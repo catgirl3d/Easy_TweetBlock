@@ -5,11 +5,15 @@ const {
   BLOCK_BUTTON_ATTRIBUTE,
   BUTTON_KINDS,
   DEFAULT_BATCH_BLOCK_DELAY_MS,
+  DEFAULT_PAGE_BLOCK_BUTTON_STYLE,
   MAX_BATCH_BLOCK_DELAY_MS,
   MESSAGE_TYPES,
   MIN_BATCH_BLOCK_DELAY_MS,
+  PAGE_BLOCK_BUTTON_STYLE_STORAGE_KEY,
+  PAGE_BUTTON_STYLES,
   SELECTORS,
   USER_BY_SCREEN_NAME_QUERY_IDS,
+  applyCurrentNativeButtonStyleToDocument,
   attachButtonToTweet,
   blockUserByScreenNameViaApi,
   blockUsernamesViaApi,
@@ -20,19 +24,24 @@ const {
   createNativeBlockButton,
   createUsernameSet,
   extractScreenNameFromHref,
+  getStoredPageButtonStyle,
   getClientLanguage,
   getButtonTitle,
   getCsrfToken,
   init,
   lookupUserRestId,
   normalizeBatchBlockDelayMs,
+  normalizePageButtonStyle,
   normalizeUsernameForMatching,
+  observeStoredPageButtonStyle,
   parseUserLookupRestId,
   readCookieValue,
   readScreenNameFromTweet,
   registerRuntimeMessageListener,
   runNativeBlockFlow,
+  setCurrentNativeButtonStyle,
   setButtonState,
+  syncStoredPageButtonStyle,
   waitForElement
 } = require('../src/content/main.js');
 
@@ -75,6 +84,7 @@ function createDomElement(overrides = {}) {
     attributes,
     dataset: {},
     disabled: false,
+    innerHTML: '',
     textContent: '',
     title: '',
     addEventListener(type, listener) {
@@ -105,6 +115,54 @@ function createDomElement(overrides = {}) {
   };
 
   return element;
+}
+
+function findDescendant(node, predicate) {
+  if (!node) {
+    return null;
+  }
+
+  if (predicate(node)) {
+    return node;
+  }
+
+  for (const child of Array.isArray(node.children) ? node.children : []) {
+    const match = findDescendant(child, predicate);
+
+    if (match) {
+      return match;
+    }
+  }
+
+  return null;
+}
+
+function detachFromParent(child) {
+  const parent = child?.parentElement;
+
+  if (!parent || !Array.isArray(parent.children)) {
+    return;
+  }
+
+  const index = parent.children.indexOf(child);
+
+  if (index !== -1) {
+    parent.children.splice(index, 1);
+  }
+}
+
+function insertChildBefore(parent, child, referenceNode) {
+  detachFromParent(child);
+  child.parentElement = parent;
+
+  const index = parent.children.indexOf(referenceNode);
+
+  if (index === -1) {
+    parent.children.push(child);
+    return;
+  }
+
+  parent.children.splice(index, 0, child);
 }
 
 function createDocumentStub() {
@@ -145,17 +203,93 @@ function createDocumentStub() {
 }
 
 function createTweetNode(screenName = 'Felixmfdo', options = {}) {
-  const caretButton = createDomElement();
-  const parentElement = {
+  const leadingActionButton = createDomElement({
+    nodeType: 1,
+    tagName: 'BUTTON',
+    matches(selector) {
+      return selector === 'button' || selector === SELECTORS.grokButton;
+    }
+  });
+  const caretButton = createDomElement({
+    nodeType: 1,
+    tagName: 'BUTTON',
+    matches(selector) {
+      return selector === 'button' || selector === SELECTORS.caretButton;
+    }
+  });
+  const metadataColumn = {
+    nodeType: 1,
+    children: [],
+    querySelector() {
+      return null;
+    }
+  };
+  const localButtonGroup = {
+    nodeType: 1,
+    get firstElementChild() {
+      return localButtonGroup.children[0] || null;
+    },
     children: [caretButton],
+    appendChild(child) {
+      insertChildBefore(localButtonGroup, child, null);
+    },
     insertBefore(child, referenceNode) {
-      child.parentElement = parentElement;
-      const index = parentElement.children.indexOf(referenceNode);
-      parentElement.children.splice(index, 0, child);
+      insertChildBefore(localButtonGroup, child, referenceNode);
+    }
+  };
+  const localButtonGroupWrapper = {
+    nodeType: 1,
+    children: [localButtonGroup],
+    querySelector(selector) {
+      return selector === 'button' ? caretButton : null;
+    }
+  };
+  const trailingAction = {
+    nodeType: 1,
+    children: [localButtonGroupWrapper],
+    querySelector(selector) {
+      return selector === 'button' ? caretButton : null;
+    }
+  };
+  const leadingAction = {
+    nodeType: 1,
+    get firstElementChild() {
+      return leadingAction.children[0] || null;
+    },
+    children: [leadingActionButton],
+    insertBefore(child, referenceNode) {
+      insertChildBefore(leadingAction, child, referenceNode);
+    },
+    querySelector(selector) {
+      return selector === 'button' || selector === SELECTORS.grokButton ? leadingActionButton : null;
+    }
+  };
+  const parentElement = {
+    nodeType: 1,
+    get firstElementChild() {
+      return parentElement.children[0] || null;
+    },
+    children: options.includeLeadingAction === false ? [trailingAction] : [leadingAction, trailingAction],
+    insertBefore(child, referenceNode) {
+      insertChildBefore(parentElement, child, referenceNode);
+    }
+  };
+  const headerRow = {
+    nodeType: 1,
+    children: [metadataColumn, parentElement],
+    querySelector() {
+      return null;
     }
   };
 
-  caretButton.parentElement = parentElement;
+  metadataColumn.parentElement = headerRow;
+  leadingAction.parentElement = parentElement;
+  leadingActionButton.parentElement = leadingAction;
+  trailingAction.parentElement = parentElement;
+  localButtonGroupWrapper.parentElement = trailingAction;
+  localButtonGroup.parentElement = localButtonGroupWrapper;
+  caretButton.parentElement = localButtonGroup;
+  parentElement.parentElement = headerRow;
 
   const tweetNode = {
     nodeType: 1,
@@ -164,7 +298,9 @@ function createTweetNode(screenName = 'Felixmfdo', options = {}) {
     },
     querySelector(selector) {
       if (selector === `[${BLOCK_BUTTON_ATTRIBUTE}]`) {
-        return options.existingButton || null;
+        return options.existingButton || findDescendant(tweetNode, (node) => (
+          Object.prototype.hasOwnProperty.call(node.attributes || {}, BLOCK_BUTTON_ATTRIBUTE)
+        ));
       }
 
       if (selector === SELECTORS.caretButton) {
@@ -195,11 +331,17 @@ function createTweetNode(screenName = 'Felixmfdo', options = {}) {
     },
     querySelectorAll() {
       return [];
-    }
+    },
+    children: [headerRow]
   };
+
+  headerRow.parentElement = tweetNode;
 
   return {
     caretButton,
+    leadingAction,
+    leadingActionButton,
+    localButtonGroup,
     parentElement,
     tweetNode
   };
@@ -266,6 +408,7 @@ test('setButtonState updates the visible label and accessibility metadata', () =
   const attributes = {};
   const button = {
     dataset: {
+      displayStyle: PAGE_BUTTON_STYLES.text,
       kind: BUTTON_KINDS.native
     },
     disabled: false,
@@ -701,6 +844,64 @@ test('normalizeBatchBlockDelayMs clamps values into the supported range', () => 
   assert.equal(normalizeBatchBlockDelayMs(2500), MAX_BATCH_BLOCK_DELAY_MS);
 });
 
+test('normalizePageButtonStyle defaults to icon and accepts the text variant', () => {
+  assert.equal(normalizePageButtonStyle(undefined), DEFAULT_PAGE_BLOCK_BUTTON_STYLE);
+  assert.equal(normalizePageButtonStyle('text'), PAGE_BUTTON_STYLES.text);
+  assert.equal(normalizePageButtonStyle('something-else'), PAGE_BUTTON_STYLES.icon);
+});
+
+test('syncStoredPageButtonStyle and observeStoredPageButtonStyle apply the saved native button style', async () => {
+  const listeners = [];
+  const button = createDomElement({
+    dataset: {
+      kind: BUTTON_KINDS.native,
+      screenName: 'Felixmfdo',
+      state: 'idle'
+    }
+  });
+  const globalRef = {
+    chrome: {
+      runtime: {
+        lastError: null
+      },
+      storage: {
+        local: {
+          get(_keys, callback) {
+            callback({
+              [PAGE_BLOCK_BUTTON_STYLE_STORAGE_KEY]: PAGE_BUTTON_STYLES.text
+            });
+          }
+        },
+        onChanged: {
+          addListener(listener) {
+            listeners.push(listener);
+          },
+          removeListener() {}
+        }
+      }
+    },
+    document: {
+      querySelectorAll(selector) {
+        return selector === `[${BLOCK_BUTTON_ATTRIBUTE}][data-kind="native"]` ? [button] : [];
+      }
+    }
+  };
+
+  await syncStoredPageButtonStyle(globalRef);
+  assert.equal(button.dataset.displayStyle, PAGE_BUTTON_STYLES.text);
+  assert.equal(button.textContent, 'Block');
+
+  observeStoredPageButtonStyle(globalRef);
+  listeners[0]({
+    [PAGE_BLOCK_BUTTON_STYLE_STORAGE_KEY]: {
+      newValue: PAGE_BUTTON_STYLES.icon
+    }
+  }, 'local');
+
+  assert.equal(button.dataset.displayStyle, PAGE_BUTTON_STYLES.icon);
+  assert.equal(button.innerHTML.includes('<svg'), true);
+});
+
 test('normalizeUsernameForMatching lowercases usernames for blocklist checks', () => {
   assert.equal(normalizeUsernameForMatching('@Felixmfdo'), 'felixmfdo');
   assert.equal(normalizeUsernameForMatching('/Felixmfdo'), 'felixmfdo');
@@ -717,18 +918,23 @@ test('createUsernameSet deduplicates and normalizes usernames', () => {
   assert.equal(blocklistSet.size, 2);
 });
 
-test('attachButtonToTweet inserts native and API buttons before the caret and skips duplicates', (t) => {
+test('attachButtonToTweet inserts the native button into the first action wrapper and uses icon style by default', (t) => {
   const { createdElements, documentRef } = createDocumentStub();
-  const { caretButton, parentElement, tweetNode } = createTweetNode();
+  const { caretButton, leadingAction, leadingActionButton, localButtonGroup, parentElement, tweetNode } = createTweetNode();
 
   useGlobalOverrides(t, { document: documentRef });
+  setCurrentNativeButtonStyle(PAGE_BUTTON_STYLES.icon);
 
   attachButtonToTweet(tweetNode);
 
-  assert.equal(createdElements.length, 2);
-  assert.equal(parentElement.children[0].dataset.kind, BUTTON_KINDS.native);
-  assert.equal(parentElement.children[1].dataset.kind, BUTTON_KINDS.api);
-  assert.equal(parentElement.children[2], caretButton);
+  assert.equal(createdElements.length, 1);
+  assert.equal(parentElement.children[0], leadingAction);
+  assert.equal(leadingAction.children[0].dataset.kind, BUTTON_KINDS.native);
+  assert.equal(leadingAction.children[0].dataset.displayStyle, PAGE_BUTTON_STYLES.icon);
+  assert.equal(leadingAction.children[0].innerHTML.includes('<svg'), true);
+  assert.equal(leadingAction.children[1], leadingActionButton);
+  assert.equal(parentElement.children[1].querySelector('button'), caretButton);
+  assert.equal(localButtonGroup.children[0], caretButton);
 
   attachButtonToTweet({
     querySelector(selector) {
@@ -740,7 +946,29 @@ test('attachButtonToTweet inserts native and API buttons before the caret and sk
     }
   });
 
-  assert.equal(createdElements.length, 2);
+  assert.equal(createdElements.length, 1);
+});
+
+test('attachButtonToTweet moves an existing native button into the Grok action wrapper', (t) => {
+  const { createdElements, documentRef } = createDocumentStub();
+  const { caretButton, leadingAction, localButtonGroup, tweetNode } = createTweetNode();
+  const misplacedButton = createDomElement({
+    nodeType: 1,
+    tagName: 'BUTTON',
+    matches(selector) {
+      return selector === 'button' || selector === `[${BLOCK_BUTTON_ATTRIBUTE}]`;
+    }
+  });
+
+  useGlobalOverrides(t, { document: documentRef });
+  misplacedButton.setAttribute(BLOCK_BUTTON_ATTRIBUTE, 'true');
+  localButtonGroup.insertBefore(misplacedButton, caretButton);
+
+  attachButtonToTweet(tweetNode);
+
+  assert.equal(createdElements.length, 0);
+  assert.equal(leadingAction.children[0], misplacedButton);
+  assert.equal(localButtonGroup.children[0], caretButton);
 });
 
 test('collectTweets returns the root tweet and nested tweet descendants', () => {
@@ -756,6 +984,26 @@ test('collectTweets returns the root tweet and nested tweet descendants', () => 
 
   assert.deepEqual(collectTweets(rootNode), [rootNode, nestedTweet]);
   assert.deepEqual(collectTweets({}), []);
+});
+
+test('collectTweets does not promote arbitrary descendant mutations to tweets', () => {
+  const tweetNode = {
+    matches(selector) {
+      return selector === SELECTORS.tweet;
+    },
+    querySelectorAll() {
+      return [];
+    }
+  };
+  const descendant = {
+    nodeType: 1,
+    parentElement: tweetNode,
+    querySelectorAll() {
+      return [];
+    }
+  };
+
+  assert.deepEqual(collectTweets(descendant), []);
 });
 
 test('createApiBlockButton marks success after a completed API block', async (t) => {
@@ -928,10 +1176,11 @@ test('registerRuntimeMessageListener attaches only once and answers block reques
 
 test('init installs styles, registers runtime messaging, and observes added tweets once', (t) => {
   const { documentRef } = createDocumentStub();
-  const { caretButton, parentElement, tweetNode } = createTweetNode();
+  const { caretButton, leadingAction, localButtonGroup, parentElement, tweetNode } = createTweetNode();
   let observedConfig = null;
   let observerCallback = null;
   const runtimeListeners = [];
+  const storageListeners = [];
 
   useGlobalOverrides(t, { document: documentRef });
 
@@ -954,33 +1203,108 @@ test('init installs styles, registers runtime messaging, and observes added twee
             runtimeListeners.push(listener);
           }
         }
+      },
+      storage: {
+        local: {
+          get(_keys, callback) {
+            callback({
+              [PAGE_BLOCK_BUTTON_STYLE_STORAGE_KEY]: PAGE_BUTTON_STYLES.text
+            });
+          }
+        },
+        onChanged: {
+          addListener(listener) {
+            storageListeners.push(listener);
+          },
+          removeListener() {}
+        }
       }
     },
     document: documentRef
   };
 
   init(globalRef);
+  return flushAsyncWork().then(() => {
+    assert.equal(globalRef.__easyTweetBlockInjected__, true);
+    assert.equal(documentRef.head.appendedNodes.length, 1);
+    assert.equal(documentRef.head.appendedNodes[0].id, 'easy-tweetblock-styles');
+    assert.deepEqual(observedConfig, {
+      options: {
+        childList: true,
+        subtree: true
+      },
+      target: documentRef.body
+    });
+    assert.equal(runtimeListeners.length, 1);
+    assert.equal(storageListeners.length, 1);
 
-  assert.equal(globalRef.__easyTweetBlockInjected__, true);
-  assert.equal(documentRef.head.appendedNodes.length, 1);
-  assert.equal(documentRef.head.appendedNodes[0].id, 'easy-tweetblock-styles');
-  assert.deepEqual(observedConfig, {
-    options: {
-      childList: true,
-      subtree: true
-    },
-    target: documentRef.body
+    observerCallback([{ addedNodes: [tweetNode] }]);
+
+    assert.equal(parentElement.children[0], leadingAction);
+    assert.equal(leadingAction.children[0].dataset.kind, BUTTON_KINDS.native);
+    assert.equal(leadingAction.children[0].dataset.displayStyle, PAGE_BUTTON_STYLES.text);
+    assert.equal(leadingAction.children[0].textContent, 'Block');
+    assert.equal(parentElement.children[1].querySelector('button'), caretButton);
+    assert.equal(localButtonGroup.children[0], caretButton);
+
+    init(globalRef);
+
+    assert.equal(documentRef.head.appendedNodes.length, 1);
+    assert.equal(runtimeListeners.length, 1);
   });
-  assert.equal(runtimeListeners.length, 1);
+});
 
-  observerCallback([{ addedNodes: [tweetNode] }]);
+test('init repositions the native button when the Grok action appears after the caret', (t) => {
+  const { documentRef } = createDocumentStub();
+  const { caretButton, leadingAction, localButtonGroup, parentElement, tweetNode } = createTweetNode('Felixmfdo', {
+    includeLeadingAction: false
+  });
+  let observerCallback = null;
 
-  assert.equal(parentElement.children[0].dataset.kind, BUTTON_KINDS.native);
-  assert.equal(parentElement.children[1].dataset.kind, BUTTON_KINDS.api);
-  assert.equal(parentElement.children[2], caretButton);
+  useGlobalOverrides(t, { document: documentRef });
+
+  class FakeMutationObserver {
+    constructor(callback) {
+      observerCallback = callback;
+    }
+
+    observe() {}
+  }
+
+  const globalRef = {
+    MutationObserver: FakeMutationObserver,
+    chrome: {
+      runtime: {
+        onMessage: {
+          addListener() {}
+        }
+      },
+      storage: {
+        local: {
+          get(_keys, callback) {
+            callback({});
+          }
+        },
+        onChanged: {
+          addListener() {},
+          removeListener() {}
+        }
+      }
+    },
+    document: documentRef
+  };
 
   init(globalRef);
+  observerCallback([{ addedNodes: [tweetNode] }]);
 
-  assert.equal(documentRef.head.appendedNodes.length, 1);
-  assert.equal(runtimeListeners.length, 1);
+  const nativeButton = localButtonGroup.children[0];
+
+  assert.equal(nativeButton.dataset.kind, BUTTON_KINDS.native);
+  assert.equal(localButtonGroup.children[1], caretButton);
+
+  parentElement.insertBefore(leadingAction, parentElement.firstElementChild);
+  observerCallback([{ addedNodes: [leadingAction] }]);
+
+  assert.equal(leadingAction.children[0], nativeButton);
+  assert.equal(localButtonGroup.children[0], caretButton);
 });

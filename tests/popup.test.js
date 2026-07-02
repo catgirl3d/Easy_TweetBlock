@@ -81,6 +81,8 @@ function createPopupDocument() {
     'batch-block-delay-ms': createPopupElement(),
     'block-now': createPopupElement(),
     'open-settings': createPopupElement(),
+    'page-button-style-icon': createPopupElement({ setAttribute() {} }),
+    'page-button-style-text': createPopupElement({ setAttribute() {} }),
     'popup-shell': createPopupElement({ dataset: {} }),
     'save-blocklist': createPopupElement(),
     'save-settings': createPopupElement(),
@@ -443,6 +445,9 @@ test('init loads stored popup state and supports settings navigation', async () 
     async getStoredBatchBlockDelayMs() {
       return 1400;
     },
+    async getStoredPageBlockButtonStyle() {
+      return sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.text;
+    },
     async getStoredUsernames() {
       return ['alice', 'bob'];
     }
@@ -456,6 +461,8 @@ test('init loads stored popup state and supports settings navigation', async () 
   assert.equal(elements['username-blocklist'].value, '@alice\n@bob');
   assert.equal(elements['username-count'].textContent, '2 usernames');
   assert.equal(elements['batch-block-delay-ms'].value, '1400');
+  assert.equal(elements['page-button-style-text'].dataset.active, 'true');
+  assert.equal(elements['page-button-style-icon'].dataset.active, 'false');
   assert.equal(elements.status.textContent, 'Save usernames for later, or block the whole list immediately through any open X tab.');
 
   elements['open-settings'].click();
@@ -464,10 +471,14 @@ test('init loads stored popup state and supports settings navigation', async () 
   elements['batch-block-delay-ms'].value = '2600';
   elements['batch-block-delay-ms'].change();
   assert.equal(elements['batch-block-delay-ms'].value, '2000');
+  elements['page-button-style-icon'].click();
+  assert.equal(elements['page-button-style-icon'].dataset.active, 'true');
+  assert.equal(elements['page-button-style-text'].dataset.active, 'false');
 
   elements['back-to-main'].click();
   assert.equal(elements['popup-shell'].dataset.view, POPUP_VIEWS.main);
   assert.equal(elements['batch-block-delay-ms'].value, '1400');
+  assert.equal(elements['page-button-style-text'].dataset.active, 'true');
 });
 
 test('init saves the blocklist, disables actions while saving, and reports invalid entries', async () => {
@@ -513,19 +524,28 @@ test('init saves the blocklist, disables actions while saving, and reports inval
 
 test('init saves settings, updates the active delay, and returns to the main view', async () => {
   const { documentRef, elements } = createPopupDocument();
-  const deferredSave = createDeferred();
+  const deferredDelaySave = createDeferred();
+  const deferredStyleSave = createDeferred();
   const savedDelayInputs = [];
+  const savedStyles = [];
   const blocklist = {
     ...sharedBlocklist,
     async getStoredBatchBlockDelayMs() {
       return 1400;
+    },
+    async getStoredPageBlockButtonStyle() {
+      return sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.icon;
     },
     async getStoredUsernames() {
       return [];
     },
     setStoredBatchBlockDelayMs(delayMs) {
       savedDelayInputs.push(delayMs);
-      return deferredSave.promise;
+      return deferredDelaySave.promise;
+    },
+    setStoredPageBlockButtonStyle(style) {
+      savedStyles.push(style);
+      return deferredStyleSave.promise;
     }
   };
 
@@ -534,26 +554,31 @@ test('init saves settings, updates the active delay, and returns to the main vie
 
   elements['open-settings'].click();
   elements['batch-block-delay-ms'].value = '2301';
+  elements['page-button-style-text'].click();
   elements['save-settings'].click();
 
   assert.deepEqual(savedDelayInputs, [2000]);
+  assert.deepEqual(savedStyles, [sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.text]);
   assert.equal(elements.status.textContent, 'Saving settings...');
   assert.equal(elements['save-blocklist'].disabled, true);
   assert.equal(elements['block-now'].disabled, true);
   assert.equal(elements['save-settings'].disabled, true);
 
-  deferredSave.resolve(1900);
+  deferredDelaySave.resolve(1900);
+  deferredStyleSave.resolve(sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.text);
   await flushAsyncWork();
 
   assert.equal(elements['popup-shell'].dataset.view, POPUP_VIEWS.main);
   assert.equal(elements['batch-block-delay-ms'].value, '1900');
-  assert.equal(elements.status.textContent, 'Saved settings. Delay: 1900 ms.');
+  assert.equal(elements['page-button-style-text'].dataset.active, 'true');
+  assert.equal(elements.status.textContent, 'Saved settings. Delay: 1900 ms. Style: text.');
   assert.equal(elements['save-blocklist'].disabled, false);
   assert.equal(elements['block-now'].disabled, false);
   assert.equal(elements['save-settings'].disabled, false);
 
   elements['open-settings'].click();
   assert.equal(elements['batch-block-delay-ms'].value, '1900');
+  assert.equal(elements['page-button-style-text'].dataset.active, 'true');
 });
 
 test('init blocks the saved list through an open X tab and reports failures with the saved delay', async () => {

@@ -1,9 +1,15 @@
 (() => {
   const STORAGE_KEY = 'usernameBlocklist';
   const BATCH_BLOCK_DELAY_MS_STORAGE_KEY = 'batchBlockDelayMs';
+  const PAGE_BLOCK_BUTTON_STYLE_STORAGE_KEY = 'pageBlockButtonStyle';
   const DEFAULT_BATCH_BLOCK_DELAY_MS = 1000;
+  const DEFAULT_PAGE_BLOCK_BUTTON_STYLE = 'icon';
   const MIN_BATCH_BLOCK_DELAY_MS = 500;
   const MAX_BATCH_BLOCK_DELAY_MS = 2000;
+  const PAGE_BLOCK_BUTTON_STYLES = Object.freeze({
+    icon: 'icon',
+    text: 'text'
+  });
   const USERNAME_PATTERN = /^[A-Za-z0-9_]{1,15}$/;
 
   function normalizeUsername(value) {
@@ -90,6 +96,12 @@
 
     const roundedValue = Math.round(numericValue);
     return Math.min(MAX_BATCH_BLOCK_DELAY_MS, Math.max(MIN_BATCH_BLOCK_DELAY_MS, roundedValue));
+  }
+
+  function normalizePageBlockButtonStyle(value) {
+    return value === PAGE_BLOCK_BUTTON_STYLES.text
+      ? PAGE_BLOCK_BUTTON_STYLES.text
+      : DEFAULT_PAGE_BLOCK_BUTTON_STYLE;
   }
 
   function getExtensionApi(extensionApi = globalThis.browser || globalThis.chrome) {
@@ -188,6 +200,23 @@
     return normalizedDelayMs;
   }
 
+  async function getStoredPageBlockButtonStyle(extensionApi = getExtensionApi()) {
+    const storageArea = extensionApi?.storage?.local;
+    const storedValues = await callStorageGet(storageArea, [PAGE_BLOCK_BUTTON_STYLE_STORAGE_KEY], extensionApi);
+    return normalizePageBlockButtonStyle(storedValues?.[PAGE_BLOCK_BUTTON_STYLE_STORAGE_KEY]);
+  }
+
+  async function setStoredPageBlockButtonStyle(style, extensionApi = getExtensionApi()) {
+    const normalizedStyle = normalizePageBlockButtonStyle(style);
+    const storageArea = extensionApi?.storage?.local;
+
+    await callStorageSet(storageArea, {
+      [PAGE_BLOCK_BUTTON_STYLE_STORAGE_KEY]: normalizedStyle
+    }, extensionApi);
+
+    return normalizedStyle;
+  }
+
   function observeStoredUsernames(listener, extensionApi = getExtensionApi()) {
     const onChangedApi = extensionApi?.storage?.onChanged;
 
@@ -215,19 +244,25 @@
   const blocklistApi = {
     BATCH_BLOCK_DELAY_MS_STORAGE_KEY,
     DEFAULT_BATCH_BLOCK_DELAY_MS,
+    DEFAULT_PAGE_BLOCK_BUTTON_STYLE,
     MAX_BATCH_BLOCK_DELAY_MS,
     MIN_BATCH_BLOCK_DELAY_MS,
+    PAGE_BLOCK_BUTTON_STYLES,
+    PAGE_BLOCK_BUTTON_STYLE_STORAGE_KEY,
     STORAGE_KEY,
     USERNAME_PATTERN,
     getStoredBatchBlockDelayMs,
+    getStoredPageBlockButtonStyle,
     getStoredUsernames,
     normalizeBatchBlockDelayMs,
+    normalizePageBlockButtonStyle,
     normalizeStoredUsernames,
     normalizeUsername,
     observeStoredUsernames,
     parseUsernameText,
     serializeUsernameText,
     setStoredBatchBlockDelayMs,
+    setStoredPageBlockButtonStyle,
     setStoredUsernames
   };
 

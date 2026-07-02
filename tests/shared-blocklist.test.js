@@ -3,17 +3,22 @@ const test = require('node:test');
 
 const {
   DEFAULT_BATCH_BLOCK_DELAY_MS,
+  DEFAULT_PAGE_BLOCK_BUTTON_STYLE,
   MAX_BATCH_BLOCK_DELAY_MS,
   MIN_BATCH_BLOCK_DELAY_MS,
+  PAGE_BLOCK_BUTTON_STYLES,
+  getStoredPageBlockButtonStyle,
   getStoredBatchBlockDelayMs,
   getStoredUsernames,
   normalizeBatchBlockDelayMs,
+  normalizePageBlockButtonStyle,
   normalizeStoredUsernames,
   normalizeUsername,
   observeStoredUsernames,
   parseUsernameText,
   serializeUsernameText,
   setStoredBatchBlockDelayMs,
+  setStoredPageBlockButtonStyle,
   setStoredUsernames
 } = require('../src/shared/blocklist.js');
 
@@ -139,6 +144,12 @@ test('serializeUsernameText formats usernames one per line with @ prefix', () =>
   assert.equal(serializeUsernameText(['felixmfdo', 'spam_account']), '@felixmfdo\n@spam_account');
 });
 
+test('normalizePageBlockButtonStyle defaults to icon and accepts text', () => {
+  assert.equal(normalizePageBlockButtonStyle(undefined), DEFAULT_PAGE_BLOCK_BUTTON_STYLE);
+  assert.equal(normalizePageBlockButtonStyle(PAGE_BLOCK_BUTTON_STYLES.text), PAGE_BLOCK_BUTTON_STYLES.text);
+  assert.equal(normalizePageBlockButtonStyle('random'), DEFAULT_PAGE_BLOCK_BUTTON_STYLE);
+});
+
 test('normalizeBatchBlockDelayMs clamps values into the supported range', () => {
   assert.equal(normalizeBatchBlockDelayMs(undefined), DEFAULT_BATCH_BLOCK_DELAY_MS);
   assert.equal(normalizeBatchBlockDelayMs('250'), MIN_BATCH_BLOCK_DELAY_MS);
@@ -166,6 +177,16 @@ test('setStoredBatchBlockDelayMs and getStoredBatchBlockDelayMs round-trip throu
   assert.equal(loadedDelayMs, MAX_BATCH_BLOCK_DELAY_MS);
 });
 
+test('setStoredPageBlockButtonStyle and getStoredPageBlockButtonStyle round-trip through extension storage', async () => {
+  const extensionApi = createExtensionApi();
+
+  const savedStyle = await setStoredPageBlockButtonStyle(PAGE_BLOCK_BUTTON_STYLES.text, extensionApi);
+  const loadedStyle = await getStoredPageBlockButtonStyle(extensionApi);
+
+  assert.equal(savedStyle, PAGE_BLOCK_BUTTON_STYLES.text);
+  assert.equal(loadedStyle, PAGE_BLOCK_BUTTON_STYLES.text);
+});
+
 test('stored blocklist helpers also work with promise-based storage APIs', async () => {
   const extensionApi = createPromiseExtensionApi();
 
@@ -173,11 +194,15 @@ test('stored blocklist helpers also work with promise-based storage APIs', async
   const loadedUsernames = await getStoredUsernames(extensionApi);
   const savedDelayMs = await setStoredBatchBlockDelayMs(1201, extensionApi);
   const loadedDelayMs = await getStoredBatchBlockDelayMs(extensionApi);
+  const savedStyle = await setStoredPageBlockButtonStyle(PAGE_BLOCK_BUTTON_STYLES.text, extensionApi);
+  const loadedStyle = await getStoredPageBlockButtonStyle(extensionApi);
 
   assert.deepEqual(savedUsernames, ['felixmfdo', 'spam_account']);
   assert.deepEqual(loadedUsernames, ['felixmfdo', 'spam_account']);
   assert.equal(savedDelayMs, 1201);
   assert.equal(loadedDelayMs, 1201);
+  assert.equal(savedStyle, PAGE_BLOCK_BUTTON_STYLES.text);
+  assert.equal(loadedStyle, PAGE_BLOCK_BUTTON_STYLES.text);
 });
 
 test('getStoredUsernames rejects callback-style storage errors', async () => {

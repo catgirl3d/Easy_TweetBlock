@@ -2,6 +2,7 @@
   const SELECTORS = Object.freeze({
     tweet: 'article[data-testid="tweet"]',
     caretButton: 'button[data-testid="caret"]',
+    grokButton: 'button[aria-label="Grok actions"]',
     blockMenuItem: '[data-testid="block"]',
     blockConfirmButton: '[data-testid="confirmationSheetConfirm"]',
     permalink: 'a[href*="/status/"]',
@@ -22,6 +23,12 @@
   const DEFAULT_BATCH_BLOCK_DELAY_MS = 1000;
   const MIN_BATCH_BLOCK_DELAY_MS = 500;
   const MAX_BATCH_BLOCK_DELAY_MS = 2000;
+  const DEFAULT_PAGE_BLOCK_BUTTON_STYLE = 'icon';
+  const PAGE_BLOCK_BUTTON_STYLE_STORAGE_KEY = 'pageBlockButtonStyle';
+  const PAGE_BUTTON_STYLES = Object.freeze({
+    icon: 'icon',
+    text: 'text'
+  });
   const USERNAME_PATTERN = /^[A-Za-z0-9_]{1,15}$/;
   const X_WEB_BEARER_TOKEN = 'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
   const USER_BY_SCREEN_NAME_QUERY_IDS = Object.freeze([
@@ -64,6 +71,8 @@
     'share'
   ]);
   const userRestIdCache = new Map();
+  let currentNativeButtonStyle = DEFAULT_PAGE_BLOCK_BUTTON_STYLE;
+  const BLOCK_ICON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><g><path d="M12 3.75c-4.55 0-8.25 3.69-8.25 8.25 0 1.92.66 3.68 1.75 5.08L17.09 5.5C15.68 4.4 13.92 3.75 12 3.75zm6.5 3.17L6.92 18.5c1.4 1.1 3.16 1.75 5.08 1.75 4.56 0 8.25-3.69 8.25-8.25 0-1.92-.65-3.68-1.75-5.08zM1.75 12C1.75 6.34 6.34 1.75 12 1.75S22.25 6.34 22.25 12 17.66 22.25 12 22.25 1.75 17.66 1.75 12z"></path></g></svg>';
 
   function extractScreenNameFromHref(href, baseUrl = 'https://x.com') {
     if (typeof href !== 'string' || !href.trim()) {
@@ -163,6 +172,57 @@
 
     const roundedValue = Math.round(numericValue);
     return Math.min(MAX_BATCH_BLOCK_DELAY_MS, Math.max(MIN_BATCH_BLOCK_DELAY_MS, roundedValue));
+  }
+
+  function normalizePageButtonStyle(value) {
+    return value === PAGE_BUTTON_STYLES.text
+      ? PAGE_BUTTON_STYLES.text
+      : DEFAULT_PAGE_BLOCK_BUTTON_STYLE;
+  }
+
+  function getExtensionApi(globalRef = globalThis) {
+    return globalRef?.browser || globalRef?.chrome || null;
+  }
+
+  function callStorageGet(storageArea, query, extensionApi) {
+    if (!storageArea) {
+      return Promise.resolve({});
+    }
+
+    try {
+      const maybePromise = storageArea.get(query);
+
+      if (maybePromise && typeof maybePromise.then === 'function') {
+        return maybePromise.then((value) => value || {});
+      }
+    } catch {
+      // Fall through to callback mode.
+    }
+
+    return new Promise((resolve, reject) => {
+      storageArea.get(query, (value) => {
+        const lastError = extensionApi?.runtime?.lastError;
+
+        if (lastError) {
+          reject(new Error(lastError.message || String(lastError)));
+          return;
+        }
+
+        resolve(value || {});
+      });
+    });
+  }
+
+  function setCurrentNativeButtonStyle(style) {
+    currentNativeButtonStyle = normalizePageButtonStyle(style);
+    return currentNativeButtonStyle;
+  }
+
+  async function getStoredPageButtonStyle(globalRef = globalThis) {
+    const extensionApi = getExtensionApi(globalRef);
+    const storageArea = extensionApi?.storage?.local;
+    const storedValues = await callStorageGet(storageArea, [PAGE_BLOCK_BUTTON_STYLE_STORAGE_KEY], extensionApi);
+    return normalizePageButtonStyle(storedValues?.[PAGE_BLOCK_BUTTON_STYLE_STORAGE_KEY]);
   }
 
   function sleep(delayMs, setTimeoutImpl = globalThis.setTimeout) {
@@ -304,10 +364,23 @@
   function setButtonState(button, state, screenName, kind = button?.dataset?.kind || BUTTON_KINDS.native) {
     const label = getButtonLabel(kind, state);
     const title = getButtonTitle(kind, screenName, state);
+    const displayStyle = kind === BUTTON_KINDS.native
+      ? normalizePageButtonStyle(button?.dataset?.displayStyle || currentNativeButtonStyle)
+      : PAGE_BUTTON_STYLES.text;
 
     button.dataset.state = state;
+    button.dataset.displayStyle = displayStyle;
+    button.dataset.screenName = screenName || '';
     button.disabled = state === 'running' || state === 'success';
-    button.textContent = label;
+
+    if (displayStyle === PAGE_BUTTON_STYLES.icon) {
+      button.textContent = '';
+      button.innerHTML = BLOCK_ICON_SVG;
+    } else {
+      button.innerHTML = '';
+      button.textContent = label;
+    }
+
     button.title = title;
     button.setAttribute('aria-label', title);
   }
@@ -331,20 +404,30 @@
         height: 32px;
         justify-content: center;
         margin-inline-end: 8px;
+        margin-inline-start: 0;
         min-width: 62px;
         padding: 0 10px;
         transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease, opacity 120ms ease;
       }
 
-      [${BLOCK_BUTTON_ATTRIBUTE}][data-kind="native"] {
-        border: 1px solid rgba(244, 33, 46, 0.35);
-        color: rgb(244, 33, 46);
+      [${BLOCK_BUTTON_ATTRIBUTE}][data-display-style="icon"] {
+        border: none;
+        min-width: 32px;
+        padding: 0;
+        width: 32px;
       }
 
-      [${BLOCK_BUTTON_ATTRIBUTE}][data-kind="api"] {
-        border: 1px solid rgba(29, 155, 240, 0.35);
-        color: rgb(29, 155, 240);
-        min-width: 48px;
+      [${BLOCK_BUTTON_ATTRIBUTE}][data-display-style="icon"] svg {
+        display: block;
+        fill: currentColor;
+        height: 18px;
+        pointer-events: none;
+        width: 18px;
+      }
+
+      [${BLOCK_BUTTON_ATTRIBUTE}][data-kind="native"] {
+        border: none;
+        color: rgb(113, 118, 123);
       }
 
       [${BLOCK_BUTTON_ATTRIBUTE}]:hover:not(:disabled) {
@@ -352,12 +435,12 @@
       }
 
       [${BLOCK_BUTTON_ATTRIBUTE}][data-kind="native"]:hover:not(:disabled) {
-        border-color: rgba(244, 33, 46, 0.55);
+        border-color: rgba(244, 33, 46, 0.35);
+        color: rgb(244, 33, 46);
       }
 
-      [${BLOCK_BUTTON_ATTRIBUTE}][data-kind="api"]:hover:not(:disabled) {
-        background: rgba(29, 155, 240, 0.12);
-        border-color: rgba(29, 155, 240, 0.55);
+      [${BLOCK_BUTTON_ATTRIBUTE}][data-kind="native"][data-display-style="icon"]:hover:not(:disabled) {
+        border-color: transparent;
       }
 
       [${BLOCK_BUTTON_ATTRIBUTE}][data-state="running"] {
@@ -594,6 +677,7 @@
     button.type = 'button';
     button.setAttribute(BLOCK_BUTTON_ATTRIBUTE, 'true');
     button.dataset.kind = kind;
+    button.dataset.displayStyle = kind === BUTTON_KINDS.native ? currentNativeButtonStyle : PAGE_BUTTON_STYLES.text;
     setButtonState(button, 'idle', screenName, kind);
 
     button.addEventListener('click', async (event) => {
@@ -626,24 +710,131 @@
     return createActionButton(tweet, BUTTON_KINDS.api, () => runApiBlockFlow(tweet, options));
   }
 
+  function getElementChildren(node) {
+    if (!node) {
+      return [];
+    }
+
+    if (Array.isArray(node.children)) {
+      return node.children.filter(Boolean);
+    }
+
+    if (node.children) {
+      return Array.from(node.children);
+    }
+
+    return [];
+  }
+
+  function subtreeContainsButton(node) {
+    if (!node) {
+      return false;
+    }
+
+    if (node.tagName === 'button' || node.tagName === 'BUTTON') {
+      return true;
+    }
+
+    if (typeof node.matches === 'function' && node.matches('button')) {
+      return true;
+    }
+
+    if (typeof node.querySelector === 'function' && node.querySelector('button')) {
+      return true;
+    }
+
+    return getElementChildren(node).some((child) => subtreeContainsButton(child));
+  }
+
+  function nodeMatchesOrContains(node, selector) {
+    if (!node || node.nodeType !== 1) {
+      return false;
+    }
+
+    if (typeof node.matches === 'function' && node.matches(selector)) {
+      return true;
+    }
+
+    return typeof node.querySelector === 'function' && Boolean(node.querySelector(selector));
+  }
+
+  function findActionRowContainer(caretButton, tweet) {
+    let current = caretButton?.parentElement || null;
+
+    while (current && current !== tweet) {
+      const childElements = getElementChildren(current);
+
+      if (
+        childElements.length > 1
+        && childElements.every((child) => subtreeContainsButton(child))
+        && childElements.every((child) => child.tagName !== 'button' && child.tagName !== 'BUTTON')
+      ) {
+        return current;
+      }
+
+      current = current.parentElement || null;
+    }
+
+    return caretButton?.parentElement || null;
+  }
+
+  function findPrimaryActionWrapper(caretButton, tweet) {
+    const actionRowContainer = findActionRowContainer(caretButton, tweet);
+    const actionRowChildren = getElementChildren(actionRowContainer);
+
+    if (actionRowChildren.length > 1) {
+      return actionRowChildren.find((child) => nodeMatchesOrContains(child, SELECTORS.grokButton))
+        || actionRowChildren[0];
+    }
+
+    return actionRowContainer;
+  }
+
+  function findAncestorTweet(node) {
+    let current = node?.nodeType === 1 ? node : node?.parentElement || null;
+
+    while (current) {
+      if (typeof current.matches === 'function' && current.matches(SELECTORS.tweet)) {
+        return current;
+      }
+
+      current = current.parentElement || null;
+    }
+
+    return null;
+  }
+
   function attachButtonToTweet(tweet) {
-    if (!tweet || tweet.querySelector(`[${BLOCK_BUTTON_ATTRIBUTE}]`)) {
+    if (!tweet) {
       return;
     }
 
+    const existingButton = tweet.querySelector(`[${BLOCK_BUTTON_ATTRIBUTE}]`);
     const caretButton = tweet.querySelector(SELECTORS.caretButton);
 
     if (!caretButton?.parentElement) {
       return;
     }
 
-    const nativeButton = createNativeBlockButton(tweet, document);
-    const apiButton = createApiBlockButton(tweet, {
-      documentRef: document
-    });
+    const nativeButton = existingButton || createNativeBlockButton(tweet, document);
+    const actionWrapper = findPrimaryActionWrapper(caretButton, tweet);
 
-    caretButton.parentElement.insertBefore(apiButton, caretButton);
-    caretButton.parentElement.insertBefore(nativeButton, apiButton);
+    if (!actionWrapper || typeof actionWrapper.insertBefore !== 'function') {
+      return;
+    }
+
+    const actionWrapperChildren = getElementChildren(actionWrapper);
+    const firstActionWrapperChild = actionWrapper.firstElementChild
+      || actionWrapperChildren[0]
+      || null;
+
+    if (nativeButton.parentElement === actionWrapper && firstActionWrapperChild === nativeButton) {
+      return;
+    }
+
+    const referenceNode = actionWrapperChildren.find((child) => child !== nativeButton) || null;
+
+    actionWrapper.insertBefore(nativeButton, referenceNode);
   }
 
   function collectTweets(rootNode) {
@@ -661,9 +852,71 @@
   }
 
   function processNode(rootNode) {
-    for (const tweet of collectTweets(rootNode)) {
+    const tweets = collectTweets(rootNode);
+    const isOwnButton = rootNode?.nodeType === 1
+      && typeof rootNode.matches === 'function'
+      && rootNode.matches(`[${BLOCK_BUTTON_ATTRIBUTE}]`);
+
+    if (
+      !isOwnButton
+      && (nodeMatchesOrContains(rootNode, SELECTORS.grokButton) || nodeMatchesOrContains(rootNode, SELECTORS.caretButton))
+    ) {
+      const ancestorTweet = findAncestorTweet(rootNode);
+
+      if (ancestorTweet && !tweets.includes(ancestorTweet)) {
+        tweets.push(ancestorTweet);
+      }
+    }
+
+    for (const tweet of tweets) {
       attachButtonToTweet(tweet);
     }
+  }
+
+  function applyCurrentNativeButtonStyleToDocument(documentRef = document) {
+    if (!documentRef || typeof documentRef.querySelectorAll !== 'function') {
+      return;
+    }
+
+    const nativeButtons = Array.from(documentRef.querySelectorAll(`[${BLOCK_BUTTON_ATTRIBUTE}][data-kind="native"]`));
+
+    for (const button of nativeButtons) {
+      button.dataset.displayStyle = currentNativeButtonStyle;
+      setButtonState(button, button.dataset.state || 'idle', button.dataset.screenName || '', BUTTON_KINDS.native);
+    }
+  }
+
+  async function syncStoredPageButtonStyle(globalRef = globalThis) {
+    const style = await getStoredPageButtonStyle(globalRef);
+    setCurrentNativeButtonStyle(style);
+    applyCurrentNativeButtonStyleToDocument(globalRef.document);
+    return style;
+  }
+
+  function observeStoredPageButtonStyle(globalRef = globalThis) {
+    const extensionApi = getExtensionApi(globalRef);
+    const onChangedApi = extensionApi?.storage?.onChanged;
+
+    if (!onChangedApi?.addListener) {
+      return () => {};
+    }
+
+    const handleStorageChange = (changes, areaName) => {
+      if (areaName !== 'local' || !Object.prototype.hasOwnProperty.call(changes, PAGE_BLOCK_BUTTON_STYLE_STORAGE_KEY)) {
+        return;
+      }
+
+      setCurrentNativeButtonStyle(changes[PAGE_BLOCK_BUTTON_STYLE_STORAGE_KEY]?.newValue);
+      applyCurrentNativeButtonStyleToDocument(globalRef.document);
+    };
+
+    onChangedApi.addListener(handleStorageChange);
+
+    return () => {
+      if (typeof onChangedApi.removeListener === 'function') {
+        onChangedApi.removeListener(handleStorageChange);
+      }
+    };
   }
 
   function registerRuntimeMessageListener(globalRef = globalThis) {
@@ -711,7 +964,19 @@
 
     installStyles(globalRef.document);
     registerRuntimeMessageListener(globalRef);
-    processNode(globalRef.document);
+    void syncStoredPageButtonStyle(globalRef)
+      .catch(() => {
+        setCurrentNativeButtonStyle(DEFAULT_PAGE_BLOCK_BUTTON_STYLE);
+      })
+      .finally(() => {
+        processNode(globalRef.document);
+      });
+
+    const stopStyleObservation = observeStoredPageButtonStyle(globalRef);
+
+    if (typeof globalRef.addEventListener === 'function') {
+      globalRef.addEventListener('unload', stopStyleObservation, { once: true });
+    }
 
     if (!globalRef.document.body || typeof globalRef.MutationObserver !== 'function') {
       return;
@@ -738,9 +1003,12 @@
       BLOCK_BUTTON_ATTRIBUTE,
       BUTTON_KINDS,
       DEFAULT_BATCH_BLOCK_DELAY_MS,
+      DEFAULT_PAGE_BLOCK_BUTTON_STYLE,
       MAX_BATCH_BLOCK_DELAY_MS,
       MESSAGE_TYPES,
       MIN_BATCH_BLOCK_DELAY_MS,
+      PAGE_BLOCK_BUTTON_STYLE_STORAGE_KEY,
+      PAGE_BUTTON_STYLES,
       RESERVED_PATH_SEGMENTS,
       SELECTORS,
       USER_BY_SCREEN_NAME_FIELD_TOGGLES,
@@ -757,14 +1025,21 @@
       createUsernameSet,
       createNativeBlockButton,
       extractScreenNameFromHref,
+      findActionRowContainer,
+      findPrimaryActionWrapper,
+      getExtensionApi,
+      getElementChildren,
       getClientLanguage,
       getButtonLabel,
       getButtonTitle,
       getCsrfToken,
+      getStoredPageButtonStyle,
       init,
       lookupUserRestId,
       normalizeBatchBlockDelayMs,
+      normalizePageButtonStyle,
       normalizeUsernameForMatching,
+      observeStoredPageButtonStyle,
       parseUserLookupRestId,
       readCookieValue,
       readScreenNameFromTweet,
@@ -772,8 +1047,12 @@
       runImmediateBlockInPageContext,
       runApiBlockFlow,
       runNativeBlockFlow,
+      applyCurrentNativeButtonStyleToDocument,
+      setCurrentNativeButtonStyle,
       setButtonState,
       sleep,
+      subtreeContainsButton,
+      syncStoredPageButtonStyle,
       waitForElement
     };
   }

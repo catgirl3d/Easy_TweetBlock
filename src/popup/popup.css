@@ -147,6 +147,10 @@ h1 {
   line-height: 1.5;
 }
 
+.setting-stack {
+  margin-bottom: 12px;
+}
+
 .blocklist-input {
   box-sizing: border-box;
   width: 100%;
@@ -180,6 +184,35 @@ h1 {
 .ghost-button {
   border: 1px solid rgba(148, 163, 184, 0.28);
   background: rgba(15, 23, 42, 0.7);
+}
+
+.segmented-control {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.segment-button {
+  appearance: none;
+  border: 1px solid rgba(148, 163, 184, 0.26);
+  border-radius: 12px;
+  padding: 9px 12px;
+  background: rgba(2, 6, 23, 0.84);
+  color: #cbd5e1;
+  font: 600 12px/1 Arial, sans-serif;
+  cursor: pointer;
+  transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease, transform 140ms ease;
+}
+
+.segment-button:hover:not(:disabled) {
+  border-color: rgba(29, 155, 240, 0.35);
+  color: #e2e8f0;
+}
+
+.segment-button[data-active="true"] {
+  border-color: rgba(29, 155, 240, 0.4);
+  background: rgba(29, 155, 240, 0.18);
+  color: #e2e8f0;
 }
 
 .delay-control {

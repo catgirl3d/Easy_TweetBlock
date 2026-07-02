@@ -254,6 +254,8 @@
     const statusElement = documentRef.getElementById('status');
     const textareaElement = documentRef.getElementById('username-blocklist');
     const delayInputElement = documentRef.getElementById('batch-block-delay-ms');
+    const pageButtonStyleIconElement = documentRef.getElementById('page-button-style-icon');
+    const pageButtonStyleTextElement = documentRef.getElementById('page-button-style-text');
     const openSettingsButton = documentRef.getElementById('open-settings');
     const backToMainButton = documentRef.getElementById('back-to-main');
     const saveButton = documentRef.getElementById('save-blocklist');
@@ -264,8 +266,10 @@
     let isSaving = false;
     let isBlocking = false;
     let currentDelayMs = blocklist.DEFAULT_BATCH_BLOCK_DELAY_MS;
+    let currentPageButtonStyle = blocklist.DEFAULT_PAGE_BLOCK_BUTTON_STYLE;
+    let draftPageButtonStyle = currentPageButtonStyle;
 
-    if (!blocklist || !extensionApi || !shellElement || !statusElement || !textareaElement || !delayInputElement || !openSettingsButton || !backToMainButton || !saveButton || !saveSettingsButton || !blockNowButton || !countElement) {
+    if (!blocklist || !extensionApi || !shellElement || !statusElement || !textareaElement || !delayInputElement || !pageButtonStyleIconElement || !pageButtonStyleTextElement || !openSettingsButton || !backToMainButton || !saveButton || !saveSettingsButton || !blockNowButton || !countElement) {
       return;
     }
 
@@ -285,6 +289,19 @@
       delayInputElement.value = String(blocklist.normalizeBatchBlockDelayMs(delayMs));
     }
 
+    function readPageButtonStyle() {
+      return blocklist.normalizePageBlockButtonStyle(draftPageButtonStyle);
+    }
+
+    function renderPageButtonStyle(style) {
+      draftPageButtonStyle = blocklist.normalizePageBlockButtonStyle(style);
+
+      pageButtonStyleIconElement.dataset.active = String(draftPageButtonStyle === blocklist.PAGE_BLOCK_BUTTON_STYLES.icon);
+      pageButtonStyleTextElement.dataset.active = String(draftPageButtonStyle === blocklist.PAGE_BLOCK_BUTTON_STYLES.text);
+      pageButtonStyleIconElement.setAttribute('aria-pressed', String(draftPageButtonStyle === blocklist.PAGE_BLOCK_BUTTON_STYLES.icon));
+      pageButtonStyleTextElement.setAttribute('aria-pressed', String(draftPageButtonStyle === blocklist.PAGE_BLOCK_BUTTON_STYLES.text));
+    }
+
     function setBusyState() {
       saveButton.disabled = isSaving || isBlocking;
       blockNowButton.disabled = isSaving || isBlocking;
@@ -300,15 +317,18 @@
     }
 
     async function loadBlocklist() {
-      const [usernames, delayMs] = await Promise.all([
+      const [usernames, delayMs, pageButtonStyle] = await Promise.all([
         blocklist.getStoredUsernames(extensionApi),
-        blocklist.getStoredBatchBlockDelayMs(extensionApi)
+        blocklist.getStoredBatchBlockDelayMs(extensionApi),
+        blocklist.getStoredPageBlockButtonStyle(extensionApi)
       ]);
 
       textareaElement.value = blocklist.serializeUsernameText(usernames);
       renderCount(usernames);
       renderDelay(delayMs);
       currentDelayMs = delayMs;
+      currentPageButtonStyle = pageButtonStyle;
+      renderPageButtonStyle(pageButtonStyle);
       setStatus('Save usernames for later, or block the whole list immediately through any open X tab.');
     }
 
@@ -349,17 +369,23 @@
       }
 
       const delayMs = readDelayMs();
+      const pageButtonStyle = readPageButtonStyle();
 
       isSaving = true;
       setBusyState();
       setStatus('Saving settings...');
 
       try {
-        const savedDelayMs = await blocklist.setStoredBatchBlockDelayMs(delayMs, extensionApi);
+        const [savedDelayMs, savedPageButtonStyle] = await Promise.all([
+          blocklist.setStoredBatchBlockDelayMs(delayMs, extensionApi),
+          blocklist.setStoredPageBlockButtonStyle(pageButtonStyle, extensionApi)
+        ]);
 
         currentDelayMs = savedDelayMs;
         renderDelay(savedDelayMs);
-        setStatus(`Saved settings. Delay: ${savedDelayMs} ms.`);
+        currentPageButtonStyle = savedPageButtonStyle;
+        renderPageButtonStyle(savedPageButtonStyle);
+        setStatus(`Saved settings. Delay: ${savedDelayMs} ms. Style: ${savedPageButtonStyle}.`);
         showMainView();
       } catch (error) {
         setStatus(error instanceof Error ? error.message : String(error));
@@ -441,18 +467,29 @@
 
     openSettingsButton.addEventListener('click', () => {
       renderDelay(currentDelayMs);
+      renderPageButtonStyle(currentPageButtonStyle);
       showSettingsView();
     });
 
     backToMainButton.addEventListener('click', () => {
       renderDelay(currentDelayMs);
+      renderPageButtonStyle(currentPageButtonStyle);
       showMainView();
+    });
+
+    pageButtonStyleIconElement.addEventListener('click', () => {
+      renderPageButtonStyle(blocklist.PAGE_BLOCK_BUTTON_STYLES.icon);
+    });
+
+    pageButtonStyleTextElement.addEventListener('click', () => {
+      renderPageButtonStyle(blocklist.PAGE_BLOCK_BUTTON_STYLES.text);
     });
 
     delayInputElement.addEventListener('change', () => {
       renderDelay(readDelayMs());
     });
 
+    renderPageButtonStyle(currentPageButtonStyle);
     showMainView();
     setBusyState();
     void loadBlocklist();

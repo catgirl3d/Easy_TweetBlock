@@ -39,7 +39,14 @@
               <button id="back-to-main" class="ghost-button" type="button">Back</button>
               <h2>Settings</h2>
             </div>
-            <p class="settings-copy">These settings affect batch blocking from the popup.</p>
+            <p class="settings-copy">These settings affect the page button appearance and batch blocking from the popup.</p>
+            <div class="setting-stack">
+              <label class="field-label setting-label" for="page-button-style-icon">Page button style</label>
+              <div class="segmented-control" role="group" aria-label="Page button style">
+                <button id="page-button-style-icon" class="segment-button" type="button">Icon</button>
+                <button id="page-button-style-text" class="segment-button" type="button">Text</button>
+              </div>
+            </div>
             <div class="setting-row">
               <label class="field-label setting-label" for="batch-block-delay-ms">Delay between blocks</label>
               <div class="delay-control">
