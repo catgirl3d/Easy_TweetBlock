@@ -5,8 +5,7 @@
   "description": "Block unwanted users on X and Twitter with one click.",
   "permissions": [
     "scripting",
-    "storage",
-    "tabs"
+    "storage"
   ],
   "host_permissions": [
     "https://x.com/*",

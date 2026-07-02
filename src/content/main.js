@@ -497,11 +497,11 @@
     }
 
     const {
-      cache = userRestIdCache,
       documentRef = document,
       fetchImpl = globalThis.fetch,
       baseOrigin = documentRef?.location?.origin || 'https://x.com',
-      queryIds = USER_BY_SCREEN_NAME_QUERY_IDS
+      queryIds = USER_BY_SCREEN_NAME_QUERY_IDS,
+      cache = userRestIdCache
     } = options;
     const restId = await lookupUserRestId(normalizedUsername, {
       cache,
