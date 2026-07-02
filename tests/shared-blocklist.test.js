@@ -10,6 +10,7 @@ const {
   normalizeBatchBlockDelayMs,
   normalizeStoredUsernames,
   normalizeUsername,
+  observeStoredUsernames,
   parseUsernameText,
   serializeUsernameText,
   setStoredBatchBlockDelayMs,
@@ -51,6 +52,56 @@ function createExtensionApi(initialStore = {}) {
           }
 
           callback();
+        }
+      },
+      onChanged: {
+        addListener(listener) {
+          listeners.add(listener);
+        },
+        removeListener(listener) {
+          listeners.delete(listener);
+        }
+      }
+    },
+    store
+  };
+}
+
+function createPromiseExtensionApi(initialStore = {}) {
+  const store = { ...initialStore };
+  const listeners = new Set();
+
+  return {
+    runtime: {
+      lastError: null
+    },
+    storage: {
+      local: {
+        get(keys) {
+          const response = {};
+
+          for (const key of keys) {
+            response[key] = store[key];
+          }
+
+          return Promise.resolve(response);
+        },
+        set(payload) {
+          const changes = {};
+
+          for (const [key, value] of Object.entries(payload)) {
+            changes[key] = {
+              oldValue: store[key],
+              newValue: value
+            };
+            store[key] = value;
+          }
+
+          for (const listener of listeners) {
+            listener(changes, 'local');
+          }
+
+          return Promise.resolve();
         }
       },
       onChanged: {
@@ -113,4 +164,70 @@ test('setStoredBatchBlockDelayMs and getStoredBatchBlockDelayMs round-trip throu
 
   assert.equal(savedDelayMs, MAX_BATCH_BLOCK_DELAY_MS);
   assert.equal(loadedDelayMs, MAX_BATCH_BLOCK_DELAY_MS);
+});
+
+test('stored blocklist helpers also work with promise-based storage APIs', async () => {
+  const extensionApi = createPromiseExtensionApi();
+
+  const savedUsernames = await setStoredUsernames(['Felixmfdo', 'spam_account'], extensionApi);
+  const loadedUsernames = await getStoredUsernames(extensionApi);
+  const savedDelayMs = await setStoredBatchBlockDelayMs(1201, extensionApi);
+  const loadedDelayMs = await getStoredBatchBlockDelayMs(extensionApi);
+
+  assert.deepEqual(savedUsernames, ['felixmfdo', 'spam_account']);
+  assert.deepEqual(loadedUsernames, ['felixmfdo', 'spam_account']);
+  assert.equal(savedDelayMs, 1201);
+  assert.equal(loadedDelayMs, 1201);
+});
+
+test('getStoredUsernames rejects callback-style storage errors', async () => {
+  const extensionApi = {
+    runtime: {
+      lastError: null
+    },
+    storage: {
+      local: {
+        get(_keys, callback) {
+          extensionApi.runtime.lastError = { message: 'storage get failed' };
+          callback({});
+          extensionApi.runtime.lastError = null;
+        }
+      }
+    }
+  };
+
+  await assert.rejects(getStoredUsernames(extensionApi), /storage get failed/);
+});
+
+test('setStoredBatchBlockDelayMs rejects callback-style storage errors', async () => {
+  const extensionApi = {
+    runtime: {
+      lastError: null
+    },
+    storage: {
+      local: {
+        set(_payload, callback) {
+          extensionApi.runtime.lastError = { message: 'storage set failed' };
+          callback();
+          extensionApi.runtime.lastError = null;
+        }
+      }
+    }
+  };
+
+  await assert.rejects(setStoredBatchBlockDelayMs(1000, extensionApi), /storage set failed/);
+});
+
+test('observeStoredUsernames notifies normalized updates and unsubscribe stops listening', async () => {
+  const extensionApi = createPromiseExtensionApi();
+  const updates = [];
+  const unsubscribe = observeStoredUsernames((usernames) => {
+    updates.push(usernames);
+  }, extensionApi);
+
+  await setStoredUsernames(['Felixmfdo', '@Felixmfdo', 'spam_account'], extensionApi);
+  unsubscribe();
+  await setStoredUsernames(['another_user'], extensionApi);
+
+  assert.deepEqual(updates, [['felixmfdo', 'spam_account']]);
 });

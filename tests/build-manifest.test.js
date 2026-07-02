@@ -1,10 +1,11 @@
 const assert = require("node:assert/strict");
+const { spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 
-const { buildManifest, writeManifest } = require("../scripts/build-manifest.js");
+const { assertTarget, buildManifest, deepMerge, writeManifest } = require("../scripts/build-manifest.js");
 
 test("buildManifest merges the Chrome overlay into the base manifest", () => {
   const manifest = buildManifest("chrome");
@@ -39,4 +40,63 @@ test("writeManifest writes manifest.json to the requested directory", () => {
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
+});
+
+test("deepMerge clones nested values and replaces arrays with override values", () => {
+  const baseValue = {
+    action: {
+      default_title: "Easy TweetBlock"
+    },
+    host_permissions: ["https://x.com/*"],
+    permissions: ["tabs"]
+  };
+  const overrideValue = {
+    action: {
+      default_popup: "src/popup/popup.html"
+    },
+    host_permissions: ["https://twitter.com/*"]
+  };
+
+  const mergedValue = deepMerge(baseValue, overrideValue);
+
+  assert.deepEqual(mergedValue, {
+    action: {
+      default_popup: "src/popup/popup.html",
+      default_title: "Easy TweetBlock"
+    },
+    host_permissions: ["https://twitter.com/*"],
+    permissions: ["tabs"]
+  });
+
+  overrideValue.host_permissions[0] = "changed";
+  assert.deepEqual(baseValue.host_permissions, ["https://x.com/*"]);
+  assert.deepEqual(mergedValue.host_permissions, ["https://twitter.com/*"]);
+});
+
+test("assertTarget rejects unsupported manifest targets", () => {
+  assert.throws(() => assertTarget("edge"), /Unsupported manifest target: edge/);
+});
+
+test("writeManifest requires an output directory", () => {
+  assert.throws(() => writeManifest("chrome"), /An output directory is required/);
+});
+
+test("build-manifest CLI prints usage when required arguments are missing", () => {
+  const result = spawnSync(process.execPath, ["scripts/build-manifest.js"], {
+    cwd: path.join(__dirname, ".."),
+    encoding: "utf8"
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Usage: node scripts\/build-manifest\.js <firefox\|chrome> <output-dir>/);
+});
+
+test("build-manifest CLI reports invalid targets", () => {
+  const result = spawnSync(process.execPath, ["scripts/build-manifest.js", "edge", path.join(os.tmpdir(), "easy-tweetblock-invalid-target")], {
+    cwd: path.join(__dirname, ".."),
+    encoding: "utf8"
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Unsupported manifest target: edge/);
 });
