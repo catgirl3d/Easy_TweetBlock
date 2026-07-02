@@ -21,9 +21,6 @@
         "https://x.com/*",
         "https://twitter.com/*"
       ],
-      "js": [
-        "src/content/main.js"
-      ],
       "run_at": "document_idle"
     }
   ]

@@ -1226,8 +1226,7 @@ test('init installs styles, registers runtime messaging, and observes added twee
   init(globalRef);
   return flushAsyncWork().then(() => {
     assert.equal(globalRef.__easyTweetBlockInjected__, true);
-    assert.equal(documentRef.head.appendedNodes.length, 1);
-    assert.equal(documentRef.head.appendedNodes[0].id, 'easy-tweetblock-styles');
+    assert.equal(documentRef.head.appendedNodes.length, 0);
     assert.deepEqual(observedConfig, {
       options: {
         childList: true,
@@ -1249,7 +1248,7 @@ test('init installs styles, registers runtime messaging, and observes added twee
 
     init(globalRef);
 
-    assert.equal(documentRef.head.appendedNodes.length, 1);
+    assert.equal(documentRef.head.appendedNodes.length, 0);
     assert.equal(runtimeListeners.length, 1);
   });
 });

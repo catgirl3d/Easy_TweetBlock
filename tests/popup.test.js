@@ -3,6 +3,7 @@ const test = require('node:test');
 
 const sharedBlocklist = require('../src/shared/blocklist.js');
 const {
+  CONTENT_SCRIPT_CSS_FILES,
   CONTENT_SCRIPT_FILES,
   POPUP_VIEWS,
   ensureContentScriptsInTab,
@@ -219,12 +220,16 @@ test('sendTabMessage surfaces callback lastError failures', async () => {
 });
 
 test('ensureContentScriptsInTab injects popup dependencies through scripting API', async () => {
-  const calls = [];
+  const insertCssCalls = [];
+  const executeScriptCalls = [];
   const extensionApi = {
     runtime: {},
     scripting: {
+      async insertCSS(options) {
+        insertCssCalls.push(options);
+      },
       async executeScript(options) {
-        calls.push(options);
+        executeScriptCalls.push(options);
         return [];
       }
     }
@@ -232,7 +237,11 @@ test('ensureContentScriptsInTab injects popup dependencies through scripting API
 
   await ensureContentScriptsInTab(17, extensionApi);
 
-  assert.deepEqual(calls, [{
+  assert.deepEqual(insertCssCalls, [{
+    files: CONTENT_SCRIPT_CSS_FILES,
+    target: { tabId: 17 }
+  }]);
+  assert.deepEqual(executeScriptCalls, [{
     files: CONTENT_SCRIPT_FILES,
     target: { tabId: 17 }
   }]);
@@ -283,12 +292,21 @@ test('executeTabFunction rejects when scripting.executeScript is unavailable', a
 });
 
 test('ensureContentScriptsInTab falls back to legacy tabs.executeScript', async () => {
+  const injectedCssFiles = [];
   const injectedFiles = [];
   const extensionApi = {
     runtime: {
       lastError: null
     },
     tabs: {
+      insertCSS(tabId, options, callback) {
+        if (typeof callback !== 'function') {
+          throw new Error('callback mode only');
+        }
+
+        injectedCssFiles.push({ file: options.file, tabId });
+        callback();
+      },
       executeScript(tabId, options, callback) {
         if (typeof callback !== 'function') {
           throw new Error('callback mode only');
@@ -302,6 +320,7 @@ test('ensureContentScriptsInTab falls back to legacy tabs.executeScript', async 
 
   await ensureContentScriptsInTab(19, extensionApi, ['first.js', 'second.js']);
 
+  assert.deepEqual(injectedCssFiles, CONTENT_SCRIPT_CSS_FILES.map((file) => ({ file, tabId: 19 })));
   assert.deepEqual(injectedFiles, [
     { file: 'first.js', tabId: 19 },
     { file: 'second.js', tabId: 19 }
@@ -329,12 +348,16 @@ test('invokeImmediateBlockInTab executes the tab runner and returns its result',
 });
 
 test('requestImmediateBlock injects scripts and falls back to direct tab execution after missing receiver', async () => {
+  const insertCssCalls = [];
   const sentMessages = [];
   const executeScriptCalls = [];
   let attempt = 0;
   const extensionApi = {
     runtime: {},
     scripting: {
+      async insertCSS(options) {
+        insertCssCalls.push(options);
+      },
       async executeScript(options) {
         executeScriptCalls.push(options);
 
@@ -368,6 +391,10 @@ test('requestImmediateBlock injects scripts and falls back to direct tab executi
   assert.deepEqual(response.results, [{ ok: true, username: 'firstuser' }]);
   assert.equal(sentMessages.length, 1);
   assert.equal(sentMessages[0].message.delayMs, 1600);
+  assert.deepEqual(insertCssCalls, [{
+    files: CONTENT_SCRIPT_CSS_FILES,
+    target: { tabId: 25 }
+  }]);
   assert.equal(executeScriptCalls.length, 2);
   assert.deepEqual(executeScriptCalls[0], {
     files: CONTENT_SCRIPT_FILES,

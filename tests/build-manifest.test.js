@@ -5,7 +5,17 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 
-const { assertTarget, buildManifest, deepMerge, writeManifest } = require("../scripts/build-manifest.js");
+const {
+  CONTENT_SCRIPT_CSS_FILES,
+  CONTENT_SCRIPT_FILES
+} = require("../src/shared/content-script-files.js");
+const {
+  applyDefaultContentScriptFiles,
+  assertTarget,
+  buildManifest,
+  deepMerge,
+  writeManifest
+} = require("../scripts/build-manifest.js");
 
 test("buildManifest merges the Chrome overlay into the base manifest", () => {
   const manifest = buildManifest("chrome");
@@ -18,6 +28,8 @@ test("buildManifest merges the Chrome overlay into the base manifest", () => {
     "https://twitter.com/*"
   ]);
   assert.equal(manifest.action.default_popup, "src/popup/popup.html");
+  assert.deepEqual(manifest.content_scripts[0].css, CONTENT_SCRIPT_CSS_FILES);
+  assert.deepEqual(manifest.content_scripts[0].js, CONTENT_SCRIPT_FILES);
 });
 
 test("buildManifest merges the Firefox overlay into the base manifest", () => {
@@ -26,6 +38,18 @@ test("buildManifest merges the Firefox overlay into the base manifest", () => {
   assert.equal(manifest.manifest_version, 3);
   assert.equal(manifest.browser_specific_settings.gecko.id, "easy-tweetblock@local.dev");
   assert.deepEqual(manifest.background.scripts, ["src/background/background-firefox.js"]);
+});
+
+test("applyDefaultContentScriptFiles fills omitted content script asset lists", () => {
+  const manifest = applyDefaultContentScriptFiles({
+    content_scripts: [{
+      matches: ["https://x.com/*"],
+      run_at: "document_idle"
+    }]
+  });
+
+  assert.deepEqual(manifest.content_scripts[0].css, CONTENT_SCRIPT_CSS_FILES);
+  assert.deepEqual(manifest.content_scripts[0].js, CONTENT_SCRIPT_FILES);
 });
 
 test("writeManifest writes manifest.json to the requested directory", () => {

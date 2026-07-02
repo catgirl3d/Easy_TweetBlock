@@ -1,6 +1,11 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
+const {
+  CONTENT_SCRIPT_CSS_FILES,
+  CONTENT_SCRIPT_FILES
+} = require("../src/shared/content-script-files.js");
+
 const PROJECT_ROOT = path.join(__dirname, "..");
 const MANIFESTS_DIR = path.join(PROJECT_ROOT, "manifests");
 const SUPPORTED_TARGETS = new Set(["firefox", "chrome"]);
@@ -54,9 +59,35 @@ function loadManifestFragment(name) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
 }
 
+function applyDefaultContentScriptFiles(manifest) {
+  const nextManifest = cloneValue(manifest);
+
+  if (!Array.isArray(nextManifest.content_scripts)) {
+    return nextManifest;
+  }
+
+  nextManifest.content_scripts = nextManifest.content_scripts.map((entry) => {
+    const nextEntry = cloneValue(entry);
+
+    if (!Array.isArray(nextEntry.css)) {
+      nextEntry.css = [...CONTENT_SCRIPT_CSS_FILES];
+    }
+
+    if (!Array.isArray(nextEntry.js)) {
+      nextEntry.js = [...CONTENT_SCRIPT_FILES];
+    }
+
+    return nextEntry;
+  });
+
+  return nextManifest;
+}
+
 function buildManifest(target) {
   assertTarget(target);
-  return deepMerge(loadManifestFragment("base"), loadManifestFragment(target));
+  return applyDefaultContentScriptFiles(
+    deepMerge(loadManifestFragment("base"), loadManifestFragment(target))
+  );
 }
 
 function writeManifest(target, outputDir) {
@@ -100,6 +131,7 @@ module.exports = {
   MANIFESTS_DIR,
   PROJECT_ROOT,
   SUPPORTED_TARGETS,
+  applyDefaultContentScriptFiles,
   assertTarget,
   buildManifest,
   cloneValue,

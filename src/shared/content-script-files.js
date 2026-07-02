@@ -1,0 +1,21 @@
+(() => {
+  const CONTENT_SCRIPT_CSS_FILES = Object.freeze([
+    'src/content/main.css'
+  ]);
+  const CONTENT_SCRIPT_FILES = Object.freeze([
+    'src/content/shared.js',
+    'src/content/api.js',
+    'src/content/dom.js',
+    'src/content/main.js'
+  ]);
+  const contentScriptFilesApi = {
+    CONTENT_SCRIPT_CSS_FILES,
+    CONTENT_SCRIPT_FILES
+  };
+
+  globalThis.EasyTweetBlockContentScriptFiles = contentScriptFilesApi;
+
+  if (typeof module !== 'undefined') {
+    module.exports = contentScriptFilesApi;
+  }
+})();

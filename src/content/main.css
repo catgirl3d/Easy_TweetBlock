@@ -1,0 +1,57 @@
+[data-easy-tweetblock-button] {
+  align-items: center;
+  appearance: none;
+  background: transparent;
+  border-radius: 9999px;
+  cursor: pointer;
+  display: inline-flex;
+  height: 32px;
+  justify-content: center;
+}
+
+[data-easy-tweetblock-button][data-display-style="icon"] {
+  border: none;
+  min-width: 32px;
+  padding: 0;
+  width: 32px;
+}
+
+[data-easy-tweetblock-button][data-display-style="icon"] svg {
+  display: block;
+  fill: currentColor;
+  height: 18px;
+  pointer-events: none;
+  width: 18px;
+}
+
+[data-easy-tweetblock-button][data-kind="native"] {
+  border: none;
+  color: rgb(113, 118, 123);
+}
+
+[data-easy-tweetblock-button]:hover:not(:disabled) {
+  background: rgba(244, 33, 46, 0.12);
+}
+
+[data-easy-tweetblock-button][data-kind="native"]:hover:not(:disabled) {
+  border-color: rgba(244, 33, 46, 0.35);
+  color: rgb(244, 33, 46);
+}
+
+[data-easy-tweetblock-button][data-kind="native"][data-display-style="icon"]:hover:not(:disabled) {
+  border-color: transparent;
+}
+
+[data-easy-tweetblock-button][data-state="running"] {
+  opacity: 0.72;
+}
+
+[data-easy-tweetblock-button][data-state="success"] {
+  border-color: rgba(0, 186, 124, 0.45);
+  color: rgb(0, 186, 124);
+}
+
+[data-easy-tweetblock-button][data-state="error"] {
+  border-color: rgba(255, 173, 31, 0.45);
+  color: rgb(255, 173, 31);
+}

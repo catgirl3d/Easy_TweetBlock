@@ -1,12 +1,18 @@
 (() => {
+  const contentScriptFilesApi = globalThis.EasyTweetBlockContentScriptFiles
+    || (typeof module !== 'undefined' && module.exports ? require('../shared/content-script-files.js') : null);
+
+  if (!contentScriptFilesApi) {
+    throw new Error('Missing Easy TweetBlock content script file config.');
+  }
+
   const IMMEDIATE_BLOCK_MESSAGE_TYPE = 'easy-tweetblock:block-usernames-via-api';
   const POPUP_VIEWS = Object.freeze({
     main: 'main',
     settings: 'settings'
   });
-  const CONTENT_SCRIPT_FILES = Object.freeze([
-    'src/content/main.js'
-  ]);
+  const CONTENT_SCRIPT_CSS_FILES = Object.freeze([...contentScriptFilesApi.CONTENT_SCRIPT_CSS_FILES]);
+  const CONTENT_SCRIPT_FILES = Object.freeze([...contentScriptFilesApi.CONTENT_SCRIPT_FILES]);
 
   function normalizePopupView(view) {
     return view === POPUP_VIEWS.settings ? POPUP_VIEWS.settings : POPUP_VIEWS.main;
@@ -153,6 +159,80 @@
     }
   }
 
+  async function insertCssWithLegacyTabs(tabId, files, extensionApi) {
+    for (const file of files) {
+      try {
+        const maybePromise = extensionApi.tabs.insertCSS(tabId, { file });
+
+        if (maybePromise && typeof maybePromise.then === 'function') {
+          await maybePromise;
+          continue;
+        }
+      } catch {
+        // Fall through to callback mode.
+      }
+
+      await new Promise((resolve, reject) => {
+        extensionApi.tabs.insertCSS(tabId, { file }, () => {
+          const lastError = extensionApi.runtime?.lastError;
+
+          if (lastError) {
+            reject(new Error(lastError.message || String(lastError)));
+            return;
+          }
+
+          resolve();
+        });
+      });
+    }
+  }
+
+  function insertCssWithScripting(tabId, files, extensionApi) {
+    try {
+      const maybePromise = extensionApi?.scripting?.insertCSS?.({
+        files,
+        target: { tabId }
+      });
+
+      if (maybePromise && typeof maybePromise.then === 'function') {
+        return maybePromise;
+      }
+    } catch {
+      // Fall through to callback mode.
+    }
+
+    return new Promise((resolve, reject) => {
+      extensionApi.scripting.insertCSS({
+        files,
+        target: { tabId }
+      }, () => {
+        const lastError = extensionApi.runtime?.lastError;
+
+        if (lastError) {
+          reject(new Error(lastError.message || String(lastError)));
+          return;
+        }
+
+        resolve();
+      });
+    });
+  }
+
+  async function ensureContentStylesInTab(tabId, extensionApi = getExtensionApi(), files = CONTENT_SCRIPT_CSS_FILES) {
+    if (!Array.isArray(files) || !files.length) {
+      return;
+    }
+
+    if (extensionApi?.scripting?.insertCSS) {
+      await insertCssWithScripting(tabId, files, extensionApi);
+      return;
+    }
+
+    if (extensionApi?.tabs?.insertCSS) {
+      await insertCssWithLegacyTabs(tabId, files, extensionApi);
+    }
+  }
+
   function executeScriptsWithScripting(tabId, files, extensionApi) {
     try {
       const maybePromise = extensionApi?.scripting?.executeScript?.({
@@ -184,7 +264,9 @@
     });
   }
 
-  async function ensureContentScriptsInTab(tabId, extensionApi = getExtensionApi(), files = CONTENT_SCRIPT_FILES) {
+  async function ensureContentScriptsInTab(tabId, extensionApi = getExtensionApi(), files = CONTENT_SCRIPT_FILES, cssFiles = CONTENT_SCRIPT_CSS_FILES) {
+    await ensureContentStylesInTab(tabId, extensionApi, cssFiles);
+
     if (extensionApi?.scripting?.executeScript) {
       await executeScriptsWithScripting(tabId, files, extensionApi);
       return;
@@ -497,6 +579,7 @@
 
   if (typeof module !== 'undefined') {
     module.exports = {
+      CONTENT_SCRIPT_CSS_FILES,
       CONTENT_SCRIPT_FILES,
       IMMEDIATE_BLOCK_MESSAGE_TYPE,
       POPUP_VIEWS,
