@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "Easy TweetBlock",
+  "version": "0.1.0",
+  "description": "Block unwanted users on X and Twitter with one click.",
+  "permissions": [
+    "scripting",
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://x.com/*",
+    "https://twitter.com/*"
+  ],
+  "action": {
+    "default_title": "Easy TweetBlock",
+    "default_popup": "src/popup/popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://x.com/*",
+        "https://twitter.com/*"
+      ],
+      "js": [
+        "src/content/main.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

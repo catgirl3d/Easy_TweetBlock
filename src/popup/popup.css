@@ -1,0 +1,241 @@
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background: #0f172a;
+  color: #e2e8f0;
+}
+
+.popup-shell {
+  width: 360px;
+  padding: 16px;
+  overflow: hidden;
+}
+
+h1 {
+  margin: 0 0 12px;
+  font-size: 18px;
+}
+
+.popup-topbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.title-group {
+  min-width: 0;
+}
+
+.status-copy {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #cbd5e1;
+}
+
+.toolbar-button,
+.ghost-button,
+.secondary-button,
+.primary-button {
+  appearance: none;
+  border-radius: 9999px;
+  padding: 8px 14px;
+  color: #e2e8f0;
+  font: 600 12px/1 Arial, sans-serif;
+  cursor: pointer;
+}
+
+.toolbar-button {
+  flex-shrink: 0;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(15, 23, 42, 0.7);
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.toolbar-button:hover:not(:disabled),
+.ghost-button:hover:not(:disabled) {
+  background: rgba(51, 65, 85, 0.65);
+}
+
+.popup-shell[data-view="settings"] .toolbar-button {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(8px);
+}
+
+.view-window {
+  margin-top: 14px;
+  overflow: hidden;
+}
+
+.view-track {
+  display: flex;
+  width: 100%;
+  transition: transform 220ms ease;
+}
+
+.popup-shell[data-view="settings"] .view-track {
+  transform: translateX(-100%);
+}
+
+.view-panel {
+  box-sizing: border-box;
+  flex: 0 0 100%;
+  min-width: 100%;
+}
+
+.card {
+  padding: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.7);
+}
+
+.settings-card {
+  min-height: 250px;
+}
+
+.card-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.card-heading h2 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.count-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 9999px;
+  background: rgba(29, 155, 240, 0.16);
+  color: #93c5fd;
+  font-size: 11px;
+}
+
+.field-label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #cbd5e1;
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.settings-header h2 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.settings-copy {
+  margin: 0 0 12px;
+  color: #cbd5e1;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.blocklist-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 160px;
+  padding: 10px 12px;
+  border: 1px solid rgba(148, 163, 184, 0.26);
+  border-radius: 12px;
+  background: rgba(2, 6, 23, 0.84);
+  color: #e2e8f0;
+  font: 13px/1.45 Consolas, "Courier New", monospace;
+  resize: vertical;
+}
+
+.blocklist-input:focus {
+  outline: 2px solid rgba(29, 155, 240, 0.55);
+  outline-offset: 1px;
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.setting-label {
+  margin: 0;
+}
+
+.ghost-button {
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(15, 23, 42, 0.7);
+}
+
+.delay-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.delay-input {
+  box-sizing: border-box;
+  width: 92px;
+  padding: 7px 10px;
+  border: 1px solid rgba(148, 163, 184, 0.26);
+  border-radius: 10px;
+  background: rgba(2, 6, 23, 0.84);
+  color: #e2e8f0;
+  font: 13px/1.2 Consolas, "Courier New", monospace;
+}
+
+.delay-input:focus {
+  outline: 2px solid rgba(29, 155, 240, 0.55);
+  outline-offset: 1px;
+}
+
+.delay-unit {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.actions-row {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+.primary-button {
+  border: 1px solid rgba(29, 155, 240, 0.4);
+  background: rgba(29, 155, 240, 0.18);
+}
+
+.primary-button:hover:not(:disabled) {
+  background: rgba(29, 155, 240, 0.28);
+}
+
+.secondary-button {
+  border: 1px solid rgba(0, 186, 124, 0.35);
+  background: rgba(0, 186, 124, 0.15);
+}
+
+.secondary-button:hover:not(:disabled) {
+  background: rgba(0, 186, 124, 0.24);
+}
+
+.secondary-button:disabled,
+.primary-button:disabled {
+  cursor: default;
+  opacity: 0.7;
+}

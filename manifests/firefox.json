@@ -1,0 +1,13 @@
+{
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "easy-tweetblock@local.dev",
+      "strict_min_version": "140.0"
+    }
+  },
+  "background": {
+    "scripts": [
+      "src/background/background-firefox.js"
+    ]
+  }
+}

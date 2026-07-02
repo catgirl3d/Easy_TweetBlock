@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Easy TweetBlock</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main id="popup-shell" class="popup-shell" data-view="main">
+    <header class="popup-topbar">
+      <div class="title-group">
+        <h1>Easy TweetBlock</h1>
+        <p id="status" class="status-copy">Save usernames for later, or block the whole list immediately through any open X tab.</p>
+      </div>
+      <button id="open-settings" class="toolbar-button" type="button">Settings</button>
+    </header>
+
+    <div class="view-window">
+      <div class="view-track">
+        <section class="view-panel">
+          <section class="card">
+            <div class="card-heading">
+              <h2>Username Blocklist</h2>
+              <span id="username-count" class="count-pill">0 usernames</span>
+            </div>
+            <label class="field-label" for="username-blocklist">One username per line. Leading `@` is optional.</label>
+            <textarea id="username-blocklist" class="blocklist-input" rows="8" placeholder="@spamaccount&#10;another_handle"></textarea>
+            <div class="actions-row">
+              <button id="block-now" class="secondary-button" type="button">Block listed now</button>
+              <button id="save-blocklist" class="primary-button" type="button">Save blocklist</button>
+            </div>
+          </section>
+        </section>
+
+        <section class="view-panel">
+          <section class="card settings-card">
+            <div class="settings-header">
+              <button id="back-to-main" class="ghost-button" type="button">Back</button>
+              <h2>Settings</h2>
+            </div>
+            <p class="settings-copy">These settings affect batch blocking from the popup.</p>
+            <div class="setting-row">
+              <label class="field-label setting-label" for="batch-block-delay-ms">Delay between blocks</label>
+              <div class="delay-control">
+                <input id="batch-block-delay-ms" class="delay-input" type="number" min="500" max="2000" step="100" inputmode="numeric">
+                <span class="delay-unit">ms</span>
+              </div>
+            </div>
+            <div class="actions-row">
+              <button id="save-settings" class="primary-button" type="button">Save settings</button>
+            </div>
+          </section>
+        </section>
+      </div>
+    </div>
+  </main>
+  <script src="../shared/blocklist.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
