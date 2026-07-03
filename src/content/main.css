@@ -2,11 +2,38 @@
   align-items: center;
   appearance: none;
   background: transparent;
+  border: none;
   border-radius: 9999px;
   cursor: pointer;
   display: inline-flex;
   height: 32px;
   justify-content: center;
+  margin: 0;
+}
+
+[data-easy-tweetblock-button][data-kind="native"][data-display-style="icon"] {
+  --etb-hit-size: 32px;
+
+  flex: 0 0 var(--etb-hit-size);
+  height: auto;
+  line-height: 1;
+  overflow: visible;
+  padding: 0;
+  position: relative;
+  width: var(--etb-hit-size);
+  transform: translateY(0.6px);
+}
+
+[data-easy-tweetblock-button][data-kind="native"][data-display-style="icon"]::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: var(--etb-hit-size);
+  height: var(--etb-hit-size);
+  border-radius: 9999px;
+  transform: translate(-50%, -50%);
+  transition: background-color 120ms ease;
 }
 
 [data-easy-tweetblock-button][data-display-style="icon"] {
@@ -21,6 +48,8 @@
   fill: currentColor;
   height: 18px;
   pointer-events: none;
+  position: relative;
+  z-index: 1;
   width: 18px;
 }
 
@@ -39,7 +68,12 @@
 }
 
 [data-easy-tweetblock-button][data-kind="native"][data-display-style="icon"]:hover:not(:disabled) {
+  background: transparent;
   border-color: transparent;
+}
+
+[data-easy-tweetblock-button][data-kind="native"][data-display-style="icon"]:hover:not(:disabled)::before {
+  background: rgba(244, 33, 46, 0.12);
 }
 
 [data-easy-tweetblock-button][data-state="running"] {

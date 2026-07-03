@@ -81,6 +81,7 @@
     button.setAttribute(BLOCK_BUTTON_ATTRIBUTE, 'true');
     button.dataset.kind = kind;
     button.dataset.displayStyle = kind === BUTTON_KINDS.native ? namespace.getCurrentNativeButtonStyle() : PAGE_BUTTON_STYLES.text;
+
     namespace.setButtonState(button, 'idle', screenName, kind);
 
     button.addEventListener('click', async (event) => {
