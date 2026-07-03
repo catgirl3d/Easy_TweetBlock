@@ -28,10 +28,13 @@
 
   const namespace = globalThis.EasyTweetBlockContent || (globalThis.EasyTweetBlockContent = {});
   const {
+    DEFAULT_FOLLOWERS_SOURCE,
+    FOLLOWERS_SOURCES,
     DEFAULT_FOLLOWERS_BLOCK_LIMIT,
     DEFAULT_FOLLOWERS_SCAN_LIMIT,
     normalizeFollowersBlockLimit,
-    normalizeFollowersScanLimit
+    normalizeFollowersScanLimit,
+    normalizeFollowersSource
   } = followersApi;
 
   const X_WEB_BEARER_TOKEN = 'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
@@ -66,6 +69,19 @@
     '4yeuNabfz3qFlfncCAy8Yw',
     '_wt2xR9Ozi8ZI7agzWf_bw'
   ]);
+  const FOLLOWING_QUERY_IDS = Object.freeze([
+    'eNoXdfXv5rU75RBzlmfuPA'
+  ]);
+  const FOLLOW_TIMELINE_SOURCE_CONFIGS = Object.freeze({
+    [FOLLOWERS_SOURCES.followers]: Object.freeze({
+      operationName: 'Followers',
+      queryIds: FOLLOWERS_QUERY_IDS
+    }),
+    [FOLLOWERS_SOURCES.following]: Object.freeze({
+      operationName: 'Following',
+      queryIds: FOLLOWING_QUERY_IDS
+    })
+  });
   const FOLLOWERS_FEATURES = Object.freeze({
     rweb_video_screen_enabled: false,
     rweb_cashtags_enabled: true,
@@ -506,6 +522,14 @@
     };
   }
 
+  function getFollowTimelineSourceConfig(source) {
+    const normalizedSource = normalizeFollowersSource(source);
+    return {
+      source: normalizedSource,
+      ...FOLLOW_TIMELINE_SOURCE_CONFIGS[normalizedSource]
+    };
+  }
+
   function buildFollowersLookupUrls(userId, options = {}) {
     const normalizedUserId = normalizeRestId(userId);
 
@@ -517,8 +541,10 @@
       baseOrigin = 'https://x.com',
       count = FOLLOWERS_PAGE_SIZE,
       cursor = '',
-      queryIds = FOLLOWERS_QUERY_IDS
+      source = DEFAULT_FOLLOWERS_SOURCE
     } = options;
+    const sourceConfig = getFollowTimelineSourceConfig(source);
+    const queryIds = options.queryIds || sourceConfig.queryIds;
     const variables = {
       userId: normalizedUserId,
       count: Math.min(FOLLOWERS_PAGE_SIZE, Math.max(1, Math.round(Number(count) || FOLLOWERS_PAGE_SIZE))),
@@ -531,7 +557,7 @@
     }
 
     return normalizeGraphqlQueryIds(queryIds).map((queryId) => {
-      const lookupUrl = new URL(`/i/api/graphql/${queryId}/Followers`, baseOrigin);
+      const lookupUrl = new URL(`/i/api/graphql/${queryId}/${sourceConfig.operationName}`, baseOrigin);
 
       lookupUrl.searchParams.set('variables', JSON.stringify(variables));
       lookupUrl.searchParams.set('features', JSON.stringify(FOLLOWERS_FEATURES));
@@ -553,8 +579,10 @@
       documentRef = document,
       fetchImpl = globalThis.fetch,
       baseOrigin = documentRef?.location?.origin || 'https://x.com',
-      queryIds = FOLLOWERS_QUERY_IDS
+      source = DEFAULT_FOLLOWERS_SOURCE
     } = options;
+    const sourceConfig = getFollowTimelineSourceConfig(source);
+    const queryIds = options.queryIds || sourceConfig.queryIds;
     const lookupHeaders = buildXApiHeaders(documentRef, {
       'content-type': 'application/json'
     });
@@ -566,16 +594,18 @@
         baseOrigin,
         count,
         cursor,
-        queryIds: lookupQueryIds
+        queryIds: lookupQueryIds,
+        source: sourceConfig.source
       });
 
       if (!lookupUrls.length) {
         return null;
       }
 
-      logContentApiInfo('Fetching followers page.', {
+      logContentApiInfo(`Fetching ${sourceConfig.operationName} page.`, {
         count,
         cursor,
+        operationName: sourceConfig.operationName,
         queryIds: lookupQueryIds,
         source,
         userId: normalizedUserId
@@ -604,8 +634,8 @@
           });
 
           if (!response.ok) {
-            lastError = new Error(`Followers fetch failed with ${response.status} for ${lookupUrl}`);
-            logContentApiError('Followers request returned a non-ok response.', {
+            lastError = new Error(`${sourceConfig.operationName} fetch failed with ${response.status} for ${lookupUrl}`);
+            logContentApiError(`${sourceConfig.operationName} request returned a non-ok response.`, {
               source,
               status: response.status,
               url: lookupUrl
@@ -615,9 +645,10 @@
 
           const page = parseFollowersPage(await response.json());
 
-          logContentApiInfo('Followers page fetched successfully.', {
+          logContentApiInfo(`${sourceConfig.operationName} page fetched successfully.`, {
             hasNext: page.hasNext,
             nextCursor: page.nextCursor,
+            operationName: sourceConfig.operationName,
             source,
             userCount: page.users.length,
             userId: normalizedUserId
@@ -625,7 +656,7 @@
           return page;
         } catch (error) {
           lastError = error;
-          logContentApiError('Followers request threw an exception.', {
+          logContentApiError(`${sourceConfig.operationName} request threw an exception.`, {
             error,
             source,
             url: lookupUrl
@@ -642,7 +673,7 @@
       return primaryPage;
     }
 
-    const discoveredQueryIds = await discoverGraphqlQueryIds('Followers', {
+    const discoveredQueryIds = await discoverGraphqlQueryIds(sourceConfig.operationName, {
       baseOrigin,
       documentRef,
       fetchImpl
@@ -658,14 +689,15 @@
         return discoveredPage;
       }
     } else {
-      logContentApiInfo('No additional discovered followers query ids to try.', {
+      logContentApiInfo(`No additional discovered ${sourceConfig.operationName} query ids to try.`, {
         discoveredQueryIds,
+        operationName: sourceConfig.operationName,
         primaryQueryIds,
         userId: normalizedUserId
       });
     }
 
-    throw lastError || new Error(`Unable to fetch followers for user ${normalizedUserId}`);
+    throw lastError || new Error(`Unable to fetch ${sourceConfig.operationName} for user ${normalizedUserId}`);
   }
 
   function normalizeFollowerBlockCandidate(candidate) {
@@ -721,13 +753,14 @@
       documentRef = document,
       fetchImpl = globalThis.fetch,
       baseOrigin = documentRef?.location?.origin || 'https://x.com',
-      queryIds = FOLLOWERS_QUERY_IDS,
       userLookupQueryIds = USER_BY_SCREEN_NAME_QUERY_IDS
     } = runtimeOptions;
+    const sourceConfig = getFollowTimelineSourceConfig(options.source);
+    const queryIds = runtimeOptions.queryIds || sourceConfig.queryIds;
     const targetScreenName = namespace.readScreenNameFromProfilePage(documentRef);
 
     if (!targetScreenName) {
-      throw new Error('Open a profile or followers page in the active X tab first.');
+      throw new Error('Open a profile, followers, or following page in the active X tab first.');
     }
 
     const blockLimit = normalizeFollowersBlockLimit(options.blockLimit);
@@ -755,7 +788,8 @@
         cursor,
         documentRef,
         fetchImpl,
-        queryIds
+        queryIds,
+        source: sourceConfig.source
       });
       const users = Array.isArray(page.users) ? page.users : [];
 
@@ -815,13 +849,14 @@
       cursor = page.nextCursor;
     }
 
-    logContentApiInfo('Followers preview scan finished.', {
+    logContentApiInfo(`${sourceConfig.operationName} preview scan finished.`, {
       alreadyBlockedCount,
       blockLimit,
       candidateCount: candidates.length,
       hasMorePages,
       scanLimit,
       scannedCount: fetchedPageCount,
+      source: sourceConfig.source,
       targetRestId,
       targetScreenName
     });
@@ -834,6 +869,7 @@
       readyCount: candidates.length,
       scanLimit,
       scannedCount: fetchedPageCount,
+      source: sourceConfig.source,
       stoppedByBlockLimit,
       stoppedByScanLimit,
       targetRestId,
@@ -1127,6 +1163,7 @@
     DEFAULT_FOLLOWERS_SCAN_LIMIT,
     FOLLOWERS_PAGE_SIZE,
     FOLLOWERS_QUERY_IDS,
+    FOLLOWING_QUERY_IDS,
     blockFollowerCandidatesViaApi,
     blockUserByRestIdViaApi,
     USER_BY_SCREEN_NAME_FIELD_TOGGLES,

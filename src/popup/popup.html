@@ -74,9 +74,16 @@
           <section class="card settings-card followers-tool-card">
             <div class="settings-header">
               <button id="back-from-followers" class="ghost-button" type="button">Back</button>
-              <h2>Followers</h2>
+            <h2>Follow graph</h2>
             </div>
-            <p class="settings-copy">Use the active X profile tab as the source, preview a limited follower batch, then block only the accounts that are not already blocked. Blocking uses the delay from Settings.</p>
+            <p class="settings-copy">Use the active X profile tab as the source, preview followers or following, then block only accounts that are not already blocked. Blocking uses the delay from Settings.</p>
+            <div class="setting-row setting-row-stack">
+              <span class="field-label setting-label">Source</span>
+              <div class="source-toggle" role="group" aria-label="Follow graph source">
+                <button id="followers-source-followers" class="source-toggle-button" type="button">Followers</button>
+                <button id="followers-source-following" class="source-toggle-button" type="button">Following</button>
+              </div>
+            </div>
             <div class="setting-row">
               <label class="field-label setting-label" for="followers-block-limit">Block up to</label>
               <div class="delay-control">
@@ -95,7 +102,7 @@
               <button id="scan-followers-preview" class="secondary-button" type="button">Scan preview</button>
               <button id="block-follower-candidates" class="primary-button" type="button">Block ready</button>
             </div>
-            <p id="followers-summary" class="followers-summary">Open a profile or followers page in the active X tab, then run a preview scan.</p>
+            <p id="followers-summary" class="followers-summary">Open a profile, followers, or following page in the active X tab, then run a preview scan.</p>
             <section id="followers-block-progress" class="block-progress" data-state="idle" aria-live="polite">
               <div class="block-progress-header">
                 <span id="followers-progress-label" class="block-progress-label">No block run started.</span>
@@ -104,7 +111,7 @@
               <div class="block-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
                 <div id="followers-progress-fill" class="block-progress-fill"></div>
               </div>
-              <p id="followers-progress-detail" class="block-progress-detail">Preview followers first, then start blocking.</p>
+              <p id="followers-progress-detail" class="block-progress-detail">Preview accounts first, then start blocking.</p>
             </section>
             <pre id="followers-preview" class="followers-preview"></pre>
             <div class="debug-header">

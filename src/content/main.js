@@ -410,6 +410,7 @@
       attachButtonToTweet,
       FOLLOWERS_PAGE_SIZE: namespace.FOLLOWERS_PAGE_SIZE,
       FOLLOWERS_QUERY_IDS: namespace.FOLLOWERS_QUERY_IDS,
+      FOLLOWING_QUERY_IDS: namespace.FOLLOWING_QUERY_IDS,
       blockFollowerCandidatesViaApi: namespace.blockFollowerCandidatesViaApi,
       blockUserByRestIdViaApi: namespace.blockUserByRestIdViaApi,
       blockUserByScreenNameViaApi: namespace.blockUserByScreenNameViaApi,

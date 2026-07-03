@@ -8,6 +8,7 @@ const {
   DEFAULT_PAGE_BLOCK_BUTTON_STYLE,
   FOLLOWERS_PAGE_SIZE,
   FOLLOWERS_QUERY_IDS,
+  FOLLOWING_QUERY_IDS,
   MAX_BATCH_BLOCK_DELAY_MS,
   MESSAGE_TYPES,
   MIN_BATCH_BLOCK_DELAY_MS,
@@ -712,6 +713,17 @@ test('buildFollowersLookupUrls creates one candidate URL per known followers que
   assert.equal(urls[0].includes('bottom-cursor'), true);
 });
 
+test('buildFollowersLookupUrls creates Following URLs for the following source', () => {
+  const urls = buildFollowersLookupUrls('1958695191897841664', {
+    baseOrigin: 'https://x.com',
+    source: 'following'
+  });
+
+  assert.equal(urls.length, FOLLOWING_QUERY_IDS.length);
+  assert.equal(urls[0].startsWith(`https://x.com/i/api/graphql/${FOLLOWING_QUERY_IDS[0]}/Following?`), true);
+  assert.equal(JSON.parse(new URL(urls[0]).searchParams.get('variables')).count, FOLLOWERS_PAGE_SIZE);
+});
+
 test('parseUserLookupRestId reads rest_id from common response shapes', () => {
   assert.equal(parseUserLookupRestId({
     data: {
@@ -1083,6 +1095,90 @@ test('scanFollowersForBlocking skips already blocked followers and stops once th
   assert.deepEqual(preview.candidates, [
     { restId: '101', username: 'alice' },
     { restId: '202', username: 'bob' }
+  ]);
+});
+
+test('scanFollowersForBlocking uses Following operation for the following source', async () => {
+  const requestedTimelineUrls = [];
+
+  async function fetchImpl(url) {
+    if (url.includes('/UserByScreenName')) {
+      return {
+        ok: true,
+        async json() {
+          return {
+            data: {
+              user: {
+                result: {
+                  rest_id: '1958695191897841664'
+                }
+              }
+            }
+          };
+        }
+      };
+    }
+
+    requestedTimelineUrls.push(url);
+
+    return {
+      ok: true,
+      async json() {
+        return {
+          data: {
+            user: {
+              result: {
+                timeline: {
+                  timeline: {
+                    instructions: [{
+                      entries: [{
+                        content: {
+                          itemContent: {
+                            user_results: {
+                              result: {
+                                core: { screen_name: 'FollowingUser' },
+                                relationship_perspectives: { blocking: false },
+                                rest_id: '2022820425018011648'
+                              }
+                            }
+                          }
+                        }
+                      }]
+                    }]
+                  }
+                }
+              }
+            }
+          }
+        };
+      }
+    };
+  }
+
+  const preview = await scanFollowersForBlocking({
+    blockLimit: 10,
+    scanLimit: 5,
+    source: 'following'
+  }, {
+    documentRef: {
+      cookie: 'ct0=token123',
+      documentElement: { lang: 'en-US' },
+      location: {
+        origin: 'https://x.com',
+        pathname: '/targetuser/following'
+      }
+    },
+    fetchImpl,
+    queryIds: ['followingWorkingQueryId'],
+    userLookupQueryIds: ['workingUserLookup']
+  });
+
+  assert.equal(preview.source, 'following');
+  assert.equal(preview.readyCount, 1);
+  assert.equal(requestedTimelineUrls.length, 1);
+  assert.equal(requestedTimelineUrls[0].includes('/followingWorkingQueryId/Following?'), true);
+  assert.deepEqual(preview.candidates, [
+    { restId: '2022820425018011648', username: 'followinguser' }
   ]);
 });
 
@@ -1875,6 +1971,42 @@ test('registerRuntimeMessageListener answers followers preview and follower bloc
     runId: 'run-1',
     type: MESSAGE_TYPES.followerBlockProgress
   }]);
+});
+
+test('registerRuntimeMessageListener falls back to free chrome/browser globals when globalRef hides them', async (t) => {
+  const listeners = [];
+  const responses = [];
+  const fakeChrome = {
+    runtime: {
+      onMessage: {
+        addListener(listener) {
+          listeners.push(listener);
+        }
+      }
+    }
+  };
+
+  useGlobalOverrides(t, { chrome: fakeChrome });
+
+  const globalRef = {
+    document: {}
+  };
+
+  registerRuntimeMessageListener(globalRef);
+
+  assert.equal(listeners.length, 1);
+  assert.equal(globalRef.__easyTweetBlockRuntimeListenerAttached__, true);
+  assert.equal(listeners[0]({
+    delayMs: 500,
+    type: MESSAGE_TYPES.blockUsernamesViaApi,
+    usernames: ['bad-name']
+  }, null, (response) => {
+    responses.push(response);
+  }), true);
+
+  await flushAsyncWork();
+
+  assert.deepEqual(responses, [{ ok: true, results: [] }]);
 });
 
 test('init installs styles, registers runtime messaging, and observes added tweets once', (t) => {

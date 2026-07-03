@@ -125,6 +125,8 @@ function createPopupDocument() {
     'followers-progress-label': createPopupElement(),
     'followers-preview': createPopupElement(),
     'followers-scan-limit': createPopupElement(),
+    'followers-source-followers': createPopupElement(),
+    'followers-source-following': createPopupElement(),
     'followers-summary': createPopupElement(),
     'open-settings': createPopupElement(),
     'open-followers': createPopupElement(),
@@ -586,7 +588,7 @@ test('requestFollowersPreview and requestFollowerBlocks send the expected messag
     }
   };
 
-  await requestFollowersPreview(33, 25, 80, extensionApi);
+  await requestFollowersPreview(33, 25, 80, 'following', extensionApi);
   await requestFollowerBlocks(33, [{ restId: '1', username: 'alice' }], 1400, extensionApi);
 
   assert.deepEqual(messages, [
@@ -594,7 +596,8 @@ test('requestFollowersPreview and requestFollowerBlocks send the expected messag
       message: {
         options: {
           blockLimit: 25,
-          scanLimit: 80
+          scanLimit: 80,
+          source: 'following'
         },
         type: FOLLOWERS_SCAN_MESSAGE_TYPE
       },
@@ -1099,7 +1102,8 @@ test('init scans followers in the active tab and blocks only the ready preview c
     message: {
       options: {
         blockLimit: 25,
-        scanLimit: 80
+        scanLimit: 80,
+        source: 'followers'
       },
       type: FOLLOWERS_SCAN_MESSAGE_TYPE
     },
@@ -1113,6 +1117,73 @@ test('init scans followers in the active tab and blocks only the ready preview c
   assert.equal(messages[1].message.delayMs, 1100);
   assert.equal(typeof messages[1].message.runId, 'string');
   assert.equal(messages[1].message.type, FOLLOWERS_BLOCK_MESSAGE_TYPE);
+});
+
+test('init scans following when the following source is selected', async () => {
+  const { documentRef, elements } = createPopupDocument();
+  const messages = [];
+  const blocklist = {
+    ...sharedBlocklist,
+    async getStoredBatchBlockDelayMs() {
+      return 1000;
+    },
+    async getStoredUsernames() {
+      return [];
+    }
+  };
+  const extensionApi = {
+    runtime: {},
+    tabs: {
+      async query(queryInfo) {
+        if (queryInfo.active) {
+          return [{ id: 42, url: 'https://x.com/targetuser/following' }];
+        }
+
+        return [];
+      },
+      async sendMessage(tabId, message) {
+        messages.push({ message, tabId });
+
+        return {
+          ok: true,
+          preview: {
+            alreadyBlockedCount: 0,
+            blockLimit: 10,
+            candidates: [{ restId: '303', username: 'charlie' }],
+            hasMorePages: false,
+            readyCount: 1,
+            scanLimit: 15,
+            scannedCount: 1,
+            source: 'following',
+            targetRestId: '999',
+            targetScreenName: 'targetuser'
+          }
+        };
+      }
+    }
+  };
+
+  init(documentRef, extensionApi, blocklist, sharedFollowers);
+  await flushAsyncWork();
+
+  elements['open-followers'].click();
+  elements['followers-source-following'].click();
+  assert.equal(elements['followers-summary'].textContent, 'Source changed to following. Run a new preview scan.');
+  elements['followers-block-limit'].value = '10';
+  elements['followers-scan-limit'].value = '15';
+  elements['scan-followers-preview'].click();
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  assert.equal(messages.length, 1);
+  assert.deepEqual(messages[0].message.options, {
+    blockLimit: 10,
+    scanLimit: 15,
+    source: 'following'
+  });
+  assert.equal(elements.status.textContent, 'Preview ready: 1 following account can be blocked from @targetuser.');
+  assert.equal(elements['followers-summary'].textContent, 'Scanned 1 following account from @targetuser. Already blocked: 0. Ready: 1.');
+  assert.equal(elements['followers-progress-label'].textContent, 'Ready to block 1 following account');
 });
 
 test('init renders fatal popup text when the initial popup load rejects', async () => {
