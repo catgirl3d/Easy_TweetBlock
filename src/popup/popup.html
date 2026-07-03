@@ -18,7 +18,7 @@
 
     <div class="view-window">
       <div class="view-track">
-        <section class="view-panel">
+        <section class="view-panel view-panel-stack" data-view-panel="main">
           <section class="card">
             <div class="card-heading">
               <h2>Username Blocklist</h2>
@@ -31,9 +31,19 @@
               <button id="save-blocklist" class="primary-button" type="button">Save blocklist</button>
             </div>
           </section>
+
+          <section class="card">
+            <div class="card-heading">
+              <h2>Followers Tool</h2>
+            </div>
+            <p class="settings-copy">Scan followers from the active X profile tab, skip users already blocked, and send only a limited batch to the block API.</p>
+            <div class="actions-row">
+              <button id="open-followers" class="secondary-button" type="button">Open followers tool</button>
+            </div>
+          </section>
         </section>
 
-        <section class="view-panel">
+        <section class="view-panel" data-view-panel="settings">
           <section class="card settings-card">
             <div class="settings-header">
               <button id="back-to-main" class="ghost-button" type="button">Back</button>
@@ -59,10 +69,56 @@
             </div>
           </section>
         </section>
+
+        <section class="view-panel" data-view-panel="followers">
+          <section class="card settings-card followers-tool-card">
+            <div class="settings-header">
+              <button id="back-from-followers" class="ghost-button" type="button">Back</button>
+              <h2>Followers</h2>
+            </div>
+            <p class="settings-copy">Use the active X profile tab as the source, preview a limited follower batch, then block only the accounts that are not already blocked. Blocking uses the delay from Settings.</p>
+            <div class="setting-row">
+              <label class="field-label setting-label" for="followers-block-limit">Block up to</label>
+              <div class="delay-control">
+                <input id="followers-block-limit" class="delay-input" type="number" min="1" max="200" step="1" inputmode="numeric">
+                <span class="delay-unit">users</span>
+              </div>
+            </div>
+            <div class="setting-row">
+              <label class="field-label setting-label" for="followers-scan-limit">Scan up to</label>
+              <div class="delay-control">
+                <input id="followers-scan-limit" class="delay-input" type="number" min="1" max="500" step="1" inputmode="numeric">
+                <span class="delay-unit">users</span>
+              </div>
+            </div>
+            <div class="actions-row actions-row-wrap">
+              <button id="scan-followers-preview" class="secondary-button" type="button">Scan preview</button>
+              <button id="block-follower-candidates" class="primary-button" type="button">Block ready</button>
+            </div>
+            <p id="followers-summary" class="followers-summary">Open a profile or followers page in the active X tab, then run a preview scan.</p>
+            <section id="followers-block-progress" class="block-progress" data-state="idle" aria-live="polite">
+              <div class="block-progress-header">
+                <span id="followers-progress-label" class="block-progress-label">No block run started.</span>
+                <span id="followers-progress-count" class="block-progress-count">0/0</span>
+              </div>
+              <div class="block-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                <div id="followers-progress-fill" class="block-progress-fill"></div>
+              </div>
+              <p id="followers-progress-detail" class="block-progress-detail">Preview followers first, then start blocking.</p>
+            </section>
+            <pre id="followers-preview" class="followers-preview"></pre>
+            <div class="debug-header">
+              <h3>Debug log</h3>
+              <button id="clear-popup-debug-log" class="ghost-button ghost-button-small" type="button">Clear</button>
+            </div>
+            <pre id="popup-debug-log" class="followers-preview popup-debug-log">No popup debug events recorded yet.</pre>
+          </section>
+        </section>
       </div>
     </div>
   </main>
   <script src="../shared/blocklist.js"></script>
+  <script src="../shared/followers.js"></script>
   <script src="../shared/content-script-files.js"></script>
   <script src="popup.js"></script>
 </body>

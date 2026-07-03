@@ -4,6 +4,8 @@
   ]);
   const CONTENT_SCRIPT_FILES = Object.freeze([
     'src/content/shared.js',
+    'src/shared/followers.js',
+    'src/content/x-client-transaction.js',
     'src/content/api.js',
     'src/content/dom.js',
     'src/content/main.js'

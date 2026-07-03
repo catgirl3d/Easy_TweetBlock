@@ -4,10 +4,12 @@
   "version": "0.1.0",
   "description": "Block unwanted users on X and Twitter with one click.",
   "permissions": [
+    "activeTab",
     "scripting",
     "storage"
   ],
   "host_permissions": [
+    "https://abs.twimg.com/*",
     "https://x.com/*",
     "https://twitter.com/*"
   ],

@@ -17,7 +17,10 @@
     api: 'api'
   });
   const MESSAGE_TYPES = Object.freeze({
-    blockUsernamesViaApi: 'easy-tweetblock:block-usernames-via-api'
+    blockFollowerCandidatesViaApi: 'easy-tweetblock:block-follower-candidates-via-api',
+    followerBlockProgress: 'easy-tweetblock:follower-block-progress',
+    blockUsernamesViaApi: 'easy-tweetblock:block-usernames-via-api',
+    scanFollowersForBlock: 'easy-tweetblock:scan-followers-for-block'
   });
   const BLOCK_BUTTON_ATTRIBUTE = 'data-easy-tweetblock-button';
   const WAIT_INTERVAL_MS = 50;
@@ -177,6 +180,14 @@
   }
 
   function getExtensionApi(globalRef = globalThis) {
+    if (typeof browser !== 'undefined') {
+      return browser;
+    }
+
+    if (typeof chrome !== 'undefined') {
+      return chrome;
+    }
+
     return globalRef?.browser || globalRef?.chrome || null;
   }
 

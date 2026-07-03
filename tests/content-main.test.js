@@ -6,6 +6,8 @@ const {
   BUTTON_KINDS,
   DEFAULT_BATCH_BLOCK_DELAY_MS,
   DEFAULT_PAGE_BLOCK_BUTTON_STYLE,
+  FOLLOWERS_PAGE_SIZE,
+  FOLLOWERS_QUERY_IDS,
   MAX_BATCH_BLOCK_DELAY_MS,
   MESSAGE_TYPES,
   MIN_BATCH_BLOCK_DELAY_MS,
@@ -16,33 +18,46 @@ const {
   applyCurrentNativeButtonStyleToDocument,
   attachButtonToProfilePage,
   attachButtonToTweet,
+  blockFollowerCandidatesViaApi,
+  blockUserByRestIdViaApi,
   blockUserByScreenNameViaApi,
   blockUsernamesViaApi,
+  buildFollowersLookupUrls,
   buildUserLookupUrls,
   buildXApiHeaders,
   collectTweets,
+  createFollowerBlockCandidates,
   createApiBlockButton,
   createNativeBlockButton,
   createProfileBlockButton,
+  discoverGraphqlQueryIds,
+  extractGraphqlQueryIdsFromScriptText,
+  extractXClientTransactionIndicesFromScriptText,
+  extractXClientTransactionKeyFromDocument,
   createUsernameSet,
   extractScreenNameFromHref,
   getStoredPageButtonStyle,
   getClientLanguage,
   getButtonTitle,
   getCsrfToken,
+  fetchFollowersPage,
   init,
   lookupUserRestId,
   normalizeBatchBlockDelayMs,
+  normalizeFollowerBlockCandidate,
   normalizePageButtonStyle,
   normalizeUsernameForMatching,
   observeStoredPageButtonStyle,
+  parseFollowersPage,
   parseUserLookupRestId,
   readCookieValue,
   readScreenNameFromProfilePage,
   readScreenNameFromTweet,
   registerRuntimeMessageListener,
+  resolveOnDemandFileUrlFromRuntime,
   runProfileNativeBlockFlow,
   runNativeBlockFlow,
+  scanFollowersForBlocking,
   setCurrentNativeButtonStyle,
   setButtonState,
   syncStoredPageButtonStyle,
@@ -684,6 +699,19 @@ test('buildUserLookupUrls creates one candidate URL per known query id', () => {
   assert.equal(urls[0].includes('Felixmfdo'), true);
 });
 
+test('buildFollowersLookupUrls creates one candidate URL per known followers query id', () => {
+  const urls = buildFollowersLookupUrls('2743192327', {
+    baseOrigin: 'https://x.com',
+    count: FOLLOWERS_PAGE_SIZE,
+    cursor: 'bottom-cursor'
+  });
+
+  assert.equal(urls.length, FOLLOWERS_QUERY_IDS.length);
+  assert.equal(urls[0].startsWith(`https://x.com/i/api/graphql/${FOLLOWERS_QUERY_IDS[0]}/Followers?`), true);
+  assert.equal(urls[0].includes('2743192327'), true);
+  assert.equal(urls[0].includes('bottom-cursor'), true);
+});
+
 test('parseUserLookupRestId reads rest_id from common response shapes', () => {
   assert.equal(parseUserLookupRestId({
     data: {
@@ -706,6 +734,76 @@ test('parseUserLookupRestId reads rest_id from common response shapes', () => {
   }), '456');
 
   assert.equal(parseUserLookupRestId({ data: {} }), null);
+});
+
+test('parseFollowersPage extracts users, blocking state, and the next cursor', () => {
+  const page = parseFollowersPage({
+    data: {
+      user: {
+        result: {
+          timeline: {
+            timeline: {
+              instructions: [{
+                entries: [
+                  {
+                    content: {
+                      itemContent: {
+                        user_results: {
+                          result: {
+                            core: { screen_name: 'Alice' },
+                            relationship_perspectives: { blocking: false },
+                            rest_id: '101'
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    content: {
+                      itemContent: {
+                        user_results: {
+                          result: {
+                            legacy: { screen_name: 'Bob' },
+                            relationship_perspectives: { blocking: true },
+                            rest_id: '202'
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    content: {
+                      cursorType: 'Bottom',
+                      value: 'cursor-bottom'
+                    }
+                  }
+                ]
+              }]
+            }
+          }
+        }
+      }
+    }
+  });
+
+  assert.deepEqual(page, {
+    hasNext: true,
+    nextCursor: 'cursor-bottom',
+    users: [
+      {
+        blockedBy: false,
+        blocking: false,
+        restId: '101',
+        username: 'alice'
+      },
+      {
+        blockedBy: false,
+        blocking: true,
+        restId: '202',
+        username: 'bob'
+      }
+    ]
+  });
 });
 
 test('lookupUserRestId retries stale query ids until one returns rest_id', async () => {
@@ -755,6 +853,69 @@ test('lookupUserRestId retries stale query ids until one returns rest_id', async
   assert.equal(requestedUrls[1].includes('/workingQueryId/UserByScreenName'), true);
 });
 
+test('fetchFollowersPage retries stale followers query ids until one returns a page', async () => {
+  const requestedUrls = [];
+  const responses = [
+    {
+      ok: false,
+      status: 404
+    },
+    {
+      ok: true,
+      async json() {
+        return {
+          data: {
+            user: {
+              result: {
+                timeline: {
+                  timeline: {
+                    instructions: [{
+                      entries: [{
+                        content: {
+                          itemContent: {
+                            user_results: {
+                              result: {
+                                core: { screen_name: 'Alice' },
+                                relationship_perspectives: { blocking: false },
+                                rest_id: '101'
+                              }
+                            }
+                          }
+                        }
+                      }]
+                    }]
+                  }
+                }
+              }
+            }
+          }
+        };
+      }
+    }
+  ];
+
+  async function fetchImpl(url) {
+    requestedUrls.push(url);
+    return responses.shift();
+  }
+
+  const page = await fetchFollowersPage('2743192327', {
+    documentRef: {
+      cookie: 'ct0=token123',
+      documentElement: { lang: 'en-US' },
+      location: { origin: 'https://x.com' }
+    },
+    fetchImpl,
+    queryIds: ['staleFollowersQueryId', 'workingFollowersQueryId']
+  });
+
+  assert.equal(page.users.length, 1);
+  assert.equal(page.users[0].username, 'alice');
+  assert.equal(requestedUrls.length, 2);
+  assert.equal(requestedUrls[0].includes('/staleFollowersQueryId/Followers'), true);
+  assert.equal(requestedUrls[1].includes('/workingFollowersQueryId/Followers'), true);
+});
+
 test('lookupUserRestId reuses the current tab cache without another network lookup', async () => {
   const requestedUrls = [];
   const cache = new Map([
@@ -779,6 +940,150 @@ test('lookupUserRestId reuses the current tab cache without another network look
 
   assert.equal(restId, '2057563419742486528');
   assert.deepEqual(requestedUrls, []);
+});
+
+test('normalizeFollowerBlockCandidate and createFollowerBlockCandidates keep usable unique candidates only', () => {
+  assert.deepEqual(normalizeFollowerBlockCandidate({ restId: '101', username: '@Alice' }), {
+    restId: '101',
+    username: 'alice'
+  });
+  assert.equal(normalizeFollowerBlockCandidate({ username: 'bad-name' }), null);
+
+  assert.deepEqual(createFollowerBlockCandidates([
+    { restId: '101', username: 'Alice' },
+    { restId: '101', username: 'AliceAgain' },
+    { username: 'Bob' },
+    { username: 'bad-name' }
+  ]), [
+    { restId: '101', username: 'alice' },
+    { restId: null, username: 'bob' }
+  ]);
+});
+
+test('scanFollowersForBlocking skips already blocked followers and stops once the block limit is filled', async () => {
+  const requestedFollowersUrls = [];
+
+  async function fetchImpl(url) {
+    if (url.includes('/UserByScreenName')) {
+      return {
+        ok: true,
+        async json() {
+          return {
+            data: {
+              user: {
+                result: {
+                  rest_id: '999'
+                }
+              }
+            }
+          };
+        }
+      };
+    }
+
+    requestedFollowersUrls.push(url);
+
+    return {
+      ok: true,
+      async json() {
+        return {
+          data: {
+            user: {
+              result: {
+                timeline: {
+                  timeline: {
+                    instructions: [{
+                      entries: [
+                        {
+                          content: {
+                            itemContent: {
+                              user_results: {
+                                result: {
+                                  core: { screen_name: 'AlreadyBlocked' },
+                                  relationship_perspectives: { blocking: true },
+                                  rest_id: '301'
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          content: {
+                            itemContent: {
+                              user_results: {
+                                result: {
+                                  core: { screen_name: 'Alice' },
+                                  relationship_perspectives: { blocking: false },
+                                  rest_id: '101'
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          content: {
+                            itemContent: {
+                              user_results: {
+                                result: {
+                                  core: { screen_name: 'Bob' },
+                                  relationship_perspectives: { blocking: false },
+                                  rest_id: '202'
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          content: {
+                            cursorType: 'Bottom',
+                            value: 'cursor-bottom'
+                          }
+                        }
+                      ]
+                    }]
+                  }
+                }
+              }
+            }
+          }
+        };
+      }
+    };
+  }
+
+  const preview = await scanFollowersForBlocking({
+    blockLimit: 2,
+    scanLimit: 10
+  }, {
+    documentRef: {
+      cookie: 'ct0=token123',
+      documentElement: { lang: 'en-US' },
+      location: {
+        origin: 'https://x.com',
+        pathname: '/targetuser/followers'
+      }
+    },
+    fetchImpl,
+    queryIds: ['followersWorkingQueryId'],
+    userLookupQueryIds: ['workingUserLookup']
+  });
+
+  assert.equal(preview.targetScreenName, 'targetuser');
+  assert.equal(preview.targetRestId, '999');
+  assert.equal(preview.scannedCount, 3);
+  assert.equal(preview.alreadyBlockedCount, 1);
+  assert.equal(preview.readyCount, 2);
+  assert.equal(preview.stoppedByBlockLimit, true);
+  assert.equal(requestedFollowersUrls.length, 1);
+
+  const requestedFollowersVariables = new URL(requestedFollowersUrls[0]).searchParams.get('variables');
+
+  assert.equal(requestedFollowersVariables.startsWith('{"userId"'), true);
+  assert.equal(JSON.parse(requestedFollowersVariables).count, FOLLOWERS_PAGE_SIZE);
+  assert.deepEqual(preview.candidates, [
+    { restId: '101', username: 'alice' },
+    { restId: '202', username: 'bob' }
+  ]);
 });
 
 test('blockUserByScreenNameViaApi resolves rest_id and posts block request', async () => {
@@ -829,6 +1134,36 @@ test('blockUserByScreenNameViaApi resolves rest_id and posts block request', asy
   assert.equal(requestedUrls[1].url.endsWith('/i/api/1.1/blocks/create.json'), true);
   assert.equal(requestedUrls[1].options.method, 'POST');
   assert.equal(requestedUrls[1].options.body, 'user_id=2057563419742486528');
+});
+
+test('blockUserByRestIdViaApi posts the block request directly without a lookup', async () => {
+  const requestedUrls = [];
+
+  async function fetchImpl(url, options = {}) {
+    requestedUrls.push({ options, url });
+    return {
+      ok: true,
+      async json() {
+        return { ok: true };
+      }
+    };
+  }
+
+  const result = await blockUserByRestIdViaApi('2057563419742486528', {
+    documentRef: {
+      cookie: 'ct0=token123',
+      documentElement: { lang: 'en-US' },
+      location: { origin: 'https://x.com' }
+    },
+    fetchImpl,
+    screenName: 'Felixmfdo'
+  });
+
+  assert.equal(result.restId, '2057563419742486528');
+  assert.equal(result.screenName, 'felixmfdo');
+  assert.equal(requestedUrls.length, 1);
+  assert.equal(requestedUrls[0].url.endsWith('/i/api/1.1/blocks/create.json'), true);
+  assert.equal(requestedUrls[0].options.body, 'user_id=2057563419742486528');
 });
 
 test('blockUserByScreenNameViaApi tolerates block responses without JSON bodies', async () => {
@@ -947,6 +1282,81 @@ test('blockUsernamesViaApi blocks usernames sequentially and returns per-user re
   assert.equal(results[1].ok, false);
   assert.equal(results[1].error.includes('Block API failed with 403'), true);
   assert.deepEqual(sleepCalls, [1200]);
+});
+
+test('blockFollowerCandidatesViaApi deduplicates candidates and uses rest_id when available', async () => {
+  const progressEvents = [];
+  const sleepCalls = [];
+  const requestedUrls = [];
+
+  async function fetchImpl(url, options = {}) {
+    requestedUrls.push({ options, url });
+
+    if (options.method === 'POST') {
+      return {
+        ok: true,
+        async json() {
+          return { ok: true };
+        }
+      };
+    }
+
+    return {
+      ok: true,
+      async json() {
+        return {
+          data: {
+            user: {
+              result: {
+                rest_id: '222'
+              }
+            }
+          }
+        };
+      }
+    };
+  }
+
+  const results = await blockFollowerCandidatesViaApi([
+    { restId: '111', username: 'Alice' },
+    { restId: '111', username: 'AliceAgain' },
+    { username: 'Bob' }
+  ], {
+    delayMs: 1300,
+    documentRef: {
+      cookie: 'ct0=token123',
+      documentElement: { lang: 'en-US' },
+      location: { origin: 'https://x.com' }
+    },
+    fetchImpl,
+    onProgress(progress) {
+      progressEvents.push(progress);
+    },
+    queryIds: ['workingQueryId'],
+    sleepImpl: async (delayMs) => {
+      sleepCalls.push(delayMs);
+    }
+  });
+
+  assert.deepEqual(results, [
+    { ok: true, restId: '111', username: 'alice' },
+    { ok: true, restId: '222', username: 'bob' }
+  ]);
+  assert.equal(requestedUrls.filter((entry) => entry.options.method === 'POST').length, 2);
+  assert.equal(requestedUrls.some((entry) => entry.url.includes('/UserByScreenName')), true);
+  assert.deepEqual(sleepCalls, [1300]);
+  assert.deepEqual(progressEvents.map((event) => event.phase), [
+    'started',
+    'blocking',
+    'blocked',
+    'waiting',
+    'blocking',
+    'blocked',
+    'finished'
+  ]);
+  assert.equal(progressEvents[0].delayMs, 1300);
+  assert.equal(progressEvents.at(-1).successCount, 2);
+  assert.equal(progressEvents.at(-1).failureCount, 0);
 });
 
 test('normalizeBatchBlockDelayMs clamps values into the supported range', () => {
@@ -1358,6 +1768,115 @@ test('registerRuntimeMessageListener attaches only once and answers block reques
   assert.deepEqual(responses, [{ ok: true, results: [] }]);
 });
 
+test('registerRuntimeMessageListener answers followers preview and follower block requests', async (t) => {
+  const listeners = [];
+  const progressMessages = [];
+  const responses = [];
+  const globalRef = {
+    chrome: {
+      runtime: {
+        onMessage: {
+          addListener(listener) {
+            listeners.push(listener);
+          }
+        },
+        sendMessage(message) {
+          progressMessages.push(message);
+        }
+      }
+    },
+    document: {
+      cookie: 'ct0=token123',
+      documentElement: { lang: 'en-US' },
+      location: {
+        origin: 'https://x.com',
+        pathname: '/targetuser/followers'
+      }
+    }
+  };
+
+  registerRuntimeMessageListener(globalRef);
+
+  const originalScanFollowersForBlocking = globalThis.EasyTweetBlockContent.scanFollowersForBlocking;
+  const originalBlockFollowerCandidatesViaApi = globalThis.EasyTweetBlockContent.blockFollowerCandidatesViaApi;
+
+  globalThis.EasyTweetBlockContent.scanFollowersForBlocking = async () => ({
+    alreadyBlockedCount: 1,
+    candidates: [{ restId: '101', username: 'alice' }],
+    hasMorePages: false,
+    readyCount: 1,
+    scannedCount: 3,
+    targetRestId: '999',
+    targetScreenName: 'targetuser'
+  });
+  globalThis.EasyTweetBlockContent.blockFollowerCandidatesViaApi = async (_candidates, options) => {
+    options.onProgress({
+      completed: 1,
+      delayMs: options.delayMs,
+      failureCount: 0,
+      phase: 'finished',
+      successCount: 1,
+      total: 1
+    });
+
+    return [{ ok: true, restId: '101', username: 'alice' }];
+  };
+
+  t.after(() => {
+    globalThis.EasyTweetBlockContent.scanFollowersForBlocking = originalScanFollowersForBlocking;
+    globalThis.EasyTweetBlockContent.blockFollowerCandidatesViaApi = originalBlockFollowerCandidatesViaApi;
+  });
+
+  assert.equal(listeners[0]({
+    options: { blockLimit: 1, scanLimit: 3 },
+    type: MESSAGE_TYPES.scanFollowersForBlock
+  }, null, (response) => {
+    responses.push(response);
+  }), true);
+
+  assert.equal(listeners[0]({
+    candidates: [{ restId: '101', username: 'alice' }],
+    delayMs: 1200,
+    runId: 'run-1',
+    type: MESSAGE_TYPES.blockFollowerCandidatesViaApi
+  }, null, (response) => {
+    responses.push(response);
+  }), true);
+
+  await flushAsyncWork();
+
+  assert.deepEqual(responses, [
+    {
+      ok: true,
+      preview: {
+        alreadyBlockedCount: 1,
+        candidates: [{ restId: '101', username: 'alice' }],
+        hasMorePages: false,
+        readyCount: 1,
+        scannedCount: 3,
+        targetRestId: '999',
+        targetScreenName: 'targetuser'
+      }
+    },
+    {
+      ok: true,
+      results: [{ ok: true, restId: '101', username: 'alice' }]
+    }
+  ]);
+  assert.deepEqual(progressMessages, [{
+    progress: {
+      completed: 1,
+      delayMs: 1200,
+      failureCount: 0,
+      phase: 'finished',
+      successCount: 1,
+      total: 1
+    },
+    runId: 'run-1',
+    type: MESSAGE_TYPES.followerBlockProgress
+  }]);
+});
+
 test('init installs styles, registers runtime messaging, and observes added tweets once', (t) => {
   const { documentRef } = createDocumentStub();
   const { caretButton, leadingAction, localButtonGroup, parentElement, tweetNode } = createTweetNode();
@@ -1535,4 +2054,222 @@ test('init adds the native block button to the profile action bar on initial pag
     assert.equal(actionBar.children[1], moreButton);
     assert.equal(typeof observerCallback, 'function');
   });
+});
+
+test('extractGraphqlQueryIdsFromScriptText reads query ids near an operation name', () => {
+  const scriptText = 'const op={queryId:"dynamicFollowersQueryId",operationName:"Followers"};'
+    + 'const other={queryId:"dynamicUserQueryId",operationName:"UserByScreenName"};';
+
+  assert.deepEqual(extractGraphqlQueryIdsFromScriptText(scriptText, 'Followers'), ['dynamicFollowersQueryId']);
+});
+
+test('fetchFollowersPage tries known followers query ids before dynamic discovery', async () => {
+  const requestedUrls = [];
+  const documentRef = {
+    baseURI: 'https://x.com/Alice',
+    cookie: 'ct0=token123',
+    documentElement: { lang: 'en-US' },
+    location: { origin: 'https://x.com' },
+    querySelectorAll() {
+      throw new Error('discovery should not run when a known followers query id works');
+    }
+  };
+
+  async function fetchImpl(url, options) {
+    requestedUrls.push(url);
+    assert.equal(options.headers['content-type'], 'application/json');
+
+    return {
+      ok: true,
+      async json() {
+        return {
+          data: {
+            user: {
+              result: {
+                timeline: {
+                  timeline: {
+                    instructions: []
+                  }
+                }
+              }
+            }
+          }
+        };
+      }
+    };
+  }
+
+  await fetchFollowersPage('2743192327', {
+    documentRef,
+    fetchImpl,
+    queryIds: ['staticFollowersQueryId']
+  });
+
+  assert.equal(requestedUrls.length, 1);
+  assert.equal(requestedUrls[0].includes('/staticFollowersQueryId/Followers'), true);
+});
+
+test('fetchFollowersPage discovers followers query ids after known ids fail', async () => {
+  const requestedUrls = [];
+  const documentRef = {
+    baseURI: 'https://x.com/Alice',
+    cookie: 'ct0=token123',
+    documentElement: { lang: 'en-US' },
+    location: { origin: 'https://x.com' },
+    querySelectorAll(selector) {
+      assert.equal(selector, 'script[src], link[href]');
+      return [{ src: 'https://abs.twimg.com/responsive-web/client-web/main.js' }];
+    }
+  };
+
+  async function fetchImpl(url) {
+    requestedUrls.push(url);
+
+    if (url.includes('/staticFollowersQueryId/Followers')) {
+      return {
+        ok: false,
+        status: 404
+      };
+    }
+
+    if (url === 'https://abs.twimg.com/responsive-web/client-web/main.js') {
+      return {
+        ok: true,
+        async text() {
+          return 'const op={queryId:"dynamicFollowersQueryId",operationName:"Followers"};';
+        }
+      };
+    }
+
+    return {
+      ok: true,
+      async json() {
+        return {
+          data: {
+            user: {
+              result: {
+                timeline: {
+                  timeline: {
+                    instructions: []
+                  }
+                }
+              }
+            }
+          }
+        };
+      }
+    };
+  }
+
+  await fetchFollowersPage('2743192327', {
+    documentRef,
+    fetchImpl,
+    queryIds: ['staticFollowersQueryId']
+  });
+
+  assert.equal(requestedUrls[0].includes('/staticFollowersQueryId/Followers'), true);
+  assert.equal(requestedUrls[1], 'https://abs.twimg.com/responsive-web/client-web/main.js');
+  assert.equal(requestedUrls[2].includes('/dynamicFollowersQueryId/Followers'), true);
+});
+
+test('discoverGraphqlQueryIds returns matching ids from X script assets', async () => {
+  const documentRef = {
+    baseURI: 'https://x.com/Alice',
+    location: { origin: 'https://x.com' },
+    querySelectorAll() {
+      return [{ src: 'https://abs.twimg.com/responsive-web/client-web/profile.js' }];
+    }
+  };
+
+  async function fetchImpl() {
+    return {
+      ok: true,
+      async text() {
+        return 'const op={operationName:"FollowersAssetTest",queryId:"assetFollowersQueryId"};';
+      }
+    };
+  }
+
+  const queryIds = await discoverGraphqlQueryIds('FollowersAssetTest', {
+    documentRef,
+    fetchImpl
+  });
+
+  assert.deepEqual(queryIds, ['assetFollowersQueryId']);
+});
+
+test('x client transaction helpers extract runtime material', () => {
+  const runtimeSource = '123:"ondemand.s";abc})[e]||e)+"."+({123:"hash_ABC-"})';
+  const indicesSource = 'alpha(w[7], 16);beta(w[2],16);gamma(w[11], 16);';
+  const documentRef = {
+    querySelector(selector) {
+      assert.equal(selector, "[name='twitter-site-verification']");
+      return {
+        getAttribute(name) {
+          assert.equal(name, 'content');
+          return 'site-key';
+        }
+      };
+    }
+  };
+
+  assert.equal(
+    resolveOnDemandFileUrlFromRuntime(runtimeSource),
+    'https://abs.twimg.com/responsive-web/client-web/ondemand.s.hash_ABC-a.js'
+  );
+  assert.deepEqual(extractXClientTransactionIndicesFromScriptText(indicesSource), {
+    keyByteIndices: [2, 11],
+    rowIndex: 7
+  });
+  assert.equal(extractXClientTransactionKeyFromDocument(documentRef), 'site-key');
+});
+
+test('fetchFollowersPage includes generated x-client-transaction-id when available', async (t) => {
+  const requestedHeaders = [];
+  const originalGenerator = globalThis.EasyTweetBlockContent.tryGenerateXClientTransactionId;
+
+  t.after(() => {
+    globalThis.EasyTweetBlockContent.tryGenerateXClientTransactionId = originalGenerator;
+  });
+
+  globalThis.EasyTweetBlockContent.tryGenerateXClientTransactionId = async (method, path) => {
+    assert.equal(method, 'GET');
+    assert.equal(path, '/i/api/graphql/workingFollowersQueryId/Followers');
+    return 'generated-transaction-id';
+  };
+
+  async function fetchImpl(_url, options = {}) {
+    requestedHeaders.push(options.headers || {});
+
+    return {
+      ok: true,
+      async json() {
+        return {
+          data: {
+            user: {
+              result: {
+                timeline: {
+                  timeline: {
+                    instructions: []
+                  }
+                }
+              }
+            }
+          }
+        };
+      }
+    };
+  }
+
+  await fetchFollowersPage('2743192327', {
+    documentRef: {
+      cookie: 'ct0=token123',
+      documentElement: { lang: 'en-US' },
+      location: { origin: 'https://x.com' }
+    },
+    fetchImpl,
+    queryIds: ['workingFollowersQueryId']
+  });
+
+  assert.equal(requestedHeaders[0]['x-client-transaction-id'], 'generated-transaction-id');
 });

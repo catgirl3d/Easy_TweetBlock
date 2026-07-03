@@ -2,22 +2,38 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const sharedBlocklist = require('../src/shared/blocklist.js');
+const sharedFollowers = require('../src/shared/followers.js');
 const {
   CONTENT_SCRIPT_CSS_FILES,
   CONTENT_SCRIPT_FILES,
+  FOLLOWERS_BLOCK_MESSAGE_TYPE,
+  FOLLOWERS_BLOCK_PROGRESS_MESSAGE_TYPE,
+  FOLLOWERS_SCAN_MESSAGE_TYPE,
   POPUP_VIEWS,
+  clearStoredPopupState,
   ensureContentScriptsInTab,
   executeTabFunction,
+  formatPopupError,
+  findActiveXTab,
   findUsableXTab,
   init,
   invokeImmediateBlockInTab,
   isMissingReceiverError,
   isSupportedTabUrl,
+  logPopupError,
+  logPopupInfo,
+  loadStoredPopupState,
   normalizePopupView,
   queryTabs,
+  registerPopupErrorHandlers,
+  renderFatalPopupError,
+  requestFollowerBlocks,
+  requestFollowersPreview,
   requestImmediateBlock,
+  requestMessageWithContentScript,
   sendTabMessage,
-  setPopupView
+  setPopupView,
+  saveStoredPopupState
 } = require('../src/popup/popup.js');
 
 function flushAsyncWork() {
@@ -39,11 +55,28 @@ function createDeferred() {
   };
 }
 
+function createLocalStorageStub(initialValues = {}) {
+  const values = new Map(Object.entries(initialValues));
+
+  return {
+    getItem(key) {
+      return values.has(key) ? values.get(key) : null;
+    },
+    removeItem(key) {
+      values.delete(key);
+    },
+    setItem(key, value) {
+      values.set(key, String(value));
+    }
+  };
+}
+
 function createPopupElement(overrides = {}) {
   const listeners = new Map();
   const element = {
     dataset: {},
     disabled: false,
+    style: {},
     textContent: '',
     value: '',
     addEventListener(type, listener) {
@@ -79,12 +112,27 @@ function createPopupElement(overrides = {}) {
 function createPopupDocument() {
   const elements = {
     'back-to-main': createPopupElement(),
+    'back-from-followers': createPopupElement(),
     'batch-block-delay-ms': createPopupElement(),
+    'block-follower-candidates': createPopupElement(),
     'block-now': createPopupElement(),
+    'clear-popup-debug-log': createPopupElement(),
+    'followers-block-limit': createPopupElement(),
+    'followers-block-progress': createPopupElement(),
+    'followers-progress-count': createPopupElement(),
+    'followers-progress-detail': createPopupElement(),
+    'followers-progress-fill': createPopupElement(),
+    'followers-progress-label': createPopupElement(),
+    'followers-preview': createPopupElement(),
+    'followers-scan-limit': createPopupElement(),
+    'followers-summary': createPopupElement(),
     'open-settings': createPopupElement(),
+    'open-followers': createPopupElement(),
+    'popup-debug-log': createPopupElement({ scrollTop: 0, scrollHeight: 0 }),
     'page-button-style-icon': createPopupElement({ setAttribute() {} }),
     'page-button-style-text': createPopupElement({ setAttribute() {} }),
     'popup-shell': createPopupElement({ dataset: {} }),
+    'scan-followers-preview': createPopupElement(),
     'save-blocklist': createPopupElement(),
     'save-settings': createPopupElement(),
     status: createPopupElement(),
@@ -94,6 +142,9 @@ function createPopupDocument() {
 
   return {
     documentRef: {
+      body: {
+        textContent: ''
+      },
       getElementById(id) {
         return elements[id] || null;
       }
@@ -104,6 +155,7 @@ function createPopupDocument() {
 
 test('normalizePopupView falls back to the main screen for unknown values', () => {
   assert.equal(normalizePopupView(POPUP_VIEWS.settings), POPUP_VIEWS.settings);
+  assert.equal(normalizePopupView(POPUP_VIEWS.followers), POPUP_VIEWS.followers);
   assert.equal(normalizePopupView('random'), POPUP_VIEWS.main);
 });
 
@@ -116,6 +168,80 @@ test('setPopupView updates the shell dataset with the normalized view', () => {
   assert.equal(shellElement.dataset.view, POPUP_VIEWS.settings);
   assert.equal(setPopupView(shellElement, 'unknown'), POPUP_VIEWS.main);
   assert.equal(shellElement.dataset.view, POPUP_VIEWS.main);
+});
+
+test('stored popup state helpers round-trip through localStorage', () => {
+  const storage = createLocalStorageStub();
+  const state = {
+    followersBlockLimit: 25,
+    statusMessage: 'Preview ready.',
+    view: POPUP_VIEWS.followers
+  };
+
+  saveStoredPopupState(state, storage);
+  assert.deepEqual(loadStoredPopupState(storage), state);
+  clearStoredPopupState(storage);
+  assert.deepEqual(loadStoredPopupState(storage), {});
+});
+
+test('formatPopupError and renderFatalPopupError expose the real popup failure text', () => {
+  const body = { textContent: '' };
+  const error = new Error('popup exploded');
+
+  assert.equal(formatPopupError(error).includes('popup exploded'), true);
+  assert.equal(renderFatalPopupError(error, { body }).includes('popup exploded'), true);
+  assert.equal(body.textContent.includes('Easy TweetBlock popup failed to load.'), true);
+  assert.equal(body.textContent.includes('popup exploded'), true);
+});
+
+test('logPopupInfo and logPopupError write prefixed browser console messages', () => {
+  const originalInfo = console.info;
+  const originalError = console.error;
+  const calls = [];
+
+  console.info = (...args) => {
+    calls.push({ args, type: 'info' });
+  };
+  console.error = (...args) => {
+    calls.push({ args, type: 'error' });
+  };
+
+  try {
+    logPopupInfo('scan started', { blockLimit: 25 });
+    logPopupError('scan failed', new Error('boom'));
+  } finally {
+    console.info = originalInfo;
+    console.error = originalError;
+  }
+
+  assert.equal(calls[0].type, 'info');
+  assert.equal(calls[0].args[0], '[Easy TweetBlock][popup]');
+  assert.equal(calls[0].args[1], 'scan started');
+  assert.deepEqual(calls[0].args[2], { blockLimit: 25 });
+  assert.equal(calls[1].type, 'error');
+  assert.equal(calls[1].args[0], '[Easy TweetBlock][popup]');
+  assert.equal(calls[1].args[1], 'scan failed');
+  assert.equal(calls[1].args[2] instanceof Error, true);
+});
+
+test('registerPopupErrorHandlers renders unhandled popup failures into the popup body', () => {
+  const listeners = new Map();
+  const globalRef = {
+    addEventListener(type, listener) {
+      listeners.set(type, listener);
+    }
+  };
+  const documentRef = {
+    body: {
+      textContent: ''
+    }
+  };
+
+  registerPopupErrorHandlers(globalRef, documentRef);
+  listeners.get('unhandledrejection')({ reason: new Error('async popup boom') });
+
+  assert.equal(documentRef.body.textContent.includes('async popup boom'), true);
+  assert.equal(globalRef.__easyTweetBlockPopupErrorHandlersAttached__, true);
 });
 
 test('isMissingReceiverError detects missing content-script receiver failures', () => {
@@ -391,10 +517,7 @@ test('requestImmediateBlock injects scripts and falls back to direct tab executi
   assert.deepEqual(response.results, [{ ok: true, username: 'firstuser' }]);
   assert.equal(sentMessages.length, 1);
   assert.equal(sentMessages[0].message.delayMs, 1600);
-  assert.deepEqual(insertCssCalls, [{
-    files: CONTENT_SCRIPT_CSS_FILES,
-    target: { tabId: 25 }
-  }]);
+  assert.deepEqual(insertCssCalls, []);
   assert.equal(executeScriptCalls.length, 2);
   assert.deepEqual(executeScriptCalls[0], {
     files: CONTENT_SCRIPT_FILES,
@@ -402,6 +525,106 @@ test('requestImmediateBlock injects scripts and falls back to direct tab executi
   });
   assert.equal(typeof executeScriptCalls[1].func, 'function');
   assert.equal(executeScriptCalls[1].args[1], 1600);
+});
+
+test('requestMessageWithContentScript injects scripts and retries the message after missing receiver', async () => {
+  const insertCssCalls = [];
+  const executeScriptCalls = [];
+  const sentMessages = [];
+  let attempt = 0;
+  const extensionApi = {
+    runtime: {},
+    scripting: {
+      async insertCSS(options) {
+        insertCssCalls.push(options);
+      },
+      async executeScript(options) {
+        executeScriptCalls.push(options);
+        return [];
+      }
+    },
+    tabs: {
+      async sendMessage(tabId, message) {
+        sentMessages.push({ message, tabId });
+        attempt += 1;
+
+        if (attempt === 1) {
+          throw new Error('Could not establish connection. Receiving end does not exist.');
+        }
+
+        return {
+          echoed: true,
+          ok: true
+        };
+      }
+    }
+  };
+
+  const response = await requestMessageWithContentScript(12, { type: 'ping' }, extensionApi);
+
+  assert.deepEqual(response, { echoed: true, ok: true });
+  assert.equal(sentMessages.length, 2);
+  assert.deepEqual(insertCssCalls, [{
+    files: CONTENT_SCRIPT_CSS_FILES,
+    target: { tabId: 12 }
+  }]);
+  assert.deepEqual(executeScriptCalls, [{
+    files: CONTENT_SCRIPT_FILES,
+    target: { tabId: 12 }
+  }]);
+});
+
+test('requestFollowersPreview and requestFollowerBlocks send the expected message payloads', async () => {
+  const messages = [];
+  const extensionApi = {
+    runtime: {},
+    tabs: {
+      async sendMessage(tabId, message) {
+        messages.push({ message, tabId });
+        return { ok: true };
+      }
+    }
+  };
+
+  await requestFollowersPreview(33, 25, 80, extensionApi);
+  await requestFollowerBlocks(33, [{ restId: '1', username: 'alice' }], 1400, extensionApi);
+
+  assert.deepEqual(messages, [
+    {
+      message: {
+        options: {
+          blockLimit: 25,
+          scanLimit: 80
+        },
+        type: FOLLOWERS_SCAN_MESSAGE_TYPE
+      },
+      tabId: 33
+    },
+    {
+      message: {
+        candidates: [{ restId: '1', username: 'alice' }],
+        delayMs: 1400,
+        type: FOLLOWERS_BLOCK_MESSAGE_TYPE
+      },
+      tabId: 33
+    }
+  ]);
+});
+
+test('findActiveXTab returns only the active supported X tab', async () => {
+  const extensionApi = {
+    runtime: {},
+    tabs: {
+      async query(queryInfo) {
+        assert.deepEqual(queryInfo, { active: true, currentWindow: true });
+        return [{ id: 7, url: 'https://x.com/someuser/followers' }];
+      }
+    }
+  };
+
+  const tab = await findActiveXTab(extensionApi);
+
+  assert.deepEqual(tab, { id: 7, url: 'https://x.com/someuser/followers' });
 });
 
 test('findUsableXTab prefers the active X tab and falls back to any X tab', async () => {
@@ -488,6 +711,8 @@ test('init loads stored popup state and supports settings navigation', async () 
   assert.equal(elements['username-blocklist'].value, '@alice\n@bob');
   assert.equal(elements['username-count'].textContent, '2 usernames');
   assert.equal(elements['batch-block-delay-ms'].value, '1400');
+  assert.equal(elements['followers-block-limit'].value, String(sharedFollowers.DEFAULT_FOLLOWERS_BLOCK_LIMIT));
+  assert.equal(elements['followers-scan-limit'].value, String(sharedFollowers.DEFAULT_FOLLOWERS_SCAN_LIMIT));
   assert.equal(elements['page-button-style-text'].dataset.active, 'true');
   assert.equal(elements['page-button-style-icon'].dataset.active, 'false');
   assert.equal(elements.status.textContent, 'Save usernames for later, or block the whole list immediately through any open X tab.');
@@ -506,6 +731,75 @@ test('init loads stored popup state and supports settings navigation', async () 
   assert.equal(elements['popup-shell'].dataset.view, POPUP_VIEWS.main);
   assert.equal(elements['batch-block-delay-ms'].value, '1400');
   assert.equal(elements['page-button-style-text'].dataset.active, 'true');
+
+  elements['open-followers'].click();
+  assert.equal(elements['popup-shell'].dataset.view, POPUP_VIEWS.followers);
+  elements['back-from-followers'].click();
+  assert.equal(elements['popup-shell'].dataset.view, POPUP_VIEWS.main);
+});
+
+test('init restores persisted followers preview and username draft state', async (t) => {
+  const originalLocalStorage = globalThis.localStorage;
+  const storage = createLocalStorageStub();
+
+  globalThis.localStorage = storage;
+  t.after(() => {
+    if (originalLocalStorage === undefined) {
+      delete globalThis.localStorage;
+      return;
+    }
+
+    globalThis.localStorage = originalLocalStorage;
+  });
+
+  saveStoredPopupState({
+    followersBlockLimit: 25,
+    followersPreview: {
+      alreadyBlockedCount: 1,
+      blockLimit: 25,
+      candidates: [{ restId: '101', username: 'alice' }],
+      hasMorePages: true,
+      readyCount: 1,
+      scanLimit: 80,
+      scannedCount: 5,
+      targetRestId: '999',
+      targetScreenName: 'targetuser'
+    },
+    followersScanLimit: 80,
+    statusMessage: 'Preview ready: 1 followers can be blocked from @targetuser.',
+    usernameDraftText: '@draftuser',
+    view: POPUP_VIEWS.followers
+  }, storage);
+
+  const { documentRef, elements } = createPopupDocument();
+
+  init(documentRef, { runtime: {}, tabs: {} }, {
+    ...sharedBlocklist,
+    async getStoredBatchBlockDelayMs() {
+      return 1000;
+    },
+    async getStoredPageBlockButtonStyle() {
+      return sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.icon;
+    },
+    async getStoredUsernames() {
+      return ['saveduser'];
+    }
+  });
+  await flushAsyncWork();
+
+  assert.equal(elements['popup-shell'].dataset.view, POPUP_VIEWS.followers);
+  assert.equal(elements['username-blocklist'].value, '@draftuser');
+  assert.equal(elements['username-count'].textContent, '1 username');
+  assert.equal(elements['followers-block-limit'].value, '25');
+  assert.equal(elements['followers-scan-limit'].value, '80');
+  assert.equal(elements['followers-preview'].textContent, '@alice');
+  assert.equal(elements['followers-summary'].textContent.includes('Scanned 5 followers from @targetuser'), true);
+  assert.equal(elements.status.textContent, 'Preview ready: 1 followers can be blocked from @targetuser.');
+  assert.equal(elements['block-follower-candidates'].disabled, false);
+
+  elements['username-blocklist'].value = '@changeduser';
+  elements['username-blocklist'].dispatch('input');
+  assert.equal(loadStoredPopupState(storage).usernameDraftText, '@changeduser');
 });
 
 test('init saves the blocklist, disables actions while saving, and reports invalid entries', async () => {
@@ -531,8 +825,9 @@ test('init saves the blocklist, disables actions while saving, and reports inval
 
   elements['username-blocklist'].value = '@Alice bad-name @Bob';
   elements['save-blocklist'].click();
+  await flushAsyncWork();
 
-  assert.deepEqual(persistedUsernames, [['alice', 'bob']]);
+  assert.equal(JSON.stringify(persistedUsernames), JSON.stringify([['alice', 'bob']]));
   assert.equal(elements.status.textContent, 'Saving blocklist...');
   assert.equal(elements['save-blocklist'].disabled, true);
   assert.equal(elements['block-now'].disabled, true);
@@ -583,9 +878,10 @@ test('init saves settings, updates the active delay, and returns to the main vie
   elements['batch-block-delay-ms'].value = '2301';
   elements['page-button-style-text'].click();
   elements['save-settings'].click();
+  await flushAsyncWork();
 
-  assert.deepEqual(savedDelayInputs, [2000]);
-  assert.deepEqual(savedStyles, [sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.text]);
+  assert.equal(JSON.stringify(savedDelayInputs), JSON.stringify([2000]));
+  assert.equal(JSON.stringify(savedStyles), JSON.stringify([sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.text]));
   assert.equal(elements.status.textContent, 'Saving settings...');
   assert.equal(elements['save-blocklist'].disabled, true);
   assert.equal(elements['block-now'].disabled, true);
@@ -684,6 +980,159 @@ test('init requires at least one valid username before blocking', async () => {
 
   elements['username-blocklist'].value = 'bad-name';
   elements['block-now'].click();
+  await flushAsyncWork();
 
   assert.equal(elements.status.textContent, 'Add at least one valid username before blocking.');
+});
+
+test('init scans followers in the active tab and blocks only the ready preview candidates', async () => {
+  const { documentRef, elements } = createPopupDocument();
+  const blockDeferred = createDeferred();
+  const messages = [];
+  const runtimeListeners = [];
+  const blocklist = {
+    ...sharedBlocklist,
+    async getStoredBatchBlockDelayMs() {
+      return 1100;
+    },
+    async getStoredUsernames() {
+      return [];
+    }
+  };
+  const extensionApi = {
+    runtime: {
+      onMessage: {
+        addListener(listener) {
+          runtimeListeners.push(listener);
+        }
+      }
+    },
+    tabs: {
+      async query(queryInfo) {
+        if (queryInfo.active) {
+          return [{ id: 41, url: 'https://x.com/targetuser/followers' }];
+        }
+
+        return [];
+      },
+      async sendMessage(tabId, message) {
+        messages.push({ message, tabId });
+
+        if (message.type === FOLLOWERS_SCAN_MESSAGE_TYPE) {
+          return {
+            ok: true,
+            preview: {
+              alreadyBlockedCount: 2,
+              blockLimit: 25,
+              candidates: [
+                { restId: '101', username: 'alice' },
+                { restId: '202', username: 'bob' }
+              ],
+              hasMorePages: true,
+              readyCount: 2,
+              scanLimit: 80,
+              scannedCount: 5,
+              targetRestId: '999',
+              targetScreenName: 'targetuser'
+            }
+          };
+        }
+
+        const runId = message.runId;
+
+        assert.equal(typeof runId, 'string');
+        runtimeListeners[0]?.({
+          progress: {
+            completed: 1,
+            delayMs: 1100,
+            failureCount: 0,
+            phase: 'waiting',
+            successCount: 1,
+            total: 2
+          },
+          runId,
+          type: FOLLOWERS_BLOCK_PROGRESS_MESSAGE_TYPE
+        });
+
+        return blockDeferred.promise;
+      }
+    }
+  };
+
+  init(documentRef, extensionApi, blocklist, sharedFollowers);
+  await flushAsyncWork();
+
+  elements['open-followers'].click();
+  elements['followers-block-limit'].value = '25';
+  elements['followers-scan-limit'].value = '80';
+  elements['scan-followers-preview'].click();
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  assert.equal(elements.status.textContent, 'Preview ready: 2 followers can be blocked from @targetuser.');
+  assert.equal(elements['followers-summary'].textContent, 'Scanned 5 followers from @targetuser. Already blocked: 2. Ready: 2. More followers remain beyond this preview.');
+  assert.equal(elements['followers-preview'].textContent, '@alice\n@bob');
+  assert.equal(elements['block-follower-candidates'].disabled, false);
+
+  elements['block-follower-candidates'].click();
+  await flushAsyncWork();
+  assert.equal(elements['followers-progress-label'].textContent, 'Waiting 1100 ms before next block');
+  assert.equal(elements['followers-progress-count'].textContent, '1/2');
+  assert.equal(elements['followers-progress-fill'].style.width, '50%');
+  blockDeferred.resolve({
+    ok: true,
+    results: [
+      { ok: true, restId: '101', username: 'alice' },
+      { ok: true, restId: '202', username: 'bob' }
+    ]
+  });
+  await flushAsyncWork();
+
+  assert.equal(elements.status.textContent, 'Block run complete: blocked 2/2 followers. Delay used: 1100 ms between requests.');
+  assert.equal(elements['followers-progress-label'].textContent, 'Block run complete');
+  assert.equal(elements['followers-progress-count'].textContent, '2/2');
+  assert.equal(elements['followers-progress-detail'].textContent, 'Blocked 2/2. Failed: 0. Delay used: 1100 ms between requests.');
+  assert.equal(elements['followers-summary'].textContent, 'Preview cleared. Run a new scan for another batch.');
+  assert.equal(elements['followers-preview'].textContent, '');
+  assert.equal(messages.length, 2);
+  assert.deepEqual(messages[0], {
+    message: {
+      options: {
+        blockLimit: 25,
+        scanLimit: 80
+      },
+      type: FOLLOWERS_SCAN_MESSAGE_TYPE
+    },
+    tabId: 41
+  });
+  assert.equal(messages[1].tabId, 41);
+  assert.deepEqual(messages[1].message.candidates, [
+    { restId: '101', username: 'alice' },
+    { restId: '202', username: 'bob' }
+  ]);
+  assert.equal(messages[1].message.delayMs, 1100);
+  assert.equal(typeof messages[1].message.runId, 'string');
+  assert.equal(messages[1].message.type, FOLLOWERS_BLOCK_MESSAGE_TYPE);
+});
+
+test('init renders fatal popup text when the initial popup load rejects', async () => {
+  const { documentRef } = createPopupDocument();
+  const blocklist = {
+    ...sharedBlocklist,
+    async getStoredBatchBlockDelayMs() {
+      return 1000;
+    },
+    async getStoredPageBlockButtonStyle() {
+      return sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.icon;
+    },
+    async getStoredUsernames() {
+      throw new Error('storage exploded');
+    }
+  };
+
+  init(documentRef, { runtime: {}, tabs: {} }, blocklist, sharedFollowers);
+  await flushAsyncWork();
+
+  assert.equal(documentRef.body.textContent.includes('storage exploded'), true);
+  assert.equal(documentRef.body.textContent.includes('Easy TweetBlock popup failed to load.'), true);
 });

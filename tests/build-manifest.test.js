@@ -24,6 +24,7 @@ test("buildManifest merges the Chrome overlay into the base manifest", () => {
   assert.equal(manifest.name, "Easy TweetBlock");
   assert.equal(manifest.background.service_worker, "src/background/background-chrome.js");
   assert.deepEqual(manifest.host_permissions, [
+    "https://abs.twimg.com/*",
     "https://x.com/*",
     "https://twitter.com/*"
   ]);

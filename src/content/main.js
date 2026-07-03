@@ -1,6 +1,27 @@
 (() => {
+  const CONTENT_LOG_PREFIX = '[Easy TweetBlock][content]';
+
+  function logContentInfo(message, details) {
+    if (details === undefined) {
+      console.info(CONTENT_LOG_PREFIX, message);
+      return;
+    }
+
+    console.info(CONTENT_LOG_PREFIX, message, details);
+  }
+
+  function logContentError(message, error) {
+    if (error === undefined) {
+      console.error(CONTENT_LOG_PREFIX, message);
+      return;
+    }
+
+    console.error(CONTENT_LOG_PREFIX, message, error);
+  }
+
   if (typeof module !== 'undefined' && module.exports) {
     require('./shared.js');
+    require('./x-client-transaction.js');
     require('./api.js');
     require('./dom.js');
   }
@@ -115,7 +136,7 @@
         await action();
         namespace.setButtonState(button, 'success', screenName, kind);
       } catch (error) {
-        console.warn(`Easy TweetBlock failed to complete ${kind} block flow.`, error);
+        logContentError(`Failed to complete ${kind} block flow.`, error);
         namespace.setButtonState(button, 'error', screenName, kind);
       }
     });
@@ -197,37 +218,116 @@
     };
   }
 
+  function sendRuntimeProgressMessage(runtimeApi, message) {
+    if (!runtimeApi?.sendMessage) {
+      return;
+    }
+
+    try {
+      const maybePromise = runtimeApi.sendMessage(message);
+
+      if (maybePromise && typeof maybePromise.catch === 'function') {
+        maybePromise.catch(() => {});
+      }
+    } catch {
+      // Popup may be closed; progress messages are best-effort UI updates.
+    }
+  }
+
   function registerRuntimeMessageListener(globalRef = globalThis) {
-    const extensionApi = globalRef.browser || globalRef.chrome;
+    const extensionApi = namespace.getExtensionApi(globalRef);
     const runtimeApi = extensionApi?.runtime;
 
     if (!runtimeApi?.onMessage?.addListener || globalRef.__easyTweetBlockRuntimeListenerAttached__) {
+      if (!runtimeApi?.onMessage?.addListener) {
+        logContentError('Runtime message listener was not attached because extension API is unavailable in this context.', {
+          hasBrowserGlobal: typeof browser !== 'undefined',
+          hasChromeGlobal: typeof chrome !== 'undefined',
+          hasGlobalRefBrowser: Boolean(globalRef?.browser),
+          hasGlobalRefChrome: Boolean(globalRef?.chrome)
+        });
+      }
+
       return;
     }
 
     runtimeApi.onMessage.addListener((message, _sender, sendResponse) => {
-      if (message?.type !== MESSAGE_TYPES.blockUsernamesViaApi) {
-        return false;
+      if (message?.type === MESSAGE_TYPES.blockUsernamesViaApi) {
+        logContentInfo('Received runtime request: block usernames via API.', message);
+        void namespace.blockUsernamesViaApi(message.usernames, {
+          delayMs: message.delayMs,
+          documentRef: globalRef.document
+        })
+          .then((results) => {
+            sendResponse({
+              ok: true,
+              results
+            });
+          })
+          .catch((error) => {
+            logContentError('Runtime username block request failed.', error);
+            sendResponse({
+              error: error instanceof Error ? error.message : String(error),
+              ok: false
+            });
+          });
+
+        return true;
       }
 
-      void namespace.blockUsernamesViaApi(message.usernames, {
-        delayMs: message.delayMs,
-        documentRef: globalRef.document
-      })
-        .then((results) => {
-          sendResponse({
-            ok: true,
-            results
-          });
+      if (message?.type === MESSAGE_TYPES.scanFollowersForBlock) {
+        logContentInfo('Received runtime request: scan followers for block.', message);
+        void namespace.scanFollowersForBlocking(message.options, {
+          documentRef: globalRef.document
         })
-        .catch((error) => {
-          sendResponse({
-            error: error instanceof Error ? error.message : String(error),
-            ok: false
+          .then((preview) => {
+            sendResponse({
+              ok: true,
+              preview
+            });
+          })
+          .catch((error) => {
+            logContentError('Runtime followers preview scan failed.', error);
+            sendResponse({
+              error: error instanceof Error ? error.message : String(error),
+              ok: false
+            });
           });
-        });
 
-      return true;
+        return true;
+      }
+
+      if (message?.type === MESSAGE_TYPES.blockFollowerCandidatesViaApi) {
+        logContentInfo('Received runtime request: block follower candidates via API.', message);
+        void namespace.blockFollowerCandidatesViaApi(message.candidates, {
+          delayMs: message.delayMs,
+          documentRef: globalRef.document,
+          onProgress(progress) {
+            sendRuntimeProgressMessage(runtimeApi, {
+              progress,
+              runId: message.runId || null,
+              type: MESSAGE_TYPES.followerBlockProgress
+            });
+          }
+        })
+          .then((results) => {
+            sendResponse({
+              ok: true,
+              results
+            });
+          })
+          .catch((error) => {
+            logContentError('Runtime follower candidate block request failed.', error);
+            sendResponse({
+              error: error instanceof Error ? error.message : String(error),
+              ok: false
+            });
+          });
+
+        return true;
+      }
+
+      return false;
     });
 
     globalRef.__easyTweetBlockRuntimeListenerAttached__ = true;
@@ -308,11 +408,21 @@
       WAIT_TIMEOUT_MS,
       attachButtonToProfilePage: namespace.attachButtonToProfilePage,
       attachButtonToTweet,
+      FOLLOWERS_PAGE_SIZE: namespace.FOLLOWERS_PAGE_SIZE,
+      FOLLOWERS_QUERY_IDS: namespace.FOLLOWERS_QUERY_IDS,
+      blockFollowerCandidatesViaApi: namespace.blockFollowerCandidatesViaApi,
+      blockUserByRestIdViaApi: namespace.blockUserByRestIdViaApi,
       blockUserByScreenNameViaApi: namespace.blockUserByScreenNameViaApi,
       blockUsernamesViaApi: namespace.blockUsernamesViaApi,
+      buildFollowersLookupUrls: namespace.buildFollowersLookupUrls,
       buildUserLookupUrls: namespace.buildUserLookupUrls,
       buildXApiHeaders: namespace.buildXApiHeaders,
       collectTweets,
+      createFollowerBlockCandidates: namespace.createFollowerBlockCandidates,
+      discoverGraphqlQueryIds: namespace.discoverGraphqlQueryIds,
+      extractGraphqlQueryIdsFromScriptText: namespace.extractGraphqlQueryIdsFromScriptText,
+      extractXClientTransactionIndicesFromScriptText: namespace.extractXClientTransactionIndicesFromScriptText,
+      extractXClientTransactionKeyFromDocument: namespace.extractXClientTransactionKeyFromDocument,
       createApiBlockButton,
       createUsernameSet: namespace.createUsernameSet,
       createNativeBlockButton,
@@ -321,6 +431,7 @@
       findActionRowContainer,
       findProfileActionBar: namespace.findProfileActionBar,
       findPrimaryActionWrapper,
+      generateXClientTransactionId: namespace.generateXClientTransactionId,
       getExtensionApi: namespace.getExtensionApi,
       getElementChildren,
       getClientLanguage: namespace.getClientLanguage,
@@ -328,27 +439,33 @@
       getButtonTitle: namespace.getButtonTitle,
       getCsrfToken: namespace.getCsrfToken,
       getStoredPageButtonStyle: namespace.getStoredPageButtonStyle,
+      fetchFollowersPage: namespace.fetchFollowersPage,
       init,
       lookupUserRestId: namespace.lookupUserRestId,
       normalizeBatchBlockDelayMs: namespace.normalizeBatchBlockDelayMs,
+      normalizeFollowerBlockCandidate: namespace.normalizeFollowerBlockCandidate,
       normalizePageButtonStyle: namespace.normalizePageButtonStyle,
       normalizeUsernameForMatching: namespace.normalizeUsernameForMatching,
       observeStoredPageButtonStyle,
+      parseFollowersPage: namespace.parseFollowersPage,
       parseUserLookupRestId: namespace.parseUserLookupRestId,
       readCookieValue: namespace.readCookieValue,
       readScreenNameFromProfilePage: namespace.readScreenNameFromProfilePage,
       readScreenNameFromTweet: namespace.readScreenNameFromTweet,
+      resolveOnDemandFileUrlFromRuntime: namespace.resolveOnDemandFileUrlFromRuntime,
       registerRuntimeMessageListener,
       runImmediateBlockInPageContext: namespace.runImmediateBlockInPageContext,
       runApiBlockFlow: namespace.runApiBlockFlow,
       runProfileNativeBlockFlow,
       runNativeBlockFlow,
+      scanFollowersForBlocking: namespace.scanFollowersForBlocking,
       applyCurrentNativeButtonStyleToDocument,
       setCurrentNativeButtonStyle: namespace.setCurrentNativeButtonStyle,
       setButtonState: namespace.setButtonState,
       sleep: namespace.sleep,
       subtreeContainsButton,
       syncStoredPageButtonStyle,
+      tryGenerateXClientTransactionId: namespace.tryGenerateXClientTransactionId,
       waitForElement
     };
   }
