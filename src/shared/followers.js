@@ -31,20 +31,19 @@
     );
   }
 
-  function normalizeFollowersScanLimit(value, minimum = MIN_FOLLOWERS_SCAN_LIMIT) {
-    const normalizedMinimum = clampRoundedNumber(
-      minimum,
-      MIN_FOLLOWERS_SCAN_LIMIT,
-      MIN_FOLLOWERS_SCAN_LIMIT,
-      MAX_FOLLOWERS_SCAN_LIMIT
-    );
-
+  function normalizeFollowersScanLimit(value) {
     return clampRoundedNumber(
       value,
-      Math.max(DEFAULT_FOLLOWERS_SCAN_LIMIT, normalizedMinimum),
-      normalizedMinimum,
+      DEFAULT_FOLLOWERS_SCAN_LIMIT,
+      MIN_FOLLOWERS_SCAN_LIMIT,
       MAX_FOLLOWERS_SCAN_LIMIT
     );
+  }
+
+  function sleep(delayMs, setTimeoutImpl = globalThis.setTimeout) {
+    return new Promise((resolve) => {
+      setTimeoutImpl(resolve, delayMs);
+    });
   }
 
   function normalizeFollowersSource(value) {
@@ -52,17 +51,17 @@
   }
 
   const followersApi = {
+    clampRoundedNumber,
     DEFAULT_FOLLOWERS_SOURCE,
     DEFAULT_FOLLOWERS_BLOCK_LIMIT,
     DEFAULT_FOLLOWERS_SCAN_LIMIT,
     FOLLOWERS_SOURCES,
     MAX_FOLLOWERS_BLOCK_LIMIT,
     MAX_FOLLOWERS_SCAN_LIMIT,
-    MIN_FOLLOWERS_BLOCK_LIMIT,
-    MIN_FOLLOWERS_SCAN_LIMIT,
     normalizeFollowersBlockLimit,
     normalizeFollowersScanLimit,
-    normalizeFollowersSource
+    normalizeFollowersSource,
+    sleep
   };
 
   globalThis.EasyTweetBlockFollowers = followersApi;

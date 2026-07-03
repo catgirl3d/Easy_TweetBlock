@@ -1,22 +1,8 @@
 (() => {
   const CONTENT_API_LOG_PREFIX = '[Easy TweetBlock][content-api]';
 
-  function logContentApiInfo(message, details) {
-    if (details === undefined) {
-      console.info(CONTENT_API_LOG_PREFIX, message);
-      return;
-    }
-
-    console.info(CONTENT_API_LOG_PREFIX, message, details);
-  }
-
-  function logContentApiError(message, error) {
-    if (error === undefined) {
-      console.error(CONTENT_API_LOG_PREFIX, message);
-      return;
-    }
-
-    console.error(CONTENT_API_LOG_PREFIX, message, error);
+  if (typeof module !== 'undefined' && module.exports) {
+    require('./shared.js');
   }
 
   const followersApi = globalThis.EasyTweetBlockFollowers
@@ -27,7 +13,10 @@
   }
 
   const namespace = globalThis.EasyTweetBlockContent || (globalThis.EasyTweetBlockContent = {});
+  const logContentApiInfo = namespace.makePrefixedLogger(CONTENT_API_LOG_PREFIX, 'info');
+  const logContentApiError = namespace.makePrefixedLogger(CONTENT_API_LOG_PREFIX, 'error');
   const {
+    clampRoundedNumber,
     DEFAULT_FOLLOWERS_SOURCE,
     FOLLOWERS_SOURCES,
     DEFAULT_FOLLOWERS_BLOCK_LIMIT,
@@ -62,9 +51,11 @@
     subscriptions_verification_info_is_identity_verified_enabled: true,
     subscriptions_verification_info_verified_since_enabled: true
   });
+  const USER_BY_SCREEN_NAME_FEATURES_PARAM = JSON.stringify(USER_BY_SCREEN_NAME_FEATURES);
   const USER_BY_SCREEN_NAME_FIELD_TOGGLES = Object.freeze({
     withAuxiliaryUserLabels: true
   });
+  const USER_BY_SCREEN_NAME_FIELD_TOGGLES_PARAM = JSON.stringify(USER_BY_SCREEN_NAME_FIELD_TOGGLES);
   const FOLLOWERS_QUERY_IDS = Object.freeze([
     '4yeuNabfz3qFlfncCAy8Yw',
     '_wt2xR9Ozi8ZI7agzWf_bw'
@@ -123,6 +114,7 @@
     responsive_web_grok_community_note_auto_translation_is_enabled: true,
     responsive_web_enhance_cards_enabled: false
   });
+  const FOLLOWERS_FEATURES_PARAM = JSON.stringify(FOLLOWERS_FEATURES);
   const FOLLOWERS_PAGE_SIZE = 20;
   const GRAPHQL_DISCOVERY_CACHE_TTL_MS = 5 * 60 * 1000;
   const GRAPHQL_DISCOVERY_OPERATION_WINDOW_SIZE = 700;
@@ -447,20 +439,55 @@
     };
   }
 
+  async function buildSignedXApiHeaders(method, path, options = {}) {
+    const {
+      documentRef = document,
+      extraHeaders = {},
+      fetchImpl = globalThis.fetch,
+      baseOrigin = documentRef?.location?.origin || 'https://x.com',
+      signal = null
+    } = options;
+    const requestHeaders = buildXApiHeaders(documentRef, extraHeaders);
+
+    if (typeof namespace.tryGenerateXClientTransactionId !== 'function') {
+      signal?.throwIfAborted?.();
+      return requestHeaders;
+    }
+
+    signal?.throwIfAborted?.();
+
+    const transactionId = await namespace.tryGenerateXClientTransactionId(method, path, {
+      baseOrigin,
+      documentRef,
+      fetchImpl,
+      signal
+    });
+
+    signal?.throwIfAborted?.();
+
+    if (transactionId) {
+      requestHeaders['x-client-transaction-id'] = transactionId;
+    }
+
+    return requestHeaders;
+  }
+
   function buildUserLookupUrls(screenName, baseOrigin = 'https://x.com', queryIds = USER_BY_SCREEN_NAME_QUERY_IDS) {
     if (!screenName) {
       return [];
     }
 
+    const variablesParam = JSON.stringify({
+      screen_name: screenName,
+      withGrokTranslatedBio: false
+    });
+
     return queryIds.map((queryId) => {
       const lookupUrl = new URL(`/i/api/graphql/${queryId}/UserByScreenName`, baseOrigin);
 
-      lookupUrl.searchParams.set('variables', JSON.stringify({
-        screen_name: screenName,
-        withGrokTranslatedBio: false
-      }));
-      lookupUrl.searchParams.set('features', JSON.stringify(USER_BY_SCREEN_NAME_FEATURES));
-      lookupUrl.searchParams.set('fieldToggles', JSON.stringify(USER_BY_SCREEN_NAME_FIELD_TOGGLES));
+      lookupUrl.searchParams.set('variables', variablesParam);
+      lookupUrl.searchParams.set('features', USER_BY_SCREEN_NAME_FEATURES_PARAM);
+      lookupUrl.searchParams.set('fieldToggles', USER_BY_SCREEN_NAME_FIELD_TOGGLES_PARAM);
 
       return lookupUrl.toString();
     });
@@ -582,6 +609,36 @@
     };
   }
 
+  function formatResponseBodySnippet(responseText) {
+    const normalizedText = String(responseText || '').replace(/\s+/g, ' ').trim();
+    return normalizedText ? normalizedText.slice(0, 200) : 'empty response body';
+  }
+
+  async function readJsonResponse(response, contextLabel) {
+    const responseStatus = response?.status || 'unknown';
+
+    if (typeof response?.text === 'function') {
+      const responseText = await response.text();
+
+      try {
+        return JSON.parse(responseText);
+      } catch {
+        const contentType = response?.headers?.get?.('content-type') || 'unknown';
+        throw new Error(`${contextLabel} returned invalid JSON (status ${responseStatus}, content-type ${contentType}): ${formatResponseBodySnippet(responseText)}`);
+      }
+    }
+
+    if (typeof response?.json === 'function') {
+      try {
+        return await response.json();
+      } catch (error) {
+        throw new Error(`${contextLabel} returned invalid JSON (status ${responseStatus}): ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    throw new Error(`${contextLabel} did not expose a readable response body.`);
+  }
+
   function buildFollowersLookupUrls(userId, options = {}) {
     const normalizedUserId = normalizeRestId(userId);
 
@@ -599,7 +656,7 @@
     const queryIds = options.queryIds || sourceConfig.queryIds;
     const variables = {
       userId: normalizedUserId,
-      count: Math.min(FOLLOWERS_PAGE_SIZE, Math.max(1, Math.round(Number(count) || FOLLOWERS_PAGE_SIZE))),
+      count: clampRoundedNumber(count, FOLLOWERS_PAGE_SIZE, 1, FOLLOWERS_PAGE_SIZE),
       includePromotedContent: false,
       withGrokTranslatedBio: true
     };
@@ -608,11 +665,13 @@
       variables.cursor = cursor;
     }
 
+    const variablesParam = JSON.stringify(variables);
+
     return normalizeGraphqlQueryIds(queryIds).map((queryId) => {
       const lookupUrl = new URL(`/i/api/graphql/${queryId}/${sourceConfig.operationName}`, baseOrigin);
 
-      lookupUrl.searchParams.set('variables', JSON.stringify(variables));
-      lookupUrl.searchParams.set('features', JSON.stringify(FOLLOWERS_FEATURES));
+      lookupUrl.searchParams.set('variables', variablesParam);
+      lookupUrl.searchParams.set('features', FOLLOWERS_FEATURES_PARAM);
 
       return lookupUrl.toString();
     });
@@ -636,9 +695,6 @@
     } = options;
     const sourceConfig = getFollowTimelineSourceConfig(source);
     const queryIds = options.queryIds || sourceConfig.queryIds;
-    const lookupHeaders = buildXApiHeaders(documentRef, {
-      'content-type': 'application/json'
-    });
     const primaryQueryIds = normalizeGraphqlQueryIds(queryIds);
     let lastError = null;
 
@@ -669,21 +725,15 @@
       for (const lookupUrl of lookupUrls) {
         try {
           signal?.throwIfAborted?.();
-          const requestHeaders = { ...lookupHeaders };
-          const transactionId = typeof namespace.tryGenerateXClientTransactionId === 'function'
-            ? await namespace.tryGenerateXClientTransactionId('GET', new URL(lookupUrl).pathname, {
-              baseOrigin,
-              documentRef,
-              fetchImpl,
-              signal
-            })
-            : null;
-
-          signal?.throwIfAborted?.();
-
-          if (transactionId) {
-            requestHeaders['x-client-transaction-id'] = transactionId;
-          }
+          const requestHeaders = await buildSignedXApiHeaders('GET', new URL(lookupUrl).pathname, {
+            baseOrigin,
+            documentRef,
+            extraHeaders: {
+              'content-type': 'application/json'
+            },
+            fetchImpl,
+            signal
+          });
 
           const response = await fetchImpl(lookupUrl, {
             method: 'GET',
@@ -703,7 +753,7 @@
             continue;
           }
 
-          const page = parseFollowersPage(await response.json());
+          const page = parseFollowersPage(await readJsonResponse(response, `${sourceConfig.operationName} response from ${lookupUrl}`));
 
           logContentApiInfo(`${sourceConfig.operationName} page fetched successfully.`, {
             hasNext: page.hasNext,
@@ -785,14 +835,26 @@
     };
   }
 
-  function getFollowerBlockCandidateKey(candidate) {
+  function getCandidateIdentityKeys(candidate) {
     if (!candidate) {
-      return null;
+      return [];
     }
 
-    return candidate.restId
-      ? `id:${candidate.restId}`
-      : `username:${candidate.username}`;
+    const identityKeys = [];
+
+    if (candidate.restId) {
+      identityKeys.push(`id:${candidate.restId}`);
+    }
+
+    if (candidate.username) {
+      identityKeys.push(`username:${candidate.username}`);
+    }
+
+    return identityKeys;
+  }
+
+  function getFollowerBlockCandidateKey(candidate) {
+    return getCandidateIdentityKeys(candidate)[0] || null;
   }
 
   function createFollowerBlockCandidates(candidates) {
@@ -810,13 +872,16 @@
         continue;
       }
 
-      const candidateKey = getFollowerBlockCandidateKey(normalizedCandidate);
+      const identityKeys = getCandidateIdentityKeys(normalizedCandidate);
 
-      if (seenKeys.has(candidateKey)) {
+      if (identityKeys.some((identityKey) => seenKeys.has(identityKey))) {
         continue;
       }
 
-      seenKeys.add(candidateKey);
+      for (const identityKey of identityKeys) {
+        seenKeys.add(identityKey);
+      }
+
       normalizedCandidates.push(normalizedCandidate);
     }
 
@@ -852,16 +917,21 @@
       queryIds: userLookupQueryIds
     });
     const candidates = [];
+    // X can yield one cursor-only transit page before the next batch arrives.
+    // Two consecutive empty pages with hasNext=true usually mean the cursor is
+    // stuck or throttled, so stop before we loop forever on empty responses.
+    const MAX_CONSECUTIVE_EMPTY_PAGES = 2;
     const seenAlreadyBlockedKeys = new Set();
     const seenCandidateKeys = new Set();
     let alreadyBlockedCount = 0;
+    let consecutiveEmptyPageCount = 0;
     let cursor = typeof options.cursor === 'string' ? options.cursor : '';
-    let fetchedPageCount = 0;
+    let processedUserCount = 0;
     let hasMorePages = false;
     let stoppedByBlockLimit = false;
     let stoppedByScanLimit = false;
 
-    while (fetchedPageCount < scanLimit && candidates.length < blockLimit) {
+    while (processedUserCount < scanLimit && candidates.length < blockLimit) {
       signal?.throwIfAborted?.();
 
       const page = await fetchFollowersPage(targetRestId, {
@@ -875,22 +945,35 @@
         source: sourceConfig.source
       });
       const users = Array.isArray(page.users) ? page.users : [];
+      const isEmptyPage = users.length === 0;
 
-      if (!users.length && !page.hasNext) {
-        hasMorePages = false;
+      // Phase 1 — empty-page streak guard (pre-harvest).
+      // One empty page with a cursor is a valid transit page (X returns
+      // cursor-only pages before the next batch). 2+ empties in a row while
+      // hasNext stays true = stuck/throttled cursor → stop. Terminal empties
+      // (no hasNext) have no users to harvest and fall through to the
+      // continuation guard below.
+      consecutiveEmptyPageCount = isEmptyPage ? consecutiveEmptyPageCount + 1 : 0;
+
+      if (isEmptyPage && page.hasNext && consecutiveEmptyPageCount >= MAX_CONSECUTIVE_EMPTY_PAGES) {
+        logContentApiInfo('Stopped scanning followers: reached maximum consecutive empty pages limit.', {
+          consecutiveEmptyPageCount,
+          nextCursor: page.nextCursor
+        });
+        hasMorePages = page.hasNext;
         break;
       }
 
       for (const user of users) {
         signal?.throwIfAborted?.();
 
-        if (fetchedPageCount >= scanLimit) {
+        if (processedUserCount >= scanLimit) {
           stoppedByScanLimit = true;
           hasMorePages = true;
           break;
         }
 
-        fetchedPageCount += 1;
+        processedUserCount += 1;
 
         if (user.blocking) {
           const normalizedAlreadyBlockedUser = normalizeFollowerBlockCandidate(user);
@@ -934,7 +1017,11 @@
         break;
       }
 
-      if (!page.hasNext || !page.nextCursor || !users.length) {
+      // Phase 2 — continuation guard (post-harvest).
+      // Stop at end of stream (!hasNext) or when hasNext is set but no cursor
+      // is offered. Also covers terminal empty pages, so no separate guard
+      // is needed for them above.
+      if (!page.hasNext || !page.nextCursor) {
         hasMorePages = false;
         break;
       }
@@ -949,7 +1036,7 @@
       candidateCount: candidates.length,
       hasMorePages,
       scanLimit,
-      scannedCount: fetchedPageCount,
+      scannedCount: processedUserCount,
       source: sourceConfig.source,
       targetRestId,
       targetScreenName
@@ -962,7 +1049,8 @@
       hasMorePages,
       readyCount: candidates.length,
       scanLimit,
-      scannedCount: fetchedPageCount,
+      // Keep the public field name for popup/UI compatibility.
+      scannedCount: processedUserCount,
       source: sourceConfig.source,
       stoppedByBlockLimit,
       stoppedByScanLimit,
@@ -994,16 +1082,21 @@
       return cache.get(cacheKey);
     }
 
-    const lookupHeaders = buildXApiHeaders(documentRef);
     const lookupUrls = buildUserLookupUrls(normalizedScreenName, baseOrigin, queryIds);
     let lastError = null;
 
     for (const lookupUrl of lookupUrls) {
       try {
         signal?.throwIfAborted?.();
+        const requestHeaders = await buildSignedXApiHeaders('GET', new URL(lookupUrl).pathname, {
+          baseOrigin,
+          documentRef,
+          fetchImpl,
+          signal
+        });
         const response = await fetchImpl(lookupUrl, {
           method: 'GET',
-          headers: lookupHeaders,
+          headers: requestHeaders,
           credentials: 'include',
           mode: 'cors',
           signal
@@ -1014,7 +1107,7 @@
           continue;
         }
 
-        const payload = await response.json();
+        const payload = await readJsonResponse(response, `User lookup response from ${lookupUrl}`);
         const restId = parseUserLookupRestId(payload);
 
         if (restId) {
@@ -1061,11 +1154,20 @@
     } = options;
     signal?.throwIfAborted?.();
 
-    const blockResponse = await fetchImpl(new URL('/i/api/1.1/blocks/create.json', baseOrigin).toString(), {
-      method: 'POST',
-      headers: buildXApiHeaders(documentRef, {
+    const blockPath = '/i/api/1.1/blocks/create.json';
+    const requestHeaders = await buildSignedXApiHeaders('POST', blockPath, {
+      baseOrigin,
+      documentRef,
+      extraHeaders: {
         'content-type': 'application/x-www-form-urlencoded'
-      }),
+      },
+      fetchImpl,
+      signal
+    });
+
+    const blockResponse = await fetchImpl(new URL(blockPath, baseOrigin).toString(), {
+      method: 'POST',
+      headers: requestHeaders,
       body: new URLSearchParams({
         user_id: normalizedRestId
       }).toString(),

@@ -10,7 +10,8 @@ const {
   MAX_FOLLOWERS_SCAN_LIMIT,
   normalizeFollowersBlockLimit,
   normalizeFollowersScanLimit,
-  normalizeFollowersSource
+  normalizeFollowersSource,
+  sleep
 } = require('../src/shared/followers.js');
 
 test('normalizeFollowersBlockLimit clamps invalid and out-of-range values', () => {
@@ -20,15 +21,27 @@ test('normalizeFollowersBlockLimit clamps invalid and out-of-range values', () =
   assert.equal(normalizeFollowersBlockLimit(9999), MAX_FOLLOWERS_BLOCK_LIMIT);
 });
 
-test('normalizeFollowersScanLimit respects the block minimum and max scan ceiling', () => {
-  assert.equal(normalizeFollowersScanLimit(undefined, 50), DEFAULT_FOLLOWERS_SCAN_LIMIT);
-  assert.equal(normalizeFollowersScanLimit(10, 25), 25);
-  assert.equal(normalizeFollowersScanLimit(73.6, 25), 74);
-  assert.equal(normalizeFollowersScanLimit(9999, 25), MAX_FOLLOWERS_SCAN_LIMIT);
+test('normalizeFollowersScanLimit clamps invalid and out-of-range values', () => {
+  assert.equal(normalizeFollowersScanLimit(undefined), DEFAULT_FOLLOWERS_SCAN_LIMIT);
+  assert.equal(normalizeFollowersScanLimit(0), 1);
+  assert.equal(normalizeFollowersScanLimit(73.6), 74);
+  assert.equal(normalizeFollowersScanLimit(9999), MAX_FOLLOWERS_SCAN_LIMIT);
 });
 
 test('normalizeFollowersSource accepts followers and following only', () => {
   assert.equal(normalizeFollowersSource(FOLLOWERS_SOURCES.followers), FOLLOWERS_SOURCES.followers);
   assert.equal(normalizeFollowersSource(FOLLOWERS_SOURCES.following), FOLLOWERS_SOURCES.following);
   assert.equal(normalizeFollowersSource('unknown'), DEFAULT_FOLLOWERS_SOURCE);
+});
+
+test('sleep delegates to the provided setTimeout implementation', async () => {
+  let observedDelay = null;
+
+  await sleep(25, (callback, delayMs) => {
+    observedDelay = delayMs;
+    callback();
+    return 0;
+  });
+
+  assert.equal(observedDelay, 25);
 });

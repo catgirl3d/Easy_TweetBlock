@@ -1,4 +1,8 @@
 (() => {
+  if (typeof module !== 'undefined' && module.exports) {
+    require('./shared.js');
+  }
+
   const namespace = globalThis.EasyTweetBlockContent || (globalThis.EasyTweetBlockContent = {});
   const TRANSACTION_LOG_PREFIX = '[Easy TweetBlock][transaction]';
   const ON_DEMAND_CHUNK_NAME = 'ondemand.s';
@@ -9,23 +13,8 @@
   const INDICES_REGEX = /\(\w\[(\d{1,2})\],\s*16\)/g;
   const ON_DEMAND_FILE_HASH_REGEX = /(\d+):\s*["']ondemand\.s["'][\s\S]*?\}\)\[e\]\s*\|\|\s*e\)\s*\+\s*["']\.["']\s*\+\s*\(\{[\s\S]*?\b\1:\s*["']([a-zA-Z0-9_-]+)["']/s;
 
-  function logTransactionInfo(message, details) {
-    if (details === undefined) {
-      console.info(TRANSACTION_LOG_PREFIX, message);
-      return;
-    }
-
-    console.info(TRANSACTION_LOG_PREFIX, message, details);
-  }
-
-  function logTransactionError(message, error) {
-    if (error === undefined) {
-      console.error(TRANSACTION_LOG_PREFIX, message);
-      return;
-    }
-
-    console.error(TRANSACTION_LOG_PREFIX, message, error);
-  }
+  const logTransactionInfo = namespace.makePrefixedLogger(TRANSACTION_LOG_PREFIX, 'info');
+  const logTransactionError = namespace.makePrefixedLogger(TRANSACTION_LOG_PREFIX, 'error');
 
   class Cubic {
     constructor(curves) {
@@ -435,7 +424,7 @@
     };
 
     cache.set(baseOrigin, {
-      createdAt: now,
+      createdAt: Date.now(),
       state
     });
     logTransactionInfo('Initialized X client transaction id generator.', {
@@ -500,7 +489,6 @@
   Object.assign(namespace, {
     extractXClientTransactionIndicesFromScriptText,
     extractXClientTransactionKeyFromDocument,
-    generateXClientTransactionId,
     resolveOnDemandFileUrlFromRuntime,
     tryGenerateXClientTransactionId
   });
@@ -509,7 +497,6 @@
     module.exports = {
       extractXClientTransactionIndicesFromScriptText,
       extractXClientTransactionKeyFromDocument,
-      generateXClientTransactionId,
       resolveOnDemandFileUrlFromRuntime,
       tryGenerateXClientTransactionId
     };

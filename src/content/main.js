@@ -600,7 +600,6 @@
       findActionRowContainer,
       findProfileActionBar: namespace.findProfileActionBar,
       findPrimaryActionWrapper,
-      generateXClientTransactionId: namespace.generateXClientTransactionId,
       getExtensionApi: namespace.getExtensionApi,
       getElementChildren,
       getClientLanguage: namespace.getClientLanguage,

@@ -58,6 +58,23 @@
 
   namespace.contentState = contentState;
 
+  function makePrefixedLogger(prefix, methodName) {
+    return function logWithPrefix(message, details) {
+      const logger = console?.[methodName];
+
+      if (typeof logger !== 'function') {
+        return;
+      }
+
+      if (details === undefined) {
+        logger(prefix, message);
+        return;
+      }
+
+      logger(prefix, message, details);
+    };
+  }
+
   function extractScreenNameFromHref(href, baseUrl = 'https://x.com') {
     if (typeof href !== 'string' || !href.trim()) {
       return null;
@@ -241,10 +258,19 @@
     return normalizePageButtonStyle(storedValues?.[PAGE_BLOCK_BUTTON_STYLE_STORAGE_KEY]);
   }
 
+  function getFollowersSharedApi() {
+    return globalThis.EasyTweetBlockFollowers
+      || (typeof module !== 'undefined' && module.exports ? require('../shared/followers.js') : null);
+  }
+
   function sleep(delayMs, setTimeoutImpl = globalThis.setTimeout) {
-    return new Promise((resolve) => {
-      setTimeoutImpl(resolve, delayMs);
-    });
+    const sharedSleep = getFollowersSharedApi()?.sleep;
+
+    if (typeof sharedSleep !== 'function' || sharedSleep === sleep) {
+      throw new Error('Missing Easy TweetBlock followers shared sleep helper.');
+    }
+
+    return sharedSleep(delayMs, setTimeoutImpl);
   }
 
   function createAbortError(reason) {
@@ -397,6 +423,7 @@
     getCsrfToken,
     getCurrentNativeButtonStyle,
     getExtensionApi,
+    makePrefixedLogger,
     getStoredPageButtonStyle,
     getUserRestIdCache,
     isAbortError,

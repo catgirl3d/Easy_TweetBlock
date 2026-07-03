@@ -1,9 +1,9 @@
 (() => {
   const PAGE_LOG_PREFIX = '[Easy TweetBlock][page]';
-  const POPUP_DEBUG_STORAGE_KEY = 'easyTweetBlockPopupDebugLog';
   const POPUP_STATE_STORAGE_KEY = 'easyTweetBlockPopupState';
   const POPUP_LOG_PREFIX = '[Easy TweetBlock][popup]';
   const MAX_POPUP_DEBUG_ENTRIES = 120;
+  const popupDebugEntriesCache = new Map();
 
   function safeSerializePopupDetails(details) {
     if (details === undefined) {
@@ -35,27 +35,43 @@
     }
   }
 
-  function loadStoredPopupDebugEntries(storageRef = globalThis.localStorage) {
-    try {
-      const rawValue = storageRef?.getItem?.(POPUP_DEBUG_STORAGE_KEY);
+  function getPopupDebugCacheKey(storageRef = globalThis.localStorage) {
+    return storageRef && (typeof storageRef === 'object' || typeof storageRef === 'function')
+      ? storageRef
+      : globalThis;
+  }
 
-      if (!rawValue) {
-        return [];
-      }
+  function normalizePopupDebugEntries(entries) {
+    return Array.isArray(entries)
+      ? entries.filter((entry) => typeof entry === 'string').slice(-MAX_POPUP_DEBUG_ENTRIES)
+      : [];
+  }
 
-      const parsedValue = JSON.parse(rawValue);
-      return Array.isArray(parsedValue) ? parsedValue.filter((entry) => typeof entry === 'string') : [];
-    } catch {
-      return [];
+  function setCachedPopupDebugEntries(entries, storageRef = globalThis.localStorage) {
+    const normalizedEntries = normalizePopupDebugEntries(entries);
+    const cacheKey = getPopupDebugCacheKey(storageRef);
+
+    popupDebugEntriesCache.set(cacheKey, normalizedEntries);
+    globalThis.__easyTweetBlockPopupDebugEntries__ = normalizedEntries;
+    return normalizedEntries;
+  }
+
+  function getMutablePopupDebugEntries(storageRef = globalThis.localStorage) {
+    const cacheKey = getPopupDebugCacheKey(storageRef);
+
+    if (popupDebugEntriesCache.has(cacheKey)) {
+      return popupDebugEntriesCache.get(cacheKey);
     }
+
+    return setCachedPopupDebugEntries([], storageRef);
+  }
+
+  function loadStoredPopupDebugEntries(storageRef = globalThis.localStorage) {
+    return [...getMutablePopupDebugEntries(storageRef)];
   }
 
   function saveStoredPopupDebugEntries(entries, storageRef = globalThis.localStorage) {
-    try {
-      storageRef?.setItem?.(POPUP_DEBUG_STORAGE_KEY, JSON.stringify(entries.slice(-MAX_POPUP_DEBUG_ENTRIES)));
-    } catch {
-      // Ignore storage write failures during debug logging.
-    }
+    setCachedPopupDebugEntries(entries, storageRef);
   }
 
   function appendPopupDebugEntry(level, message, details, storageRef = globalThis.localStorage) {
@@ -64,22 +80,20 @@
     const composedEntry = detailsText
       ? `${timestamp} ${level} ${message}\n${detailsText}`
       : `${timestamp} ${level} ${message}`;
-    const entries = loadStoredPopupDebugEntries(storageRef);
+    const entries = getMutablePopupDebugEntries(storageRef);
 
     entries.push(composedEntry);
-    saveStoredPopupDebugEntries(entries, storageRef);
+
+    if (entries.length > MAX_POPUP_DEBUG_ENTRIES) {
+      entries.splice(0, entries.length - MAX_POPUP_DEBUG_ENTRIES);
+    }
+
     globalThis.__easyTweetBlockPopupDebugEntries__ = entries;
     return composedEntry;
   }
 
   function clearStoredPopupDebugEntries(storageRef = globalThis.localStorage) {
-    try {
-      storageRef?.removeItem?.(POPUP_DEBUG_STORAGE_KEY);
-    } catch {
-      // Ignore storage cleanup failures during debug logging.
-    }
-
-    globalThis.__easyTweetBlockPopupDebugEntries__ = [];
+    setCachedPopupDebugEntries([], storageRef);
   }
 
   function renderPopupDebugLog(debugElement, storageRef = globalThis.localStorage) {
@@ -188,6 +202,8 @@
     renderFatalPopupError(new Error('Missing Easy TweetBlock followers shared API.'));
     return;
   }
+
+  const sleep = followersApi.sleep;
 
   const IMMEDIATE_BLOCK_MESSAGE_TYPE = 'easy-tweetblock:block-usernames-via-api';
   const FOLLOWERS_BLOCK_MESSAGE_TYPE = 'easy-tweetblock:block-follower-candidates-via-api';
@@ -385,12 +401,6 @@
 
         resolve(result || []);
       });
-    });
-  }
-
-  function sleep(ms) {
-    return new Promise((resolve) => {
-      globalThis.setTimeout(resolve, ms);
     });
   }
 
@@ -681,23 +691,45 @@
     try {
       const results = await executeTabFunction(
         tabId,
-        async (requestedCandidates, requestedDelayMs, requestedRunId) => {
+        async (requestedCandidates, requestedDelayMs, requestedRunId, progressMessageType) => {
           if (typeof globalThis.EasyTweetBlockContent?.blockFollowerCandidatesViaApi !== 'function') {
             throw new Error('Easy TweetBlock follower block runner is not available in this tab.');
           }
 
           const followerRun = globalThis.EasyTweetBlockContent.startFollowerRun?.(requestedRunId) || {};
+          const extensionRuntime = globalThis.browser?.runtime || globalThis.chrome?.runtime || null;
+
+          function reportProgress(progress) {
+            if (!extensionRuntime?.sendMessage || !progressMessageType) {
+              return;
+            }
+
+            try {
+              const maybePromise = extensionRuntime.sendMessage({
+                progress,
+                runId: requestedRunId || null,
+                type: progressMessageType
+              });
+
+              if (maybePromise && typeof maybePromise.catch === 'function') {
+                maybePromise.catch(() => {});
+              }
+            } catch {
+              // Popup progress updates are best-effort during direct execution fallback.
+            }
+          }
 
           try {
             return await globalThis.EasyTweetBlockContent.blockFollowerCandidatesViaApi(requestedCandidates, {
               delayMs: requestedDelayMs,
+              onProgress: reportProgress,
               signal: followerRun.signal || null
             });
           } finally {
             globalThis.EasyTweetBlockContent.finishFollowerRun?.(followerRun.runId, followerRun.controller);
           }
         },
-        [candidates, delayMs, runId],
+        [candidates, delayMs, runId, FOLLOWERS_BLOCK_PROGRESS_MESSAGE_TYPE],
         extensionApi
       );
       const firstResult = Array.isArray(results) ? results[0] : null;

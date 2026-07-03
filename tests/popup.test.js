@@ -12,6 +12,7 @@ const {
   FOLLOWERS_RUN_PORT_PREFIX,
   FOLLOWERS_SCAN_MESSAGE_TYPE,
   POPUP_VIEWS,
+  appendPopupDebugEntry,
   clearStoredPopupState,
   ensureContentScriptsInTab,
   executeTabFunction,
@@ -24,6 +25,8 @@ const {
   isSupportedTabUrl,
   logPopupError,
   logPopupInfo,
+  clearStoredPopupDebugEntries,
+  loadStoredPopupDebugEntries,
   loadStoredPopupState,
   normalizePopupView,
   queryTabs,
@@ -33,6 +36,7 @@ const {
   requestFollowersPreview,
   requestImmediateBlock,
   requestMessageWithContentScript,
+  saveStoredPopupDebugEntries,
   sendTabMessage,
   setPopupView,
   saveStoredPopupState
@@ -187,6 +191,67 @@ test('stored popup state helpers round-trip through localStorage', () => {
   assert.deepEqual(loadStoredPopupState(storage), state);
   clearStoredPopupState(storage);
   assert.deepEqual(loadStoredPopupState(storage), {});
+});
+
+test('appendPopupDebugEntry keeps popup debug log in memory and does not touch storage', () => {
+  let getItemCalls = 0;
+  let setItemCalls = 0;
+  let removeItemCalls = 0;
+  let storedValue = null;
+  const storage = {
+    getItem() {
+      getItemCalls += 1;
+      return storedValue;
+    },
+    removeItem() {
+      removeItemCalls += 1;
+      storedValue = null;
+    },
+    setItem(_key, value) {
+      setItemCalls += 1;
+      storedValue = value;
+    }
+  };
+
+  appendPopupDebugEntry('INFO', 'first event', null, storage);
+  appendPopupDebugEntry('INFO', 'second event', null, storage);
+
+  assert.equal(getItemCalls, 0);
+  assert.equal(setItemCalls, 0);
+  assert.equal(removeItemCalls, 0);
+  assert.equal(loadStoredPopupDebugEntries(storage).length, 2);
+});
+
+test('saveStoredPopupDebugEntries and clearStoredPopupDebugEntries stay in memory only', () => {
+  let getItemCalls = 0;
+  let setItemCalls = 0;
+  let removeItemCalls = 0;
+  let storedValue = null;
+  const storage = {
+    getItem() {
+      getItemCalls += 1;
+      return storedValue;
+    },
+    removeItem() {
+      removeItemCalls += 1;
+      storedValue = null;
+    },
+    setItem(_key, value) {
+      setItemCalls += 1;
+      storedValue = value;
+    }
+  };
+
+  saveStoredPopupDebugEntries(['first event', 'second event'], storage);
+  assert.deepEqual(loadStoredPopupDebugEntries(storage), ['first event', 'second event']);
+
+  clearStoredPopupDebugEntries(storage);
+
+  assert.deepEqual(loadStoredPopupDebugEntries(storage), []);
+  assert.equal(getItemCalls, 0);
+  assert.equal(setItemCalls, 0);
+  assert.equal(removeItemCalls, 0);
+  assert.equal(storedValue, null);
 });
 
 test('formatPopupError and renderFatalPopupError expose the real popup failure text', () => {
@@ -613,6 +678,139 @@ test('requestFollowersPreview and requestFollowerBlocks send the expected messag
         type: FOLLOWERS_BLOCK_MESSAGE_TYPE
       },
       tabId: 33
+    }
+  ]);
+});
+
+test('requestFollowerBlocks relays progress during direct execution fallback', async (t) => {
+  const originalChrome = globalThis.chrome;
+  const originalEasyTweetBlockContent = globalThis.EasyTweetBlockContent;
+  const originalSetTimeout = globalThis.setTimeout;
+  const progressMessages = [];
+  let sendMessageCalls = 0;
+
+  globalThis.chrome = {
+    runtime: {
+      sendMessage(message) {
+        progressMessages.push(message);
+        return Promise.resolve();
+      }
+    }
+  };
+  globalThis.EasyTweetBlockContent = {
+    async blockFollowerCandidatesViaApi(candidates, options) {
+      options.onProgress({
+        completed: 0,
+        delayMs: options.delayMs,
+        failureCount: 0,
+        phase: 'started',
+        successCount: 0,
+        total: candidates.length
+      });
+      options.onProgress({
+        candidate: candidates[0],
+        completed: 1,
+        currentIndex: 1,
+        delayMs: options.delayMs,
+        failureCount: 0,
+        phase: 'blocked',
+        successCount: 1,
+        total: candidates.length
+      });
+
+      return [{ ok: true, restId: '1', username: 'alice' }];
+    },
+    finishFollowerRun() {},
+    startFollowerRun(runId) {
+      return {
+        controller: null,
+        runId,
+        signal: null
+      };
+    }
+  };
+  globalThis.setTimeout = (callback) => {
+    callback();
+    return 0;
+  };
+
+  t.after(() => {
+    if (originalChrome === undefined) {
+      delete globalThis.chrome;
+    } else {
+      globalThis.chrome = originalChrome;
+    }
+
+    if (originalEasyTweetBlockContent === undefined) {
+      delete globalThis.EasyTweetBlockContent;
+    } else {
+      globalThis.EasyTweetBlockContent = originalEasyTweetBlockContent;
+    }
+
+    globalThis.setTimeout = originalSetTimeout;
+  });
+
+  const extensionApi = {
+    runtime: {},
+    scripting: {
+      async executeScript(options) {
+        if (Array.isArray(options.files)) {
+          return [];
+        }
+
+        return [{ result: await options.func(...options.args) }];
+      },
+      async insertCSS() {
+        return [];
+      }
+    },
+    tabs: {
+      async sendMessage() {
+        sendMessageCalls += 1;
+        throw new Error('Could not establish connection. Receiving end does not exist.');
+      }
+    }
+  };
+
+  const response = await requestFollowerBlocks(
+    33,
+    [{ restId: '1', username: 'alice' }],
+    1400,
+    extensionApi,
+    'run-1'
+  );
+
+  assert.deepEqual(response, {
+    ok: true,
+    results: [{ ok: true, restId: '1', username: 'alice' }]
+  });
+  assert.equal(sendMessageCalls, 2);
+  assert.deepEqual(progressMessages, [
+    {
+      progress: {
+        completed: 0,
+        delayMs: 1400,
+        failureCount: 0,
+        phase: 'started',
+        successCount: 0,
+        total: 1
+      },
+      runId: 'run-1',
+      type: FOLLOWERS_BLOCK_PROGRESS_MESSAGE_TYPE
+    },
+    {
+      progress: {
+        candidate: { restId: '1', username: 'alice' },
+        completed: 1,
+        currentIndex: 1,
+        delayMs: 1400,
+        failureCount: 0,
+        phase: 'blocked',
+        successCount: 1,
+        total: 1
+      },
+      runId: 'run-1',
+      type: FOLLOWERS_BLOCK_PROGRESS_MESSAGE_TYPE
     }
   ]);
 });

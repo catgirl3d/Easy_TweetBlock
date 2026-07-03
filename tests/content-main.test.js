@@ -65,8 +65,10 @@ const {
   scanFollowersForBlocking,
   setCurrentNativeButtonStyle,
   setButtonState,
+  sleep,
   startFollowerRun,
   syncStoredPageButtonStyle,
+  tryGenerateXClientTransactionId,
   waitForElement
 } = require('../src/content/main.js');
 
@@ -729,6 +731,15 @@ test('buildFollowersLookupUrls creates Following URLs for the following source',
   assert.equal(JSON.parse(new URL(urls[0]).searchParams.get('variables')).count, FOLLOWERS_PAGE_SIZE);
 });
 
+test('buildFollowersLookupUrls clamps count without treating zero as missing', () => {
+  const urls = buildFollowersLookupUrls('2743192327', {
+    baseOrigin: 'https://x.com',
+    count: 0
+  });
+
+  assert.equal(JSON.parse(new URL(urls[0]).searchParams.get('variables')).count, 1);
+});
+
 test('parseUserLookupRestId reads rest_id from common response shapes', () => {
   assert.equal(parseUserLookupRestId({
     data: {
@@ -933,6 +944,32 @@ test('fetchFollowersPage retries stale followers query ids until one returns a p
   assert.equal(requestedUrls[1].includes('/workingFollowersQueryId/Followers'), true);
 });
 
+test('fetchFollowersPage surfaces invalid HTML bodies with a clear JSON parse error', async () => {
+  await assert.rejects(fetchFollowersPage('2743192327', {
+    documentRef: {
+      cookie: 'ct0=token123',
+      documentElement: { lang: 'en-US' },
+      location: { origin: 'https://x.com' },
+      querySelectorAll() {
+        return [];
+      }
+    },
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      headers: {
+        get(name) {
+          return name === 'content-type' ? 'text/html' : null;
+        }
+      },
+      async text() {
+        return '<!DOCTYPE html><html><body>Challenge</body></html>';
+      }
+    }),
+    queryIds: ['workingFollowersQueryId']
+  }), /returned invalid JSON \(status 200, content-type text\/html\): <!DOCTYPE html><html><body>Challenge<\/body><\/html>/);
+});
+
 test('lookupUserRestId reuses the current tab cache without another network lookup', async () => {
   const requestedUrls = [];
   const cache = new Map([
@@ -959,6 +996,53 @@ test('lookupUserRestId reuses the current tab cache without another network look
   assert.deepEqual(requestedUrls, []);
 });
 
+test('lookupUserRestId includes generated x-client-transaction-id when available', async (t) => {
+  const requestedHeaders = [];
+  const originalGenerator = globalThis.EasyTweetBlockContent.tryGenerateXClientTransactionId;
+
+  t.after(() => {
+    globalThis.EasyTweetBlockContent.tryGenerateXClientTransactionId = originalGenerator;
+  });
+
+  globalThis.EasyTweetBlockContent.tryGenerateXClientTransactionId = async (method, path) => {
+    assert.equal(method, 'GET');
+    assert.equal(path, '/i/api/graphql/workingQueryId/UserByScreenName');
+    return 'generated-transaction-id';
+  };
+
+  async function fetchImpl(_url, options = {}) {
+    requestedHeaders.push(options.headers || {});
+
+    return {
+      ok: true,
+      async json() {
+        return {
+          data: {
+            user: {
+              result: {
+                rest_id: '2057563419742486528'
+              }
+            }
+          }
+        };
+      }
+    };
+  }
+
+  await lookupUserRestId('Felixmfdo', {
+    cache: new Map(),
+    documentRef: {
+      cookie: 'ct0=token123',
+      documentElement: { lang: 'en-US' },
+      location: { origin: 'https://x.com' }
+    },
+    fetchImpl,
+    queryIds: ['workingQueryId']
+  });
+
+  assert.equal(requestedHeaders[0]['x-client-transaction-id'], 'generated-transaction-id');
+});
+
 test('normalizeFollowerBlockCandidate and createFollowerBlockCandidates keep usable unique candidates only', () => {
   assert.deepEqual(normalizeFollowerBlockCandidate({ restId: '101', username: '@Alice' }), {
     restId: '101',
@@ -974,6 +1058,29 @@ test('normalizeFollowerBlockCandidate and createFollowerBlockCandidates keep usa
   ]), [
     { restId: '101', username: 'alice' },
     { restId: null, username: 'bob' }
+  ]);
+});
+
+test('createFollowerBlockCandidates deduplicates a user appearing in both restId and username forms', () => {
+  assert.deepEqual(createFollowerBlockCandidates([
+    { restId: '101', username: 'Alice' },
+    { username: 'Alice' }
+  ]), [
+    { restId: '101', username: 'alice' }
+  ]);
+
+  assert.deepEqual(createFollowerBlockCandidates([
+    { username: 'Alice' },
+    { restId: '101', username: 'Alice' }
+  ]), [
+    { restId: null, username: 'alice' }
+  ]);
+
+  assert.deepEqual(createFollowerBlockCandidates([
+    { restId: '101', username: 'Alice' },
+    { restId: '101', username: 'OtherName' }
+  ]), [
+    { restId: '101', username: 'alice' }
   ]);
 });
 
@@ -1200,6 +1307,241 @@ test('scanFollowersForBlocking uses Following operation for the following source
   ]);
 });
 
+test('scanFollowersForBlocking continues after an empty cursor page when another page is available', async () => {
+  const requestedTimelineUrls = [];
+  let timelineRequestCount = 0;
+
+  async function fetchImpl(url) {
+    if (url.includes('/UserByScreenName')) {
+      return {
+        ok: true,
+        async json() {
+          return {
+            data: {
+              user: {
+                result: {
+                  rest_id: '999'
+                }
+              }
+            }
+          };
+        }
+      };
+    }
+
+    requestedTimelineUrls.push(url);
+    timelineRequestCount += 1;
+
+    if (timelineRequestCount === 1) {
+      return {
+        ok: true,
+        async json() {
+          return {
+            data: {
+              user: {
+                result: {
+                  timeline: {
+                    timeline: {
+                      instructions: [{
+                        entries: [{
+                          content: {
+                            cursorType: 'Bottom',
+                            value: 'cursor-bottom'
+                          }
+                        }]
+                      }]
+                    }
+                  }
+                }
+              }
+            }
+          };
+        }
+      };
+    }
+
+    return {
+      ok: true,
+      async json() {
+        return {
+          data: {
+            user: {
+              result: {
+                timeline: {
+                  timeline: {
+                    instructions: [{
+                      entries: [{
+                        content: {
+                          itemContent: {
+                            user_results: {
+                              result: {
+                                core: { screen_name: 'Alice' },
+                                relationship_perspectives: { blocking: false },
+                                rest_id: '101'
+                              }
+                            }
+                          }
+                        }
+                      }]
+                    }]
+                  }
+                }
+              }
+            }
+          }
+        };
+      }
+    };
+  }
+
+  const preview = await scanFollowersForBlocking({
+    blockLimit: 10,
+    scanLimit: 5
+  }, {
+    documentRef: {
+      cookie: 'ct0=token123',
+      documentElement: { lang: 'en-US' },
+      location: {
+        origin: 'https://x.com',
+        pathname: '/targetuser/followers'
+      }
+    },
+    fetchImpl,
+    queryIds: ['followersWorkingQueryId'],
+    userLookupQueryIds: ['workingUserLookup']
+  });
+
+  assert.equal(preview.readyCount, 1);
+  assert.equal(preview.scannedCount, 1);
+  assert.equal(preview.hasMorePages, false);
+  assert.equal(requestedTimelineUrls.length, 2);
+  assert.equal(JSON.parse(new URL(requestedTimelineUrls[1]).searchParams.get('variables')).cursor, 'cursor-bottom');
+  assert.deepEqual(preview.candidates, [
+    { restId: '101', username: 'alice' }
+  ]);
+});
+
+test('scanFollowersForBlocking resets the empty-page streak after a non-empty page', async () => {
+  const requestedTimelineUrls = [];
+  let timelineRequestCount = 0;
+
+  async function fetchImpl(url) {
+    if (url.includes('/UserByScreenName')) {
+      return {
+        ok: true,
+        async json() {
+          return {
+            data: {
+              user: {
+                result: {
+                  rest_id: '999'
+                }
+              }
+            }
+          };
+        }
+      };
+    }
+
+    requestedTimelineUrls.push(url);
+    timelineRequestCount += 1;
+
+    if (timelineRequestCount === 2) {
+      return {
+        ok: true,
+        async json() {
+          return {
+            data: {
+              user: {
+                result: {
+                  timeline: {
+                    timeline: {
+                      instructions: [{
+                        entries: [
+                          {
+                            content: {
+                              itemContent: {
+                                user_results: {
+                                  result: {
+                                    core: { screen_name: 'Alice' },
+                                    relationship_perspectives: { blocking: false },
+                                    rest_id: '101'
+                                  }
+                                }
+                              }
+                            }
+                          },
+                          {
+                            content: {
+                              cursorType: 'Bottom',
+                              value: 'cursor-bottom-2'
+                            }
+                          }
+                        ]
+                      }]
+                    }
+                  }
+                }
+              }
+            }
+          };
+        }
+      };
+    }
+
+    return {
+      ok: true,
+      async json() {
+        return {
+          data: {
+            user: {
+              result: {
+                timeline: {
+                  timeline: {
+                    instructions: [{
+                      entries: [{
+                        content: {
+                          cursorType: 'Bottom',
+                          value: `cursor-bottom-${timelineRequestCount}`
+                        }
+                      }]
+                    }]
+                  }
+                }
+              }
+            }
+          }
+        };
+      }
+    };
+  }
+
+  const preview = await scanFollowersForBlocking({
+    blockLimit: 10,
+    scanLimit: 5
+  }, {
+    documentRef: {
+      cookie: 'ct0=token123',
+      documentElement: { lang: 'en-US' },
+      location: {
+        origin: 'https://x.com',
+        pathname: '/targetuser/followers'
+      }
+    },
+    fetchImpl,
+    queryIds: ['followersWorkingQueryId'],
+    userLookupQueryIds: ['workingUserLookup']
+  });
+
+  assert.equal(preview.readyCount, 1);
+  assert.equal(preview.scannedCount, 1);
+  assert.equal(preview.hasMorePages, true);
+  assert.equal(requestedTimelineUrls.length, 4);
+  assert.deepEqual(preview.candidates, [
+    { restId: '101', username: 'alice' }
+  ]);
+});
+
 test('blockUserByScreenNameViaApi resolves rest_id and posts block request', async () => {
   const requestedUrls = [];
 
@@ -1278,6 +1620,43 @@ test('blockUserByRestIdViaApi posts the block request directly without a lookup'
   assert.equal(requestedUrls.length, 1);
   assert.equal(requestedUrls[0].url.endsWith('/i/api/1.1/blocks/create.json'), true);
   assert.equal(requestedUrls[0].options.body, 'user_id=2057563419742486528');
+});
+
+test('blockUserByRestIdViaApi includes generated x-client-transaction-id when available', async (t) => {
+  const requestedHeaders = [];
+  const originalGenerator = globalThis.EasyTweetBlockContent.tryGenerateXClientTransactionId;
+
+  t.after(() => {
+    globalThis.EasyTweetBlockContent.tryGenerateXClientTransactionId = originalGenerator;
+  });
+
+  globalThis.EasyTweetBlockContent.tryGenerateXClientTransactionId = async (method, path) => {
+    assert.equal(method, 'POST');
+    assert.equal(path, '/i/api/1.1/blocks/create.json');
+    return 'generated-transaction-id';
+  };
+
+  async function fetchImpl(_url, options = {}) {
+    requestedHeaders.push(options.headers || {});
+    return {
+      ok: true,
+      async json() {
+        return { ok: true };
+      }
+    };
+  }
+
+  await blockUserByRestIdViaApi('2057563419742486528', {
+    documentRef: {
+      cookie: 'ct0=token123',
+      documentElement: { lang: 'en-US' },
+      location: { origin: 'https://x.com' }
+    },
+    fetchImpl,
+    screenName: 'Felixmfdo'
+  });
+
+  assert.equal(requestedHeaders[0]['x-client-transaction-id'], 'generated-transaction-id');
 });
 
 test('blockUserByScreenNameViaApi tolerates block responses without JSON bodies', async () => {
@@ -1548,6 +1927,29 @@ test('normalizeBatchBlockDelayMs clamps values into the supported range', () => 
   assert.equal(normalizeBatchBlockDelayMs(250), MIN_BATCH_BLOCK_DELAY_MS);
   assert.equal(normalizeBatchBlockDelayMs(1250), 1250);
   assert.equal(normalizeBatchBlockDelayMs(2500), MAX_BATCH_BLOCK_DELAY_MS);
+});
+
+test('content sleep delegates to the shared followers sleep helper', async (t) => {
+  const originalFollowersApi = globalThis.EasyTweetBlockFollowers;
+  const calls = [];
+  const setTimeoutImpl = () => 0;
+
+  globalThis.EasyTweetBlockFollowers = {
+    ...(originalFollowersApi || {}),
+    sleep(delayMs, providedSetTimeoutImpl) {
+      calls.push({ delayMs, setTimeoutImpl: providedSetTimeoutImpl });
+      return Promise.resolve('delegated-sleep');
+    }
+  };
+
+  t.after(() => {
+    globalThis.EasyTweetBlockFollowers = originalFollowersApi;
+  });
+
+  const result = await sleep(25, setTimeoutImpl);
+
+  assert.equal(result, 'delegated-sleep');
+  assert.deepEqual(calls, [{ delayMs: 25, setTimeoutImpl }]);
 });
 
 test('normalizePageButtonStyle defaults to icon and accepts the text variant', () => {
@@ -2548,4 +2950,167 @@ test('fetchFollowersPage includes generated x-client-transaction-id when availab
   });
 
   assert.equal(requestedHeaders[0]['x-client-transaction-id'], 'generated-transaction-id');
+});
+
+test('tryGenerateXClientTransactionId caches transaction state from completion time', async (t) => {
+  const originalDateNow = Date.now;
+  const originalCache = globalThis.EasyTweetBlockContent.contentState.xClientTransactionCache;
+  let currentTime = 0;
+  let fetchCount = 0;
+
+  Date.now = () => currentTime;
+  globalThis.EasyTweetBlockContent.contentState.xClientTransactionCache = new Map();
+
+  t.after(() => {
+    Date.now = originalDateNow;
+    globalThis.EasyTweetBlockContent.contentState.xClientTransactionCache = originalCache;
+  });
+
+  const documentRef = {
+    documentElement: {
+      outerHTML: '123:"ondemand.s";abc})[e]||e)+"."+({123:"hash_ABC-"})'
+    },
+    querySelector(selector) {
+      assert.equal(selector, "[name='twitter-site-verification']");
+      return {
+        getAttribute(name) {
+          assert.equal(name, 'content');
+          return 'AAAAAAAA';
+        }
+      };
+    },
+    querySelectorAll(selector) {
+      if (selector === 'script') {
+        return [];
+      }
+
+      if (selector === "[id^='loading-x-anim']") {
+        return [{
+          children: [{
+            children: [null, {
+              getAttribute(name) {
+                assert.equal(name, 'd');
+                return '0000000001 2 3 4 5 6 7 8 9 10 11 12 13';
+              }
+            }]
+          }]
+        }];
+      }
+
+      return [];
+    }
+  };
+
+  async function fetchImpl(url) {
+    fetchCount += 1;
+    assert.equal(url, 'https://abs.twimg.com/responsive-web/client-web/ondemand.s.hash_ABC-a.js');
+    currentTime = 300000;
+
+    return {
+      ok: true,
+      async text() {
+        return 'alpha(w[0], 16);beta(w[1],16);gamma(w[2], 16);';
+      }
+    };
+  }
+
+  const firstId = await tryGenerateXClientTransactionId('GET', '/i/api/graphql/test/Followers', {
+    baseOrigin: 'https://x.com',
+    documentRef,
+    fetchImpl,
+    randomByte: 0,
+    timeNow: 1
+  });
+
+  currentTime = 600001;
+
+  const secondId = await tryGenerateXClientTransactionId('GET', '/i/api/graphql/test/Followers', {
+    baseOrigin: 'https://x.com',
+    documentRef,
+    fetchImpl,
+    randomByte: 0,
+    timeNow: 1
+  });
+
+  assert.equal(typeof firstId, 'string');
+  assert.equal(firstId.length > 0, true);
+  assert.equal(secondId, firstId);
+  assert.equal(fetchCount, 1);
+});
+
+test('scanFollowersForBlocking stops scanning and limits request count when it hits consecutive empty pages limit', async () => {
+  const requestedTimelineUrls = [];
+  let timelineRequestCount = 0;
+
+  async function fetchImpl(url) {
+    if (url.includes('/UserByScreenName')) {
+      return {
+        ok: true,
+        async json() {
+          return {
+            data: {
+              user: {
+                result: {
+                  rest_id: '999'
+                }
+              }
+            }
+          };
+        }
+      };
+    }
+
+    requestedTimelineUrls.push(url);
+    timelineRequestCount += 1;
+
+    // Return empty pages with cursor indefinitely
+    return {
+      ok: true,
+      async json() {
+        return {
+          data: {
+            user: {
+              result: {
+                timeline: {
+                  timeline: {
+                    instructions: [{
+                      entries: [{
+                        content: {
+                          cursorType: 'Bottom',
+                          value: `cursor-bottom-${timelineRequestCount}`
+                        }
+                      }]
+                    }]
+                  }
+                }
+              }
+            }
+          }
+        };
+      }
+    };
+  }
+
+  const preview = await scanFollowersForBlocking({
+    blockLimit: 10,
+    scanLimit: 5
+  }, {
+    documentRef: {
+      cookie: 'ct0=token123',
+      documentElement: { lang: 'en-US' },
+      location: {
+        origin: 'https://x.com',
+        pathname: '/targetuser/followers'
+      }
+    },
+    fetchImpl,
+    queryIds: ['followersWorkingQueryId'],
+    userLookupQueryIds: ['workingUserLookup']
+  });
+
+  // Should stop after 2 empty pages, despite scanLimit being 5 and hasMorePages being true
+  assert.equal(preview.readyCount, 0);
+  assert.equal(preview.scannedCount, 0);
+  assert.equal(preview.hasMorePages, true);
+  assert.equal(requestedTimelineUrls.length, 2);
 });
