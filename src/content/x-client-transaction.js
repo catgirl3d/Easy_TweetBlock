@@ -320,7 +320,8 @@
   async function fetchXHomeDocument(options = {}) {
     const {
       baseOrigin = 'https://x.com',
-      fetchImpl = globalThis.fetch
+      fetchImpl = globalThis.fetch,
+      signal = null
     } = options;
 
     if (typeof globalThis.DOMParser !== 'function') {
@@ -334,7 +335,8 @@
         accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
       },
       method: 'GET',
-      mode: 'cors'
+      mode: 'cors',
+      signal
     });
 
     if (!response?.ok || typeof response.text !== 'function') {
@@ -380,7 +382,8 @@
     const {
       baseOrigin = 'https://x.com',
       documentRef = document,
-      fetchImpl = globalThis.fetch
+      fetchImpl = globalThis.fetch,
+      signal = null
     } = options;
     const cache = getTransactionCache();
     const cachedEntry = cache.get(baseOrigin);
@@ -393,7 +396,8 @@
     const transactionDocument = await getTransactionDocument({
       baseOrigin,
       documentRef,
-      fetchImpl
+      fetchImpl,
+      signal
     });
     const onDemandFileUrl = resolveOnDemandFileUrlFromDocument(transactionDocument);
 
@@ -404,7 +408,8 @@
     const onDemandResponse = await fetchImpl(onDemandFileUrl, {
       credentials: 'omit',
       method: 'GET',
-      mode: 'cors'
+      mode: 'cors',
+      signal
     });
 
     if (!onDemandResponse?.ok || typeof onDemandResponse.text !== 'function') {

@@ -192,7 +192,9 @@
   const IMMEDIATE_BLOCK_MESSAGE_TYPE = 'easy-tweetblock:block-usernames-via-api';
   const FOLLOWERS_BLOCK_MESSAGE_TYPE = 'easy-tweetblock:block-follower-candidates-via-api';
   const FOLLOWERS_BLOCK_PROGRESS_MESSAGE_TYPE = 'easy-tweetblock:follower-block-progress';
+  const FOLLOWERS_CANCEL_MESSAGE_TYPE = 'easy-tweetblock:cancel-follower-run';
   const FOLLOWERS_SCAN_MESSAGE_TYPE = 'easy-tweetblock:scan-followers-for-block';
+  const FOLLOWERS_RUN_PORT_PREFIX = 'easy-tweetblock:follower-run:';
   const POPUP_VIEWS = Object.freeze({
     followers: 'followers',
     main: 'main',
@@ -314,6 +316,39 @@
         resolve(response);
       });
     });
+  }
+
+  function connectFollowerRunPort(tabId, runId, extensionApi = getExtensionApi()) {
+    if (!runId || !extensionApi?.tabs?.connect) {
+      return null;
+    }
+
+    try {
+      return extensionApi.tabs.connect(tabId, {
+        name: `${FOLLOWERS_RUN_PORT_PREFIX}${runId}`
+      }) || null;
+    } catch (error) {
+      logPopupError(`Follower run port connection failed for tab ${tabId}.`, error);
+      return null;
+    }
+  }
+
+  function disconnectFollowerRunPort(port) {
+    try {
+      port?.disconnect?.();
+    } catch {
+      // The port may already be disconnected when the popup is closing.
+    }
+  }
+
+  async function sendFollowerRunMessage(tabId, message, extensionApi = getExtensionApi()) {
+    const port = connectFollowerRunPort(tabId, message?.runId, extensionApi);
+
+    try {
+      return await sendTabMessage(tabId, message, extensionApi);
+    } finally {
+      disconnectFollowerRunPort(port);
+    }
   }
 
   function executeTabFunction(tabId, func, args = [], extensionApi = getExtensionApi()) {
@@ -597,63 +632,90 @@
     }
   }
 
-  async function invokeFollowersPreviewInTab(tabId, blockLimit, scanLimit, source, extensionApi = getExtensionApi()) {
-    const results = await executeTabFunction(
-      tabId,
-      async (requestedBlockLimit, requestedScanLimit, requestedSource) => {
-        if (typeof globalThis.EasyTweetBlockContent?.scanFollowersForBlocking !== 'function') {
-          throw new Error('Easy TweetBlock followers preview runner is not available in this tab.');
-        }
+  async function invokeFollowersPreviewInTab(tabId, blockLimit, scanLimit, source, extensionApi = getExtensionApi(), runId = null) {
+    const port = connectFollowerRunPort(tabId, runId, extensionApi);
 
-        return globalThis.EasyTweetBlockContent.scanFollowersForBlocking({
-          blockLimit: requestedBlockLimit,
-          scanLimit: requestedScanLimit,
-          source: requestedSource
-        });
-      },
-      [blockLimit, scanLimit, source],
-      extensionApi
-    );
-    const firstResult = Array.isArray(results) ? results[0] : null;
+    try {
+      const results = await executeTabFunction(
+        tabId,
+        async (requestedBlockLimit, requestedScanLimit, requestedSource, requestedRunId) => {
+          if (typeof globalThis.EasyTweetBlockContent?.scanFollowersForBlocking !== 'function') {
+            throw new Error('Easy TweetBlock followers preview runner is not available in this tab.');
+          }
 
-    if (!firstResult || firstResult.result == null) {
-      throw new Error('Followers preview direct execution returned no result.');
+          const followerRun = globalThis.EasyTweetBlockContent.startFollowerRun?.(requestedRunId) || {};
+
+          try {
+            return await globalThis.EasyTweetBlockContent.scanFollowersForBlocking({
+              blockLimit: requestedBlockLimit,
+              scanLimit: requestedScanLimit,
+              source: requestedSource
+            }, {
+              signal: followerRun.signal || null
+            });
+          } finally {
+            globalThis.EasyTweetBlockContent.finishFollowerRun?.(followerRun.runId, followerRun.controller);
+          }
+        },
+        [blockLimit, scanLimit, source, runId],
+        extensionApi
+      );
+      const firstResult = Array.isArray(results) ? results[0] : null;
+
+      if (!firstResult || firstResult.result == null) {
+        throw new Error('Followers preview direct execution returned no result.');
+      }
+
+      return {
+        ok: true,
+        preview: firstResult.result
+      };
+    } finally {
+      disconnectFollowerRunPort(port);
     }
-
-    return {
-      ok: true,
-      preview: firstResult.result
-    };
   }
 
-  async function invokeFollowerBlocksInTab(tabId, candidates, delayMs, extensionApi = getExtensionApi()) {
-    const results = await executeTabFunction(
-      tabId,
-      async (requestedCandidates, requestedDelayMs) => {
-        if (typeof globalThis.EasyTweetBlockContent?.blockFollowerCandidatesViaApi !== 'function') {
-          throw new Error('Easy TweetBlock follower block runner is not available in this tab.');
-        }
+  async function invokeFollowerBlocksInTab(tabId, candidates, delayMs, extensionApi = getExtensionApi(), runId = null) {
+    const port = connectFollowerRunPort(tabId, runId, extensionApi);
 
-        return globalThis.EasyTweetBlockContent.blockFollowerCandidatesViaApi(requestedCandidates, {
-          delayMs: requestedDelayMs
-        });
-      },
-      [candidates, delayMs],
-      extensionApi
-    );
-    const firstResult = Array.isArray(results) ? results[0] : null;
+    try {
+      const results = await executeTabFunction(
+        tabId,
+        async (requestedCandidates, requestedDelayMs, requestedRunId) => {
+          if (typeof globalThis.EasyTweetBlockContent?.blockFollowerCandidatesViaApi !== 'function') {
+            throw new Error('Easy TweetBlock follower block runner is not available in this tab.');
+          }
 
-    if (!firstResult || !Array.isArray(firstResult.result)) {
-      throw new Error('Follower block direct execution returned no result array.');
+          const followerRun = globalThis.EasyTweetBlockContent.startFollowerRun?.(requestedRunId) || {};
+
+          try {
+            return await globalThis.EasyTweetBlockContent.blockFollowerCandidatesViaApi(requestedCandidates, {
+              delayMs: requestedDelayMs,
+              signal: followerRun.signal || null
+            });
+          } finally {
+            globalThis.EasyTweetBlockContent.finishFollowerRun?.(followerRun.runId, followerRun.controller);
+          }
+        },
+        [candidates, delayMs, runId],
+        extensionApi
+      );
+      const firstResult = Array.isArray(results) ? results[0] : null;
+
+      if (!firstResult || !Array.isArray(firstResult.result)) {
+        throw new Error('Follower block direct execution returned no result array.');
+      }
+
+      return {
+        ok: true,
+        results: firstResult.result
+      };
+    } finally {
+      disconnectFollowerRunPort(port);
     }
-
-    return {
-      ok: true,
-      results: firstResult.result
-    };
   }
 
-  async function requestFollowersPreview(tabId, blockLimit, scanLimit, source, extensionApi = getExtensionApi()) {
+  async function requestFollowersPreview(tabId, blockLimit, scanLimit, source, extensionApi = getExtensionApi(), runId = null) {
     const message = {
       options: {
         blockLimit,
@@ -663,8 +725,12 @@
       type: FOLLOWERS_SCAN_MESSAGE_TYPE
     };
 
+    if (runId) {
+      message.runId = runId;
+    }
+
     try {
-      return await sendTabMessage(tabId, message, extensionApi);
+      return await sendFollowerRunMessage(tabId, message, extensionApi);
     } catch (error) {
       if (!isMissingReceiverError(error)) {
         logPopupError(`Followers preview message delivery failed for tab ${tabId}.`, error);
@@ -685,7 +751,7 @@
 
       try {
         await sleep(50);
-        return await sendTabMessage(tabId, message, extensionApi);
+        return await sendFollowerRunMessage(tabId, message, extensionApi);
       } catch (retryError) {
         logPopupError(`Followers preview message retry failed for tab ${tabId}; falling back to direct execution.`, retryError);
         logPopupInfo(`Invoking followers preview directly in tab ${tabId} after message retry failure.`, {
@@ -693,7 +759,7 @@
           scanLimit,
           source
         });
-        return invokeFollowersPreviewInTab(tabId, blockLimit, scanLimit, source, extensionApi);
+        return invokeFollowersPreviewInTab(tabId, blockLimit, scanLimit, source, extensionApi, runId);
       }
     }
   }
@@ -710,7 +776,7 @@
     }
 
     try {
-      return await sendTabMessage(tabId, message, extensionApi);
+      return await sendFollowerRunMessage(tabId, message, extensionApi);
     } catch (error) {
       if (!isMissingReceiverError(error)) {
         logPopupError(`Follower block message delivery failed for tab ${tabId}.`, error);
@@ -729,16 +795,31 @@
 
       try {
         await sleep(50);
-        return await sendTabMessage(tabId, message, extensionApi);
+        return await sendFollowerRunMessage(tabId, message, extensionApi);
       } catch (retryError) {
         logPopupError(`Follower block message retry failed for tab ${tabId}; falling back to direct execution.`, retryError);
         logPopupInfo(`Invoking follower block run directly in tab ${tabId} after message retry failure.`, {
           candidateCount: Array.isArray(candidates) ? candidates.length : 0,
           delayMs
         });
-        return invokeFollowerBlocksInTab(tabId, candidates, delayMs, extensionApi);
+        return invokeFollowerBlocksInTab(tabId, candidates, delayMs, extensionApi, runId);
       }
     }
+  }
+
+  async function requestCancelFollowerRun(tabId, runId, extensionApi = getExtensionApi()) {
+    if (!runId) {
+      return { canceled: false, ok: false };
+    }
+
+    return sendTabMessage(tabId, {
+      runId,
+      type: FOLLOWERS_CANCEL_MESSAGE_TYPE
+    }, extensionApi);
+  }
+
+  function isFollowerRunCanceledError(error) {
+    return error?.name === 'AbortError';
   }
 
   async function findActiveXTab(extensionApi = getExtensionApi()) {
@@ -812,6 +893,7 @@
     const saveButton = documentRef.getElementById('save-blocklist');
     const saveSettingsButton = documentRef.getElementById('save-settings');
     const blockNowButton = documentRef.getElementById('block-now');
+    const cancelFollowersRunButton = documentRef.getElementById('cancel-followers-run');
     const countElement = documentRef.getElementById('username-count');
     const followersBlockLimitElement = documentRef.getElementById('followers-block-limit');
     const followersScanLimitElement = documentRef.getElementById('followers-scan-limit');
@@ -833,18 +915,20 @@
     let isBlocking = false;
     let isFollowersScanning = false;
     let isFollowersBlocking = false;
+    let currentFollowerRunTabId = null;
     let currentDelayMs = blocklist?.DEFAULT_BATCH_BLOCK_DELAY_MS;
     let currentPageButtonStyle = blocklist?.DEFAULT_PAGE_BLOCK_BUTTON_STYLE;
     let currentFollowersBlockLimit = followers?.DEFAULT_FOLLOWERS_BLOCK_LIMIT;
     let currentFollowersBlockRunId = null;
     let currentFollowersPreview = null;
     let currentFollowersScanLimit = followers?.DEFAULT_FOLLOWERS_SCAN_LIMIT;
+    let currentFollowersScanRunId = null;
     let currentFollowersSource = followers?.DEFAULT_FOLLOWERS_SOURCE;
     let draftPageButtonStyle = currentPageButtonStyle;
     const storedPopupState = loadStoredPopupState();
     let isHydratingPopupState = true;
 
-    if (!blocklist || !followers || !extensionApi || !shellElement || !statusElement || !textareaElement || !delayInputElement || !pageButtonStyleIconElement || !pageButtonStyleTextElement || !openSettingsButton || !openFollowersButton || !backToMainButton || !backFromFollowersButton || !saveButton || !saveSettingsButton || !blockNowButton || !countElement || !followersBlockLimitElement || !followersScanLimitElement || !followersSummaryElement || !followersPreviewElement || !followersBlockProgressElement || !followersProgressCountElement || !followersProgressDetailElement || !followersProgressFillElement || !followersProgressLabelElement || !followersSourceFollowersElement || !followersSourceFollowingElement || !scanFollowersButton || !blockFollowerCandidatesButton || !popupDebugLogElement || !clearPopupDebugLogButton) {
+    if (!blocklist || !followers || !extensionApi || !shellElement || !statusElement || !textareaElement || !delayInputElement || !pageButtonStyleIconElement || !pageButtonStyleTextElement || !openSettingsButton || !openFollowersButton || !backToMainButton || !backFromFollowersButton || !saveButton || !saveSettingsButton || !blockNowButton || !cancelFollowersRunButton || !countElement || !followersBlockLimitElement || !followersScanLimitElement || !followersSummaryElement || !followersPreviewElement || !followersBlockProgressElement || !followersProgressCountElement || !followersProgressDetailElement || !followersProgressFillElement || !followersProgressLabelElement || !followersSourceFollowersElement || !followersSourceFollowingElement || !scanFollowersButton || !blockFollowerCandidatesButton || !popupDebugLogElement || !clearPopupDebugLogButton) {
       return;
     }
 
@@ -1090,6 +1174,14 @@
         state = 'waiting';
         label = `Waiting ${delayMs} ms before next block`;
         detail = `Next: ${progress.nextIndex || completed + 1}/${total}. Success: ${successCount}. Failed: ${failureCount}.`;
+      } else if (phase === 'canceling') {
+        state = 'waiting';
+        label = 'Canceling run';
+        detail = 'Waiting for the active X request to stop.';
+      } else if (phase === 'canceled') {
+        state = 'idle';
+        label = 'Run canceled';
+        detail = 'No further scan or block requests will be sent for this run.';
       } else if (phase === 'finished') {
         state = failureCount ? 'error' : 'success';
         label = failureCount ? `Finished with ${failureCount} failures` : 'Block run complete';
@@ -1187,6 +1279,7 @@
       followersSourceFollowingElement.disabled = isAnyBusy;
       scanFollowersButton.disabled = isAnyBusy;
       blockFollowerCandidatesButton.disabled = isAnyBusy || !currentFollowersPreview?.candidates?.length;
+      cancelFollowersRunButton.disabled = !(isFollowersScanning || isFollowersBlocking);
     }
 
     function showMainView() {
@@ -1225,6 +1318,34 @@
           refreshPopupDebugLog();
           setStatus(error instanceof Error ? error.message : String(error));
         });
+    }
+
+    async function cancelActiveFollowerRun() {
+      const activeRunId = currentFollowersBlockRunId || currentFollowersScanRunId;
+      const activeTabId = currentFollowerRunTabId;
+
+      if (!activeRunId || !activeTabId || (!isFollowersScanning && !isFollowersBlocking)) {
+        return;
+      }
+
+      logPopupInfo('Canceling active follower run.', {
+        runId: activeRunId,
+        tabId: activeTabId
+      });
+      renderFollowerBlockProgress({
+        phase: 'canceling',
+        total: currentFollowersPreview?.candidates?.length || currentFollowersScanLimit
+      });
+      setStatus('Cancel requested. Waiting for the active X request to stop...');
+      refreshPopupDebugLog();
+
+      try {
+        await requestCancelFollowerRun(activeTabId, activeRunId, extensionApi);
+      } catch (error) {
+        logPopupError('Follower run cancel request failed.', error);
+        refreshPopupDebugLog();
+        setStatus(error instanceof Error ? error.message : String(error));
+      }
     }
 
     async function loadBlocklist() {
@@ -1405,6 +1526,8 @@
     }
 
     async function scanFollowersPreview() {
+      let scanRunId = null;
+
       try {
         if (isSaving || isBlocking || isFollowersScanning || isFollowersBlocking) {
           logPopupInfo('Followers preview scan ignored because popup is busy.', {
@@ -1435,11 +1558,14 @@
         currentFollowersScanLimit = readFollowersScanLimit();
         currentFollowersSource = readFollowersSource();
         const sourceCopy = getFollowersSourceCopy(currentFollowersSource);
+        scanRunId = createFollowerBlockRunId();
         renderFollowersBlockLimit(currentFollowersBlockLimit);
         renderFollowersScanLimit(currentFollowersScanLimit);
         renderFollowersSource(currentFollowersSource);
 
         isFollowersScanning = true;
+        currentFollowersScanRunId = scanRunId;
+        currentFollowerRunTabId = targetTab.id;
         setBusyState();
         setFollowersSummary(`Scanning up to ${currentFollowersScanLimit} ${sourceCopy.accountsLabel} from the active X tab...`);
         renderFollowerBlockProgress({
@@ -1450,6 +1576,7 @@
         setStatus(`${sourceCopy.graphLabel} scan running.`);
         logPopupInfo('Starting followers preview scan.', {
           blockLimit: currentFollowersBlockLimit,
+          runId: scanRunId,
           scanLimit: currentFollowersScanLimit,
           source: currentFollowersSource,
           tabId: targetTab.id,
@@ -1457,7 +1584,18 @@
         });
         refreshPopupDebugLog();
 
-        const response = await requestFollowersPreview(targetTab.id, currentFollowersBlockLimit, currentFollowersScanLimit, currentFollowersSource, extensionApi);
+        const response = await requestFollowersPreview(targetTab.id, currentFollowersBlockLimit, currentFollowersScanLimit, currentFollowersSource, extensionApi, scanRunId);
+
+        if (response?.canceled) {
+          setFollowersSummary(`${sourceCopy.graphLabel} scan canceled.`);
+          renderFollowerBlockProgress({
+            phase: 'canceled',
+            source: currentFollowersSource,
+            total: currentFollowersScanLimit
+          });
+          setStatus(`${sourceCopy.graphLabel} scan canceled.`);
+          return;
+        }
 
         if (!response?.ok) {
           logPopupError('Followers preview scan returned a non-ok response.', response);
@@ -1475,6 +1613,20 @@
 
         setStatus(`Preview ready: ${response.preview.readyCount} ${response.preview.readyCount === 1 ? sourceCopy.accountLabel : sourceCopy.readyLabel} can be blocked from @${response.preview.targetScreenName}.`);
       } catch (error) {
+        if (isFollowerRunCanceledError(error)) {
+          const sourceCopy = getFollowersSourceCopy(currentFollowersSource);
+
+          setFollowersSummary(`${sourceCopy.graphLabel} scan canceled.`);
+          renderFollowerBlockProgress({
+            phase: 'canceled',
+            source: currentFollowersSource,
+            total: currentFollowersScanLimit
+          });
+          setStatus(`${sourceCopy.graphLabel} scan canceled.`);
+          refreshPopupDebugLog();
+          return;
+        }
+
         logPopupError('Followers preview scan failed.', error);
         refreshPopupDebugLog();
         setFollowersSummary(`Scan failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -1482,12 +1634,23 @@
         setStatus(error instanceof Error ? error.message : String(error));
       } finally {
         isFollowersScanning = false;
+
+        if (scanRunId && currentFollowersScanRunId === scanRunId) {
+          currentFollowersScanRunId = null;
+        }
+
+        if (!currentFollowersScanRunId && !currentFollowersBlockRunId) {
+          currentFollowerRunTabId = null;
+        }
+
         setBusyState();
         refreshPopupDebugLog();
       }
     }
 
     async function blockScannedFollowers() {
+      let blockRunId = null;
+
       try {
         if (isSaving || isBlocking || isFollowersScanning || isFollowersBlocking) {
           logPopupInfo('Follower block run ignored because popup is busy.', {
@@ -1519,7 +1682,9 @@
         }
 
         isFollowersBlocking = true;
-        currentFollowersBlockRunId = createFollowerBlockRunId();
+        blockRunId = createFollowerBlockRunId();
+        currentFollowersBlockRunId = blockRunId;
+        currentFollowerRunTabId = targetTab.id;
         setBusyState();
         renderFollowerBlockProgress({
           delayMs: currentDelayMs,
@@ -1538,7 +1703,18 @@
         refreshPopupDebugLog();
 
         const previousPreview = currentFollowersPreview;
-        const response = await requestFollowerBlocks(targetTab.id, previousPreview.candidates, currentDelayMs, extensionApi, currentFollowersBlockRunId);
+        const response = await requestFollowerBlocks(targetTab.id, previousPreview.candidates, currentDelayMs, extensionApi, blockRunId);
+
+        if (response?.canceled) {
+          renderFollowerBlockProgress({
+            delayMs: currentDelayMs,
+            phase: 'canceled',
+            source: previousPreview.source || currentFollowersSource,
+            total: previousPreview.candidates.length
+          });
+          setStatus(`Block run canceled for ${sourceCopy.graphLabel}.`);
+          return;
+        }
 
         if (!response?.ok) {
           logPopupError('Follower block run returned a non-ok response.', response);
@@ -1576,6 +1752,20 @@
         clearFollowersPreview('Preview cleared. Run a new scan for another batch.');
         setStatus(`Block run complete: blocked ${successCount}/${results.length} ${sourceCopy.readyLabel}. Delay used: ${currentDelayMs} ms between requests.`);
       } catch (error) {
+        if (isFollowerRunCanceledError(error)) {
+          const sourceCopy = getFollowersSourceCopy(currentFollowersPreview?.source || currentFollowersSource);
+
+          renderFollowerBlockProgress({
+            delayMs: currentDelayMs,
+            phase: 'canceled',
+            source: sourceCopy.source,
+            total: currentFollowersPreview?.candidates?.length || 0
+          });
+          setStatus(`Block run canceled for ${sourceCopy.graphLabel}.`);
+          refreshPopupDebugLog();
+          return;
+        }
+
         logPopupError('Follower block run failed.', error);
         refreshPopupDebugLog();
         renderFollowerBlockProgress({
@@ -1588,7 +1778,15 @@
         setStatus(error instanceof Error ? error.message : String(error));
       } finally {
         isFollowersBlocking = false;
-        currentFollowersBlockRunId = null;
+
+        if (blockRunId && currentFollowersBlockRunId === blockRunId) {
+          currentFollowersBlockRunId = null;
+        }
+
+        if (!currentFollowersScanRunId && !currentFollowersBlockRunId) {
+          currentFollowerRunTabId = null;
+        }
+
         setBusyState();
         refreshPopupDebugLog();
       }
@@ -1612,6 +1810,10 @@
 
     blockFollowerCandidatesButton.addEventListener('click', () => {
       handleAsyncPopupAction('blockScannedFollowers', blockScannedFollowers);
+    });
+
+    cancelFollowersRunButton.addEventListener('click', () => {
+      handleAsyncPopupAction('cancelActiveFollowerRun', cancelActiveFollowerRun);
     });
 
     openSettingsButton.addEventListener('click', () => {
@@ -1715,6 +1917,8 @@
       CONTENT_SCRIPT_FILES,
       FOLLOWERS_BLOCK_MESSAGE_TYPE,
       FOLLOWERS_BLOCK_PROGRESS_MESSAGE_TYPE,
+      FOLLOWERS_CANCEL_MESSAGE_TYPE,
+      FOLLOWERS_RUN_PORT_PREFIX,
       FOLLOWERS_SCAN_MESSAGE_TYPE,
       IMMEDIATE_BLOCK_MESSAGE_TYPE,
       POPUP_VIEWS,
@@ -1744,11 +1948,14 @@
       clearStoredPopupDebugEntries,
       clearStoredPopupState,
       appendPopupDebugEntry,
+      connectFollowerRunPort,
       loadStoredPopupState,
+      requestCancelFollowerRun,
       setPopupView,
       safeSerializePopupDetails,
       saveStoredPopupDebugEntries,
       saveStoredPopupState,
+      sendFollowerRunMessage,
       sendTabMessage
     };
   }

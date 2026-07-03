@@ -18,6 +18,7 @@
   });
   const MESSAGE_TYPES = Object.freeze({
     blockFollowerCandidatesViaApi: 'easy-tweetblock:block-follower-candidates-via-api',
+    cancelFollowerRun: 'easy-tweetblock:cancel-follower-run',
     followerBlockProgress: 'easy-tweetblock:follower-block-progress',
     blockUsernamesViaApi: 'easy-tweetblock:block-usernames-via-api',
     scanFollowersForBlock: 'easy-tweetblock:scan-followers-for-block'
@@ -246,6 +247,23 @@
     });
   }
 
+  function createAbortError(reason) {
+    if (reason instanceof Error) {
+      reason.name = 'AbortError';
+      return reason;
+    }
+
+    const error = new Error(typeof reason === 'string' && reason.trim()
+      ? reason
+      : 'Operation canceled.');
+    error.name = 'AbortError';
+    return error;
+  }
+
+  function isAbortError(error) {
+    return error?.name === 'AbortError';
+  }
+
   function readCookieValue(cookieSource, cookieName) {
     if (typeof cookieSource !== 'string' || !cookieSource || !cookieName) {
       return null;
@@ -371,6 +389,7 @@
     WAIT_INTERVAL_MS,
     WAIT_TIMEOUT_MS,
     createUsernameSet,
+    createAbortError,
     extractScreenNameFromHref,
     getButtonLabel,
     getButtonTitle,
@@ -380,6 +399,7 @@
     getExtensionApi,
     getStoredPageButtonStyle,
     getUserRestIdCache,
+    isAbortError,
     normalizeBatchBlockDelayMs,
     normalizePageButtonStyle,
     normalizeUsernameForMatching,

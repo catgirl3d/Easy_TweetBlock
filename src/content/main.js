@@ -52,6 +52,92 @@
     WAIT_INTERVAL_MS,
     WAIT_TIMEOUT_MS
   } = namespace;
+  const FOLLOWER_RUN_PORT_PREFIX = 'easy-tweetblock:follower-run:';
+
+  function normalizeFollowerRunId(runId) {
+    return typeof runId === 'string' && runId.trim() ? runId.trim() : null;
+  }
+
+  function getFollowerRunControllers() {
+    if (!namespace.contentState) {
+      namespace.contentState = {};
+    }
+
+    if (!namespace.contentState.followerRunControllers) {
+      namespace.contentState.followerRunControllers = new Map();
+    }
+
+    return namespace.contentState.followerRunControllers;
+  }
+
+  function startFollowerRun(runId) {
+    const normalizedRunId = normalizeFollowerRunId(runId);
+
+    if (!normalizedRunId || typeof AbortController !== 'function') {
+      return {
+        controller: null,
+        runId: normalizedRunId,
+        signal: null
+      };
+    }
+
+    const controllers = getFollowerRunControllers();
+    let controller = controllers.get(normalizedRunId);
+
+    if (!controller) {
+      controller = new AbortController();
+      controllers.set(normalizedRunId, controller);
+    }
+
+    return {
+      controller,
+      runId: normalizedRunId,
+      signal: controller.signal
+    };
+  }
+
+  function finishFollowerRun(runId, controller) {
+    const normalizedRunId = normalizeFollowerRunId(runId);
+
+    if (!normalizedRunId) {
+      return;
+    }
+
+    const controllers = getFollowerRunControllers();
+
+    if (!controller || controllers.get(normalizedRunId) === controller) {
+      controllers.delete(normalizedRunId);
+    }
+  }
+
+  function cancelFollowerRun(runId, reason = 'Follower run canceled.') {
+    const normalizedRunId = normalizeFollowerRunId(runId);
+
+    if (!normalizedRunId) {
+      return false;
+    }
+
+    const controllers = getFollowerRunControllers();
+    const controller = controllers.get(normalizedRunId);
+
+    if (!controller) {
+      return false;
+    }
+
+    if (!controller.signal.aborted) {
+      controller.abort(namespace.createAbortError(reason));
+    }
+
+    return true;
+  }
+
+  function readFollowerRunIdFromPortName(portName) {
+    if (typeof portName !== 'string' || !portName.startsWith(FOLLOWER_RUN_PORT_PREFIX)) {
+      return null;
+    }
+
+    return normalizeFollowerRunId(portName.slice(FOLLOWER_RUN_PORT_PREFIX.length));
+  }
 
   function waitForElement(selector, documentRef = document, timeoutMs = WAIT_TIMEOUT_MS) {
     return new Promise((resolve, reject) => {
@@ -234,6 +320,31 @@
     }
   }
 
+  function registerRuntimeConnectionListener(globalRef = globalThis) {
+    const extensionApi = namespace.getExtensionApi(globalRef);
+    const runtimeApi = extensionApi?.runtime;
+
+    if (!runtimeApi?.onConnect?.addListener || globalRef.__easyTweetBlockRuntimeConnectionListenerAttached__) {
+      return;
+    }
+
+    runtimeApi.onConnect.addListener((port) => {
+      const runId = readFollowerRunIdFromPortName(port?.name);
+
+      if (!runId || !port?.onDisconnect?.addListener) {
+        return;
+      }
+
+      port.onDisconnect.addListener(() => {
+        if (cancelFollowerRun(runId, 'Popup closed or disconnected.')) {
+          logContentInfo('Follower run port disconnected; canceled active run.', { runId });
+        }
+      });
+    });
+
+    globalRef.__easyTweetBlockRuntimeConnectionListenerAttached__ = true;
+  }
+
   function registerRuntimeMessageListener(globalRef = globalThis) {
     const extensionApi = namespace.getExtensionApi(globalRef);
     const runtimeApi = extensionApi?.runtime;
@@ -277,17 +388,35 @@
 
       if (message?.type === MESSAGE_TYPES.scanFollowersForBlock) {
         logContentInfo('Received runtime request: scan followers for block.', message);
+        const followerRun = startFollowerRun(message.runId);
+
         void namespace.scanFollowersForBlocking(message.options, {
-          documentRef: globalRef.document
+          documentRef: globalRef.document,
+          signal: followerRun.signal
         })
           .then((preview) => {
+            finishFollowerRun(followerRun.runId, followerRun.controller);
             sendResponse({
               ok: true,
               preview
             });
           })
           .catch((error) => {
+            if (namespace.isAbortError(error)) {
+              logContentInfo('Runtime followers preview scan canceled.', {
+                runId: followerRun.runId
+              });
+              finishFollowerRun(followerRun.runId, followerRun.controller);
+              sendResponse({
+                canceled: true,
+                error: error instanceof Error ? error.message : String(error),
+                ok: false
+              });
+              return;
+            }
+
             logContentError('Runtime followers preview scan failed.', error);
+            finishFollowerRun(followerRun.runId, followerRun.controller);
             sendResponse({
               error: error instanceof Error ? error.message : String(error),
               ok: false
@@ -299,6 +428,8 @@
 
       if (message?.type === MESSAGE_TYPES.blockFollowerCandidatesViaApi) {
         logContentInfo('Received runtime request: block follower candidates via API.', message);
+        const followerRun = startFollowerRun(message.runId);
+
         void namespace.blockFollowerCandidatesViaApi(message.candidates, {
           delayMs: message.delayMs,
           documentRef: globalRef.document,
@@ -308,16 +439,32 @@
               runId: message.runId || null,
               type: MESSAGE_TYPES.followerBlockProgress
             });
-          }
+          },
+          signal: followerRun.signal
         })
           .then((results) => {
+            finishFollowerRun(followerRun.runId, followerRun.controller);
             sendResponse({
               ok: true,
               results
             });
           })
           .catch((error) => {
+            if (namespace.isAbortError(error)) {
+              logContentInfo('Runtime follower candidate block run canceled.', {
+                runId: followerRun.runId
+              });
+              finishFollowerRun(followerRun.runId, followerRun.controller);
+              sendResponse({
+                canceled: true,
+                error: error instanceof Error ? error.message : String(error),
+                ok: false
+              });
+              return;
+            }
+
             logContentError('Runtime follower candidate block request failed.', error);
+            finishFollowerRun(followerRun.runId, followerRun.controller);
             sendResponse({
               error: error instanceof Error ? error.message : String(error),
               ok: false
@@ -325,6 +472,20 @@
           });
 
         return true;
+      }
+
+      if (message?.type === MESSAGE_TYPES.cancelFollowerRun) {
+        const canceled = cancelFollowerRun(message.runId);
+        logContentInfo('Received runtime request: cancel follower run.', {
+          canceled,
+          runId: normalizeFollowerRunId(message.runId)
+        });
+        sendResponse({
+          canceled,
+          ok: true
+        });
+
+        return false;
       }
 
       return false;
@@ -340,6 +501,7 @@
 
     globalRef.__easyTweetBlockInjected__ = true;
 
+    registerRuntimeConnectionListener(globalRef);
     registerRuntimeMessageListener(globalRef);
     void syncStoredPageButtonStyle(globalRef)
       .catch(() => {
@@ -377,14 +539,19 @@
 
   Object.assign(namespace, {
     applyCurrentNativeButtonStyleToDocument,
+    cancelFollowerRun,
     createApiBlockButton,
     createNativeBlockButton,
     createProfileBlockButton,
+    finishFollowerRun,
+    FOLLOWER_RUN_PORT_PREFIX,
     init,
     observeStoredPageButtonStyle,
+    registerRuntimeConnectionListener,
     registerRuntimeMessageListener,
     runProfileNativeBlockFlow,
     runNativeBlockFlow,
+    startFollowerRun,
     syncStoredPageButtonStyle,
     waitForElement
   });
@@ -418,6 +585,7 @@
       buildFollowersLookupUrls: namespace.buildFollowersLookupUrls,
       buildUserLookupUrls: namespace.buildUserLookupUrls,
       buildXApiHeaders: namespace.buildXApiHeaders,
+      cancelFollowerRun,
       collectTweets,
       createFollowerBlockCandidates: namespace.createFollowerBlockCandidates,
       discoverGraphqlQueryIds: namespace.discoverGraphqlQueryIds,
@@ -441,6 +609,8 @@
       getCsrfToken: namespace.getCsrfToken,
       getStoredPageButtonStyle: namespace.getStoredPageButtonStyle,
       fetchFollowersPage: namespace.fetchFollowersPage,
+      finishFollowerRun,
+      FOLLOWER_RUN_PORT_PREFIX,
       init,
       lookupUserRestId: namespace.lookupUserRestId,
       normalizeBatchBlockDelayMs: namespace.normalizeBatchBlockDelayMs,
@@ -455,6 +625,7 @@
       readScreenNameFromTweet: namespace.readScreenNameFromTweet,
       resolveOnDemandFileUrlFromRuntime: namespace.resolveOnDemandFileUrlFromRuntime,
       registerRuntimeMessageListener,
+      registerRuntimeConnectionListener,
       runImmediateBlockInPageContext: namespace.runImmediateBlockInPageContext,
       runApiBlockFlow: namespace.runApiBlockFlow,
       runProfileNativeBlockFlow,
@@ -464,6 +635,7 @@
       setCurrentNativeButtonStyle: namespace.setCurrentNativeButtonStyle,
       setButtonState: namespace.setButtonState,
       sleep: namespace.sleep,
+      startFollowerRun,
       subtreeContainsButton,
       syncStoredPageButtonStyle,
       tryGenerateXClientTransactionId: namespace.tryGenerateXClientTransactionId,

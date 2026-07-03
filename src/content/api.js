@@ -134,6 +134,49 @@
     'x.com'
   ]);
 
+  function waitForDelay(delayMs, sleepImpl, signal) {
+    signal?.throwIfAborted?.();
+
+    if (!signal || typeof signal.addEventListener !== 'function') {
+      return sleepImpl(delayMs);
+    }
+
+    return new Promise((resolve, reject) => {
+      let settled = false;
+
+      function cleanup() {
+        signal.removeEventListener('abort', handleAbort);
+      }
+
+      function settle(callback, value) {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        cleanup();
+        callback(value);
+      }
+
+      function handleAbort() {
+        settle(reject, namespace.createAbortError(signal.reason));
+      }
+
+      signal.addEventListener('abort', handleAbort, { once: true });
+
+      Promise.resolve()
+        .then(() => sleepImpl(delayMs))
+        .then(
+          () => settle(resolve),
+          (error) => settle(reject, error)
+        );
+
+      if (signal.aborted) {
+        handleAbort();
+      }
+    });
+  }
+
   function normalizeRestId(value) {
     if (typeof value !== 'string' && typeof value !== 'number') {
       return null;
@@ -314,12 +357,15 @@
     const {
       documentRef = document,
       fetchImpl = globalThis.fetch,
-      baseOrigin = documentRef?.location?.origin || 'https://x.com'
+      baseOrigin = documentRef?.location?.origin || 'https://x.com',
+      signal = null
     } = options;
     const cache = getGraphqlQueryIdCache();
     const cacheKey = operationName;
     const cachedEntry = cache.get(cacheKey);
     const now = Date.now();
+
+    signal?.throwIfAborted?.();
 
     if (cachedEntry && now - cachedEntry.createdAt < GRAPHQL_DISCOVERY_CACHE_TTL_MS) {
       return cachedEntry.queryIds;
@@ -339,10 +385,12 @@
 
     for (const scriptUrl of scriptUrls) {
       try {
+        signal?.throwIfAborted?.();
         const response = await fetchImpl(scriptUrl, {
           credentials: 'omit',
           method: 'GET',
-          mode: 'cors'
+          mode: 'cors',
+          signal
         });
 
         if (!response?.ok || typeof response.text !== 'function') {
@@ -366,6 +414,10 @@
         });
         return discoveredQueryIds;
       } catch (error) {
+        if (namespace.isAbortError(error) || signal?.aborted) {
+          throw signal?.reason || error;
+        }
+
         logContentApiError('Failed to scan X script asset for GraphQL query ids.', {
           error,
           operationName,
@@ -579,6 +631,7 @@
       documentRef = document,
       fetchImpl = globalThis.fetch,
       baseOrigin = documentRef?.location?.origin || 'https://x.com',
+      signal = null,
       source = DEFAULT_FOLLOWERS_SOURCE
     } = options;
     const sourceConfig = getFollowTimelineSourceConfig(source);
@@ -590,6 +643,8 @@
     let lastError = null;
 
     async function tryFetchFollowersPage(lookupQueryIds, source) {
+      signal?.throwIfAborted?.();
+
       const lookupUrls = buildFollowersLookupUrls(normalizedUserId, {
         baseOrigin,
         count,
@@ -613,14 +668,18 @@
 
       for (const lookupUrl of lookupUrls) {
         try {
+          signal?.throwIfAborted?.();
           const requestHeaders = { ...lookupHeaders };
           const transactionId = typeof namespace.tryGenerateXClientTransactionId === 'function'
             ? await namespace.tryGenerateXClientTransactionId('GET', new URL(lookupUrl).pathname, {
               baseOrigin,
               documentRef,
-              fetchImpl
+              fetchImpl,
+              signal
             })
             : null;
+
+          signal?.throwIfAborted?.();
 
           if (transactionId) {
             requestHeaders['x-client-transaction-id'] = transactionId;
@@ -630,7 +689,8 @@
             method: 'GET',
             headers: requestHeaders,
             credentials: 'include',
-            mode: 'cors'
+            mode: 'cors',
+            signal
           });
 
           if (!response.ok) {
@@ -655,6 +715,10 @@
           });
           return page;
         } catch (error) {
+          if (namespace.isAbortError(error) || signal?.aborted) {
+            throw signal?.reason || error;
+          }
+
           lastError = error;
           logContentApiError(`${sourceConfig.operationName} request threw an exception.`, {
             error,
@@ -673,10 +737,13 @@
       return primaryPage;
     }
 
+    signal?.throwIfAborted?.();
+
     const discoveredQueryIds = await discoverGraphqlQueryIds(sourceConfig.operationName, {
       baseOrigin,
       documentRef,
-      fetchImpl
+      fetchImpl,
+      signal
     });
     const primaryQueryIdSet = new Set(primaryQueryIds);
     const discoveredOnlyQueryIds = normalizeGraphqlQueryIds(discoveredQueryIds)
@@ -718,6 +785,16 @@
     };
   }
 
+  function getFollowerBlockCandidateKey(candidate) {
+    if (!candidate) {
+      return null;
+    }
+
+    return candidate.restId
+      ? `id:${candidate.restId}`
+      : `username:${candidate.username}`;
+  }
+
   function createFollowerBlockCandidates(candidates) {
     if (!Array.isArray(candidates)) {
       return [];
@@ -733,9 +810,7 @@
         continue;
       }
 
-      const candidateKey = normalizedCandidate.restId
-        ? `id:${normalizedCandidate.restId}`
-        : `username:${normalizedCandidate.username}`;
+      const candidateKey = getFollowerBlockCandidateKey(normalizedCandidate);
 
       if (seenKeys.has(candidateKey)) {
         continue;
@@ -753,6 +828,7 @@
       documentRef = document,
       fetchImpl = globalThis.fetch,
       baseOrigin = documentRef?.location?.origin || 'https://x.com',
+      signal = null,
       userLookupQueryIds = USER_BY_SCREEN_NAME_QUERY_IDS
     } = runtimeOptions;
     const sourceConfig = getFollowTimelineSourceConfig(options.source);
@@ -765,14 +841,18 @@
 
     const blockLimit = normalizeFollowersBlockLimit(options.blockLimit);
     const scanLimit = normalizeFollowersScanLimit(options.scanLimit);
+    signal?.throwIfAborted?.();
+
     const targetRestId = await lookupUserRestId(targetScreenName, {
       baseOrigin,
       cache: namespace.getUserRestIdCache(),
       documentRef,
       fetchImpl,
+      signal,
       queryIds: userLookupQueryIds
     });
     const candidates = [];
+    const seenAlreadyBlockedKeys = new Set();
     const seenCandidateKeys = new Set();
     let alreadyBlockedCount = 0;
     let cursor = typeof options.cursor === 'string' ? options.cursor : '';
@@ -782,6 +862,8 @@
     let stoppedByScanLimit = false;
 
     while (fetchedPageCount < scanLimit && candidates.length < blockLimit) {
+      signal?.throwIfAborted?.();
+
       const page = await fetchFollowersPage(targetRestId, {
         baseOrigin,
         count: FOLLOWERS_PAGE_SIZE,
@@ -789,6 +871,7 @@
         documentRef,
         fetchImpl,
         queryIds,
+        signal,
         source: sourceConfig.source
       });
       const users = Array.isArray(page.users) ? page.users : [];
@@ -799,6 +882,8 @@
       }
 
       for (const user of users) {
+        signal?.throwIfAborted?.();
+
         if (fetchedPageCount >= scanLimit) {
           stoppedByScanLimit = true;
           hasMorePages = true;
@@ -808,6 +893,17 @@
         fetchedPageCount += 1;
 
         if (user.blocking) {
+          const normalizedAlreadyBlockedUser = normalizeFollowerBlockCandidate(user);
+          const alreadyBlockedKey = getFollowerBlockCandidateKey(normalizedAlreadyBlockedUser);
+
+          if (alreadyBlockedKey && seenAlreadyBlockedKeys.has(alreadyBlockedKey)) {
+            continue;
+          }
+
+          if (alreadyBlockedKey) {
+            seenAlreadyBlockedKeys.add(alreadyBlockedKey);
+          }
+
           alreadyBlockedCount += 1;
           continue;
         }
@@ -818,9 +914,7 @@
           continue;
         }
 
-        const candidateKey = normalizedCandidate.restId
-          ? `id:${normalizedCandidate.restId}`
-          : `username:${normalizedCandidate.username}`;
+        const candidateKey = getFollowerBlockCandidateKey(normalizedCandidate);
 
         if (seenCandidateKeys.has(candidateKey)) {
           continue;
@@ -889,9 +983,12 @@
       fetchImpl = globalThis.fetch,
       baseOrigin = documentRef?.location?.origin || 'https://x.com',
       queryIds = USER_BY_SCREEN_NAME_QUERY_IDS,
-      cache = namespace.getUserRestIdCache()
+      cache = namespace.getUserRestIdCache(),
+      signal = null
     } = options;
     const cacheKey = normalizedScreenName.toLowerCase();
+
+    signal?.throwIfAborted?.();
 
     if (cache.has(cacheKey)) {
       return cache.get(cacheKey);
@@ -903,11 +1000,13 @@
 
     for (const lookupUrl of lookupUrls) {
       try {
+        signal?.throwIfAborted?.();
         const response = await fetchImpl(lookupUrl, {
           method: 'GET',
           headers: lookupHeaders,
           credentials: 'include',
-          mode: 'cors'
+          mode: 'cors',
+          signal
         });
 
         if (!response.ok) {
@@ -925,6 +1024,10 @@
 
         lastError = new Error(`User lookup response did not include rest_id for @${normalizedScreenName}`);
       } catch (error) {
+        if (namespace.isAbortError(error) || signal?.aborted) {
+          throw signal?.reason || error;
+        }
+
         lastError = error;
       }
     }
@@ -953,8 +1056,11 @@
       documentRef = document,
       fetchImpl = globalThis.fetch,
       baseOrigin = documentRef?.location?.origin || 'https://x.com',
+      signal = null,
       screenName = null
     } = options;
+    signal?.throwIfAborted?.();
+
     const blockResponse = await fetchImpl(new URL('/i/api/1.1/blocks/create.json', baseOrigin).toString(), {
       method: 'POST',
       headers: buildXApiHeaders(documentRef, {
@@ -964,7 +1070,8 @@
         user_id: normalizedRestId
       }).toString(),
       credentials: 'include',
-      mode: 'cors'
+      mode: 'cors',
+      signal
     });
 
     if (!blockResponse.ok) {
@@ -1006,19 +1113,24 @@
       fetchImpl = globalThis.fetch,
       baseOrigin = documentRef?.location?.origin || 'https://x.com',
       queryIds = USER_BY_SCREEN_NAME_QUERY_IDS,
-      cache = namespace.getUserRestIdCache()
+      cache = namespace.getUserRestIdCache(),
+      signal = null
     } = options;
+    signal?.throwIfAborted?.();
+
     const restId = await lookupUserRestId(normalizedUsername, {
       cache,
       documentRef,
       fetchImpl,
       baseOrigin,
-      queryIds
+      queryIds,
+      signal
     });
     return blockUserByRestIdViaApi(restId, {
       baseOrigin,
       documentRef,
       fetchImpl,
+      signal,
       screenName: normalizedUsername
     });
   }
@@ -1027,6 +1139,7 @@
     const normalizedCandidates = createFollowerBlockCandidates(candidates);
     const normalizedDelayMs = namespace.normalizeBatchBlockDelayMs(options.delayMs);
     const onProgress = typeof options.onProgress === 'function' ? options.onProgress : null;
+    const signal = options.signal || null;
     const sleepImpl = options.sleepImpl || namespace.sleep;
     const results = [];
     let failureCount = 0;
@@ -1052,6 +1165,8 @@
       }
     }
 
+    signal?.throwIfAborted?.();
+
     logContentApiInfo('Starting follower candidate block run.', {
       candidateCount: normalizedCandidates.length,
       delayMs: normalizedDelayMs
@@ -1059,6 +1174,7 @@
     reportProgress('started');
 
     for (const [index, candidate] of normalizedCandidates.entries()) {
+      signal?.throwIfAborted?.();
       reportProgress('blocking', {
         candidate,
         currentIndex: index + 1
@@ -1084,6 +1200,10 @@
           currentIndex: index + 1
         });
       } catch (error) {
+        if (namespace.isAbortError(error) || signal?.aborted) {
+          throw signal?.reason || error;
+        }
+
         logContentApiError('Follower candidate block failed.', {
           candidate,
           error
@@ -1108,7 +1228,7 @@
           currentIndex: index + 1,
           nextIndex: index + 2
         });
-        await sleepImpl(normalizedDelayMs);
+        await waitForDelay(normalizedDelayMs, sleepImpl, signal);
       }
     }
 

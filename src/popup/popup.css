@@ -37,7 +37,8 @@ h1 {
 .toolbar-button,
 .ghost-button,
 .secondary-button,
-.primary-button {
+.primary-button,
+.danger-button {
   appearance: none;
   border-radius: 9999px;
   padding: 8px 14px;
@@ -328,9 +329,19 @@ h1 {
 }
 
 .secondary-button:disabled,
-.primary-button:disabled {
+.primary-button:disabled,
+.danger-button:disabled {
   cursor: default;
   opacity: 0.7;
+}
+
+.danger-button {
+  border: 1px solid rgba(248, 113, 113, 0.38);
+  background: rgba(127, 29, 29, 0.28);
+}
+
+.danger-button:hover:not(:disabled) {
+  background: rgba(185, 28, 28, 0.36);
 }
 
 .followers-summary {

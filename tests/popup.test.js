@@ -8,6 +8,8 @@ const {
   CONTENT_SCRIPT_FILES,
   FOLLOWERS_BLOCK_MESSAGE_TYPE,
   FOLLOWERS_BLOCK_PROGRESS_MESSAGE_TYPE,
+  FOLLOWERS_CANCEL_MESSAGE_TYPE,
+  FOLLOWERS_RUN_PORT_PREFIX,
   FOLLOWERS_SCAN_MESSAGE_TYPE,
   POPUP_VIEWS,
   clearStoredPopupState,
@@ -116,6 +118,7 @@ function createPopupDocument() {
     'batch-block-delay-ms': createPopupElement(),
     'block-follower-candidates': createPopupElement(),
     'block-now': createPopupElement(),
+    'cancel-followers-run': createPopupElement(),
     'clear-popup-debug-log': createPopupElement(),
     'followers-block-limit': createPopupElement(),
     'followers-block-progress': createPopupElement(),
@@ -1098,17 +1101,14 @@ test('init scans followers in the active tab and blocks only the ready preview c
   assert.equal(elements['followers-summary'].textContent, 'Preview cleared. Run a new scan for another batch.');
   assert.equal(elements['followers-preview'].textContent, '');
   assert.equal(messages.length, 2);
-  assert.deepEqual(messages[0], {
-    message: {
-      options: {
-        blockLimit: 25,
-        scanLimit: 80,
-        source: 'followers'
-      },
-      type: FOLLOWERS_SCAN_MESSAGE_TYPE
-    },
-    tabId: 41
+  assert.equal(messages[0].tabId, 41);
+  assert.deepEqual(messages[0].message.options, {
+    blockLimit: 25,
+    scanLimit: 80,
+    source: 'followers'
   });
+  assert.equal(typeof messages[0].message.runId, 'string');
+  assert.equal(messages[0].message.type, FOLLOWERS_SCAN_MESSAGE_TYPE);
   assert.equal(messages[1].tabId, 41);
   assert.deepEqual(messages[1].message.candidates, [
     { restId: '101', username: 'alice' },
@@ -1117,6 +1117,109 @@ test('init scans followers in the active tab and blocks only the ready preview c
   assert.equal(messages[1].message.delayMs, 1100);
   assert.equal(typeof messages[1].message.runId, 'string');
   assert.equal(messages[1].message.type, FOLLOWERS_BLOCK_MESSAGE_TYPE);
+});
+
+test('init can cancel an active follower block run', async () => {
+  const { documentRef, elements } = createPopupDocument();
+  const blockDeferred = createDeferred();
+  const messages = [];
+  const ports = [];
+  let activeBlockRunId = null;
+  const blocklist = {
+    ...sharedBlocklist,
+    async getStoredBatchBlockDelayMs() {
+      return 1000;
+    },
+    async getStoredUsernames() {
+      return [];
+    }
+  };
+  const extensionApi = {
+    runtime: {},
+    tabs: {
+      connect(tabId, options) {
+        const port = {
+          disconnected: false,
+          name: options.name,
+          tabId,
+          disconnect() {
+            port.disconnected = true;
+          }
+        };
+        ports.push(port);
+        return port;
+      },
+      async query(queryInfo) {
+        if (queryInfo.active) {
+          return [{ id: 43, url: 'https://x.com/targetuser/followers' }];
+        }
+
+        return [];
+      },
+      async sendMessage(tabId, message) {
+        messages.push({ message, tabId });
+
+        if (message.type === FOLLOWERS_SCAN_MESSAGE_TYPE) {
+          return {
+            ok: true,
+            preview: {
+              alreadyBlockedCount: 0,
+              blockLimit: 5,
+              candidates: [{ restId: '101', username: 'alice' }],
+              hasMorePages: false,
+              readyCount: 1,
+              scanLimit: 10,
+              scannedCount: 1,
+              source: 'followers',
+              targetRestId: '999',
+              targetScreenName: 'targetuser'
+            }
+          };
+        }
+
+        if (message.type === FOLLOWERS_BLOCK_MESSAGE_TYPE) {
+          activeBlockRunId = message.runId;
+          return blockDeferred.promise;
+        }
+
+        if (message.type === FOLLOWERS_CANCEL_MESSAGE_TYPE) {
+          assert.equal(message.runId, activeBlockRunId);
+          blockDeferred.resolve({
+            canceled: true,
+            error: 'Follower run canceled.',
+            ok: false
+          });
+          return {
+            canceled: true,
+            ok: true
+          };
+        }
+
+        return { ok: false };
+      }
+    }
+  };
+
+  init(documentRef, extensionApi, blocklist, sharedFollowers);
+  await flushAsyncWork();
+
+  elements['open-followers'].click();
+  elements['scan-followers-preview'].click();
+  await flushAsyncWork();
+  await flushAsyncWork();
+  elements['block-follower-candidates'].click();
+  await flushAsyncWork();
+
+  assert.equal(elements['cancel-followers-run'].disabled, false);
+  elements['cancel-followers-run'].click();
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  assert.equal(messages.at(-1).message.type, FOLLOWERS_CANCEL_MESSAGE_TYPE);
+  assert.equal(messages.at(-1).tabId, 43);
+  assert.equal(ports.some((port) => port.name === `${FOLLOWERS_RUN_PORT_PREFIX}${activeBlockRunId}`), true);
+  assert.equal(elements.status.textContent, 'Block run canceled for followers.');
+  assert.equal(elements['followers-progress-label'].textContent, 'Run canceled');
 });
 
 test('init scans following when the following source is selected', async () => {
@@ -1181,6 +1284,7 @@ test('init scans following when the following source is selected', async () => {
     scanLimit: 15,
     source: 'following'
   });
+  assert.equal(typeof messages[0].message.runId, 'string');
   assert.equal(elements.status.textContent, 'Preview ready: 1 following account can be blocked from @targetuser.');
   assert.equal(elements['followers-summary'].textContent, 'Scanned 1 following account from @targetuser. Already blocked: 0. Ready: 1.');
   assert.equal(elements['followers-progress-label'].textContent, 'Ready to block 1 following account');

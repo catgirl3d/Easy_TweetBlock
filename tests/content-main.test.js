@@ -26,6 +26,7 @@ const {
   buildFollowersLookupUrls,
   buildUserLookupUrls,
   buildXApiHeaders,
+  cancelFollowerRun,
   collectTweets,
   createFollowerBlockCandidates,
   createApiBlockButton,
@@ -42,6 +43,8 @@ const {
   getButtonTitle,
   getCsrfToken,
   fetchFollowersPage,
+  finishFollowerRun,
+  FOLLOWER_RUN_PORT_PREFIX,
   init,
   lookupUserRestId,
   normalizeBatchBlockDelayMs,
@@ -54,6 +57,7 @@ const {
   readCookieValue,
   readScreenNameFromProfilePage,
   readScreenNameFromTweet,
+  registerRuntimeConnectionListener,
   registerRuntimeMessageListener,
   resolveOnDemandFileUrlFromRuntime,
   runProfileNativeBlockFlow,
@@ -61,6 +65,7 @@ const {
   scanFollowersForBlocking,
   setCurrentNativeButtonStyle,
   setButtonState,
+  startFollowerRun,
   syncStoredPageButtonStyle,
   waitForElement
 } = require('../src/content/main.js');
@@ -1024,6 +1029,19 @@ test('scanFollowersForBlocking skips already blocked followers and stops once th
                             itemContent: {
                               user_results: {
                                 result: {
+                                  core: { screen_name: 'AlreadyBlockedAgain' },
+                                  relationship_perspectives: { blocking: true },
+                                  rest_id: '301'
+                                }
+                              }
+                            }
+                          }
+                        },
+                        {
+                          content: {
+                            itemContent: {
+                              user_results: {
+                                result: {
                                   core: { screen_name: 'Alice' },
                                   relationship_perspectives: { blocking: false },
                                   rest_id: '101'
@@ -1082,7 +1100,7 @@ test('scanFollowersForBlocking skips already blocked followers and stops once th
 
   assert.equal(preview.targetScreenName, 'targetuser');
   assert.equal(preview.targetRestId, '999');
-  assert.equal(preview.scannedCount, 3);
+  assert.equal(preview.scannedCount, 4);
   assert.equal(preview.alreadyBlockedCount, 1);
   assert.equal(preview.readyCount, 2);
   assert.equal(preview.stoppedByBlockLimit, true);
@@ -1453,6 +1471,76 @@ test('blockFollowerCandidatesViaApi deduplicates candidates and uses rest_id whe
   assert.equal(progressEvents[0].delayMs, 1300);
   assert.equal(progressEvents.at(-1).successCount, 2);
   assert.equal(progressEvents.at(-1).failureCount, 0);
+});
+
+test('blockFollowerCandidatesViaApi aborts remaining candidates when canceled during delay', async () => {
+  const controller = new AbortController();
+  const abortError = new Error('Follower run canceled.');
+  abortError.name = 'AbortError';
+  const requestedUrls = [];
+  const sleepCalls = [];
+
+  async function fetchImpl(url, options = {}) {
+    requestedUrls.push({ options, url });
+
+    return {
+      ok: true,
+      async json() {
+        return { ok: true };
+      }
+    };
+  }
+
+  await assert.rejects(async () => blockFollowerCandidatesViaApi([
+    { restId: '111', username: 'Alice' },
+    { restId: '222', username: 'Bob' }
+  ], {
+    delayMs: 1000,
+    documentRef: {
+      cookie: 'ct0=token123',
+      documentElement: { lang: 'en-US' },
+      location: { origin: 'https://x.com' }
+    },
+    fetchImpl,
+    signal: controller.signal,
+    sleepImpl: async (delayMs) => {
+      sleepCalls.push(delayMs);
+      controller.abort(abortError);
+      return new Promise(() => {});
+    }
+  }), (error) => error?.name === 'AbortError' && error.message === 'Follower run canceled.');
+
+  assert.equal(requestedUrls.filter((entry) => entry.options.method === 'POST').length, 1);
+  assert.deepEqual(sleepCalls, [1000]);
+});
+
+test('scanFollowersForBlocking rejects before network work when already canceled', async () => {
+  const controller = new AbortController();
+  const abortError = new Error('Follower run canceled.');
+  abortError.name = 'AbortError';
+  let fetchCount = 0;
+  controller.abort(abortError);
+
+  await assert.rejects(async () => scanFollowersForBlocking({
+    blockLimit: 2,
+    scanLimit: 10
+  }, {
+    documentRef: {
+      cookie: 'ct0=token123',
+      documentElement: { lang: 'en-US' },
+      location: {
+        origin: 'https://x.com',
+        pathname: '/targetuser/followers'
+      }
+    },
+    fetchImpl: async () => {
+      fetchCount += 1;
+      return { ok: false };
+    },
+    signal: controller.signal
+  }), (error) => error?.name === 'AbortError' && error.message === 'Follower run canceled.');
+
+  assert.equal(fetchCount, 0);
 });
 
 test('normalizeBatchBlockDelayMs clamps values into the supported range', () => {
@@ -1896,16 +1984,21 @@ test('registerRuntimeMessageListener answers followers preview and follower bloc
   const originalScanFollowersForBlocking = globalThis.EasyTweetBlockContent.scanFollowersForBlocking;
   const originalBlockFollowerCandidatesViaApi = globalThis.EasyTweetBlockContent.blockFollowerCandidatesViaApi;
 
-  globalThis.EasyTweetBlockContent.scanFollowersForBlocking = async () => ({
-    alreadyBlockedCount: 1,
-    candidates: [{ restId: '101', username: 'alice' }],
-    hasMorePages: false,
-    readyCount: 1,
-    scannedCount: 3,
-    targetRestId: '999',
-    targetScreenName: 'targetuser'
-  });
+  globalThis.EasyTweetBlockContent.scanFollowersForBlocking = async (_options, runtimeOptions) => {
+    assert.equal(Boolean(runtimeOptions.signal), true);
+
+    return {
+      alreadyBlockedCount: 1,
+      candidates: [{ restId: '101', username: 'alice' }],
+      hasMorePages: false,
+      readyCount: 1,
+      scannedCount: 3,
+      targetRestId: '999',
+      targetScreenName: 'targetuser'
+    };
+  };
   globalThis.EasyTweetBlockContent.blockFollowerCandidatesViaApi = async (_candidates, options) => {
+    assert.equal(Boolean(options.signal), true);
     options.onProgress({
       completed: 1,
       delayMs: options.delayMs,
@@ -1925,6 +2018,7 @@ test('registerRuntimeMessageListener answers followers preview and follower bloc
 
   assert.equal(listeners[0]({
     options: { blockLimit: 1, scanLimit: 3 },
+    runId: 'scan-run-1',
     type: MESSAGE_TYPES.scanFollowersForBlock
   }, null, (response) => {
     responses.push(response);
@@ -1971,6 +2065,56 @@ test('registerRuntimeMessageListener answers followers preview and follower bloc
     runId: 'run-1',
     type: MESSAGE_TYPES.followerBlockProgress
   }]);
+});
+
+test('registerRuntimeConnectionListener cancels an active follower run when the popup port disconnects', () => {
+  const connectListeners = [];
+  const disconnectListeners = [];
+  const globalRef = {
+    chrome: {
+      runtime: {
+        onConnect: {
+          addListener(listener) {
+            connectListeners.push(listener);
+          }
+        }
+      }
+    }
+  };
+
+  registerRuntimeConnectionListener(globalRef);
+  registerRuntimeConnectionListener(globalRef);
+
+  assert.equal(connectListeners.length, 1);
+
+  const followerRun = startFollowerRun('port-run-1');
+
+  connectListeners[0]({
+    name: `${FOLLOWER_RUN_PORT_PREFIX}port-run-1`,
+    onDisconnect: {
+      addListener(listener) {
+        disconnectListeners.push(listener);
+      }
+    }
+  });
+
+  assert.equal(disconnectListeners.length, 1);
+  assert.equal(followerRun.signal.aborted, false);
+  disconnectListeners[0]();
+  assert.equal(followerRun.signal.aborted, true);
+  finishFollowerRun('port-run-1', followerRun.controller);
+});
+
+test('cancelFollowerRun does not poison an already finished run id', () => {
+  const firstRun = startFollowerRun('finished-run-1');
+
+  finishFollowerRun('finished-run-1', firstRun.controller);
+  assert.equal(cancelFollowerRun('finished-run-1'), false);
+
+  const secondRun = startFollowerRun('finished-run-1');
+
+  assert.equal(secondRun.signal.aborted, false);
+  finishFollowerRun('finished-run-1', secondRun.controller);
 });
 
 test('registerRuntimeMessageListener falls back to free chrome/browser globals when globalRef hides them', async (t) => {
