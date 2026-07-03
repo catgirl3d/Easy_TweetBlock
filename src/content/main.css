@@ -11,7 +11,7 @@
   margin: 0;
 }
 
-[data-easy-tweetblock-button][data-kind="native"][data-display-style="icon"] {
+[data-easy-tweetblock-button][data-kind="native"][data-display-style="icon"]:not([data-surface="profile"]) {
   --etb-hit-size: 32px;
 
   flex: 0 0 var(--etb-hit-size);
@@ -24,7 +24,7 @@
   transform: translateY(0.6px);
 }
 
-[data-easy-tweetblock-button][data-kind="native"][data-display-style="icon"]::before {
+[data-easy-tweetblock-button][data-kind="native"][data-display-style="icon"]:not([data-surface="profile"])::before {
   content: "";
   position: absolute;
   top: 50%;
@@ -34,6 +34,31 @@
   border-radius: 9999px;
   transform: translate(-50%, -50%);
   transition: background-color 120ms ease;
+}
+
+[data-easy-tweetblock-button][data-kind="native"][data-surface="profile"] {
+  box-sizing: border-box;
+  color: rgb(15, 20, 25);
+  margin-bottom: 12px;
+  flex-shrink: 0;
+  margin-right: 8px;
+}
+
+[data-easy-tweetblock-button][data-kind="native"][data-surface="profile"][data-display-style="icon"] {
+  --etb-hit-size: 36px;
+
+  border: 1px solid rgb(207, 217, 222);
+  flex: 0 0 var(--etb-hit-size);
+  height: var(--etb-hit-size);
+  line-height: 1;
+  padding: 0;
+  position: relative;
+  width: var(--etb-hit-size);
+}
+
+[data-easy-tweetblock-button][data-kind="native"][data-surface="profile"][data-display-style="icon"] svg {
+  height: 20px;
+  width: 20px;
 }
 
 [data-easy-tweetblock-button][data-display-style="icon"] {
@@ -67,13 +92,18 @@
   color: rgb(244, 33, 46);
 }
 
-[data-easy-tweetblock-button][data-kind="native"][data-display-style="icon"]:hover:not(:disabled) {
+[data-easy-tweetblock-button][data-kind="native"][data-display-style="icon"]:not([data-surface="profile"]):hover:not(:disabled) {
   background: transparent;
   border-color: transparent;
 }
 
-[data-easy-tweetblock-button][data-kind="native"][data-display-style="icon"]:hover:not(:disabled)::before {
+[data-easy-tweetblock-button][data-kind="native"][data-display-style="icon"]:not([data-surface="profile"]):hover:not(:disabled)::before {
   background: rgba(244, 33, 46, 0.12);
+}
+
+[data-easy-tweetblock-button][data-kind="native"][data-surface="profile"]:hover:not(:disabled) {
+  background: rgba(244, 33, 46, 0.08);
+  border-color: rgba(244, 33, 46, 0.35);
 }
 
 [data-easy-tweetblock-button][data-state="running"] {

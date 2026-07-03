@@ -14,6 +14,7 @@ const {
   SELECTORS,
   USER_BY_SCREEN_NAME_QUERY_IDS,
   applyCurrentNativeButtonStyleToDocument,
+  attachButtonToProfilePage,
   attachButtonToTweet,
   blockUserByScreenNameViaApi,
   blockUsernamesViaApi,
@@ -22,6 +23,7 @@ const {
   collectTweets,
   createApiBlockButton,
   createNativeBlockButton,
+  createProfileBlockButton,
   createUsernameSet,
   extractScreenNameFromHref,
   getStoredPageButtonStyle,
@@ -36,8 +38,10 @@ const {
   observeStoredPageButtonStyle,
   parseUserLookupRestId,
   readCookieValue,
+  readScreenNameFromProfilePage,
   readScreenNameFromTweet,
   registerRuntimeMessageListener,
+  runProfileNativeBlockFlow,
   runNativeBlockFlow,
   setCurrentNativeButtonStyle,
   setButtonState,
@@ -170,6 +174,7 @@ function createDocumentStub() {
   const createdElements = [];
   const documentRef = {
     body: {},
+    nodeType: 9,
     createElement(tagName) {
       const element = createDomElement({ tagName });
       createdElements.push(element);
@@ -347,6 +352,101 @@ function createTweetNode(screenName = 'Felixmfdo', options = {}) {
   };
 }
 
+function createProfilePageDocument(screenName = 'Felixmfdo') {
+  const { createdElements, documentRef } = createDocumentStub();
+  const moreButton = createDomElement({
+    nodeType: 1,
+    tagName: 'BUTTON',
+    matches(selector) {
+      return selector === 'button' || selector === SELECTORS.profileActionsButton;
+    }
+  });
+  const messageButton = createDomElement({
+    nodeType: 1,
+    tagName: 'BUTTON',
+    matches(selector) {
+      return selector === 'button';
+    }
+  });
+  const followButton = createDomElement({
+    nodeType: 1,
+    tagName: 'BUTTON',
+    matches(selector) {
+      return selector === 'button';
+    }
+  });
+  const placementTracking = {
+    nodeType: 1,
+    children: [followButton],
+    querySelector(selector) {
+      return selector === 'button' ? followButton : null;
+    }
+  };
+  const actionBar = {
+    nodeType: 1,
+    get firstElementChild() {
+      return actionBar.children[0] || null;
+    },
+    children: [moreButton, messageButton, placementTracking],
+    insertBefore(child, referenceNode) {
+      insertChildBefore(actionBar, child, referenceNode);
+    },
+    querySelector(selector) {
+      if (selector === SELECTORS.profileActionsButton) {
+        return moreButton;
+      }
+
+      if (selector === `[${BLOCK_BUTTON_ATTRIBUTE}]`) {
+        return findDescendant(actionBar, (node) => (
+          typeof node?.getAttribute === 'function'
+          && node.getAttribute(BLOCK_BUTTON_ATTRIBUTE) !== null
+        ));
+      }
+
+      return null;
+    }
+  };
+
+  moreButton.parentElement = actionBar;
+  messageButton.parentElement = actionBar;
+  placementTracking.parentElement = actionBar;
+  followButton.parentElement = placementTracking;
+
+  documentRef.location = {
+    origin: 'https://x.com',
+    pathname: `/${screenName}`
+  };
+  documentRef.querySelector = (selector) => {
+    if (selector === SELECTORS.profileActionsButton) {
+      return moreButton;
+    }
+
+    return null;
+  };
+  documentRef.querySelectorAll = (selector) => {
+    if (selector === SELECTORS.tweet) {
+      return [];
+    }
+
+    if (selector === `[${BLOCK_BUTTON_ATTRIBUTE}][data-kind="native"]`) {
+      const managedButton = actionBar.querySelector(`[${BLOCK_BUTTON_ATTRIBUTE}]`);
+      return managedButton ? [managedButton] : [];
+    }
+
+    return [];
+  };
+
+  return {
+    actionBar,
+    createdElements,
+    documentRef,
+    followButton,
+    messageButton,
+    moreButton,
+    placementTracking
+  };
+}
+
 test('extractScreenNameFromHref reads a screen name from tweet permalinks', () => {
   assert.equal(extractScreenNameFromHref('/Felixmfdo/status/2072691291956068443'), 'Felixmfdo');
   assert.equal(extractScreenNameFromHref('https://x.com/Felixmfdo/status/2072691291956068443'), 'Felixmfdo');
@@ -402,6 +502,18 @@ test('readScreenNameFromTweet falls back to avatar data-testid', () => {
   });
 
   assert.equal(readScreenNameFromTweet(tweet), 'Felixmfdo');
+});
+
+test('readScreenNameFromProfilePage reads the username from the current profile path', () => {
+  assert.equal(readScreenNameFromProfilePage({
+    location: { pathname: '/Felixmfdo' }
+  }), 'Felixmfdo');
+  assert.equal(readScreenNameFromProfilePage({
+    location: { pathname: '/Felixmfdo/with_replies' }
+  }), 'Felixmfdo');
+  assert.equal(readScreenNameFromProfilePage({
+    location: { pathname: '/home' }
+  }), null);
 });
 
 test('setButtonState updates the visible label and accessibility metadata', () => {
@@ -971,6 +1083,25 @@ test('attachButtonToTweet moves an existing native button into the Grok action w
   assert.equal(localButtonGroup.children[0], caretButton);
 });
 
+test('attachButtonToProfilePage inserts the native button before the profile actions trigger', (t) => {
+  const { actionBar, createdElements, documentRef, moreButton, messageButton } = createProfilePageDocument('281v6s1b5z51');
+
+  useGlobalOverrides(t, { document: documentRef });
+  setCurrentNativeButtonStyle(PAGE_BUTTON_STYLES.icon);
+
+  attachButtonToProfilePage(documentRef);
+
+  assert.equal(createdElements.length, 1);
+  assert.equal(actionBar.children[0].dataset.kind, BUTTON_KINDS.native);
+  assert.equal(actionBar.children[0].dataset.screenName, '281v6s1b5z51');
+  assert.equal(actionBar.children[1], moreButton);
+  assert.equal(actionBar.children[2], messageButton);
+
+  attachButtonToProfilePage(documentRef);
+
+  assert.equal(createdElements.length, 1);
+});
+
 test('collectTweets returns the root tweet and nested tweet descendants', () => {
   const nestedTweet = { id: 'nested' };
   const rootNode = {
@@ -1137,6 +1268,59 @@ test('createNativeBlockButton runs the native flow and updates state on success'
 
   assert.deepEqual(clickOrder, ['caret', 'menu', 'confirm']);
   assert.equal(button.dataset.state, 'success');
+});
+
+test('createProfileBlockButton runs the profile native flow and updates state on success', async (t) => {
+  const { documentRef } = createProfilePageDocument('281v6s1b5z51');
+  const clickOrder = [];
+  const blockMenuItem = {
+    click() {
+      clickOrder.push('menu');
+    }
+  };
+  const confirmButton = {
+    click() {
+      clickOrder.push('confirm');
+    }
+  };
+
+  documentRef.querySelector = (selector) => {
+    if (selector === SELECTORS.profileActionsButton) {
+      return {
+        click() {
+          clickOrder.push('profile-actions');
+        }
+      };
+    }
+
+    if (selector === SELECTORS.blockMenuItem) {
+      return blockMenuItem;
+    }
+
+    if (selector === SELECTORS.blockConfirmButton) {
+      return confirmButton;
+    }
+
+    return null;
+  };
+
+  useGlobalOverrides(t, { document: documentRef });
+
+  const button = createProfileBlockButton(documentRef);
+
+  button.click();
+  await flushAsyncWork();
+
+  assert.deepEqual(clickOrder, ['profile-actions', 'menu', 'confirm']);
+  assert.equal(button.dataset.state, 'success');
+});
+
+test('runProfileNativeBlockFlow requires the profile actions button', async () => {
+  await assert.rejects(async () => runProfileNativeBlockFlow({
+    querySelector() {
+      return null;
+    }
+  }), /Missing profile actions button/);
 });
 
 test('registerRuntimeMessageListener attaches only once and answers block requests', async () => {
@@ -1306,4 +1490,49 @@ test('init repositions the native button when the Grok action appears after the 
 
   assert.equal(leadingAction.children[0], nativeButton);
   assert.equal(localButtonGroup.children[0], caretButton);
+});
+
+test('init adds the native block button to the profile action bar on initial page scan', (t) => {
+  const { actionBar, documentRef, moreButton } = createProfilePageDocument('281v6s1b5z51');
+  let observerCallback = null;
+
+  useGlobalOverrides(t, { document: documentRef });
+
+  class FakeMutationObserver {
+    constructor(callback) {
+      observerCallback = callback;
+    }
+
+    observe() {}
+  }
+
+  const globalRef = {
+    MutationObserver: FakeMutationObserver,
+    chrome: {
+      runtime: {
+        onMessage: {
+          addListener() {}
+        }
+      },
+      storage: {
+        local: {
+          get(_keys, callback) {
+            callback({});
+          }
+        },
+        onChanged: {
+          addListener() {},
+          removeListener() {}
+        }
+      }
+    },
+    document: documentRef
+  };
+
+  init(globalRef);
+  return flushAsyncWork().then(() => {
+    assert.equal(actionBar.children[0].dataset.kind, BUTTON_KINDS.native);
+    assert.equal(actionBar.children[1], moreButton);
+    assert.equal(typeof observerCallback, 'function');
+  });
 });

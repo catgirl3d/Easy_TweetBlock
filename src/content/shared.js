@@ -5,6 +5,7 @@
     tweet: 'article[data-testid="tweet"]',
     caretButton: 'button[data-testid="caret"]',
     grokButton: 'button[aria-label="Grok actions"]',
+    profileActionsButton: 'button[data-testid="userActions"]',
     blockMenuItem: '[data-testid="block"]',
     blockConfirmButton: '[data-testid="confirmationSheetConfirm"]',
     permalink: 'a[href*="/status/"]',
@@ -113,6 +114,22 @@
 
     const avatarScreenName = avatarTestId.slice('UserAvatar-Container-'.length).trim();
     return avatarScreenName || null;
+  }
+
+  function readScreenNameFromProfilePage(documentRef = document) {
+    const pathname = documentRef?.location?.pathname;
+
+    if (typeof pathname !== 'string' || !pathname.trim()) {
+      return null;
+    }
+
+    const [firstPathSegment] = pathname.split('/').filter(Boolean);
+
+    if (!firstPathSegment || RESERVED_PATH_SEGMENTS.has(firstPathSegment.toLowerCase())) {
+      return null;
+    }
+
+    return USERNAME_PATTERN.test(firstPathSegment) ? firstPathSegment : null;
   }
 
   function normalizeUsernameForMatching(value) {
@@ -356,6 +373,7 @@
     normalizePageButtonStyle,
     normalizeUsernameForMatching,
     readCookieValue,
+    readScreenNameFromProfilePage,
     readScreenNameFromTweet,
     setButtonState,
     setCurrentNativeButtonStyle,

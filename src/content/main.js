@@ -63,8 +63,16 @@
       throw new Error('Missing tweet caret button.');
     }
 
+    return runNativeBlockFlowFromTriggerButton(caretButton, documentRef);
+  }
+
+  async function runNativeBlockFlowFromTriggerButton(triggerButton, documentRef = document) {
+    if (!triggerButton) {
+      throw new Error('Missing native block trigger button.');
+    }
+
     // Reuse X's own UI flow so auth, CSRF, and anti-bot state stay in the page session.
-    caretButton.click();
+    triggerButton.click();
 
     const blockMenuItem = await waitForElement(SELECTORS.blockMenuItem, documentRef);
     blockMenuItem.click();
@@ -73,9 +81,18 @@
     confirmButton.click();
   }
 
-  function createActionButton(tweet, kind, action) {
+  async function runProfileNativeBlockFlow(documentRef = document) {
+    const profileActionsButton = documentRef?.querySelector?.(SELECTORS.profileActionsButton);
+
+    if (!profileActionsButton) {
+      throw new Error('Missing profile actions button.');
+    }
+
+    return runNativeBlockFlowFromTriggerButton(profileActionsButton, documentRef);
+  }
+
+  function createActionButton(targetRoot, kind, action, screenName = namespace.readScreenNameFromTweet(targetRoot)) {
     const button = document.createElement('button');
-    const screenName = namespace.readScreenNameFromTweet(tweet);
 
     button.type = 'button';
     button.setAttribute(BLOCK_BUTTON_ATTRIBUTE, 'true');
@@ -107,7 +124,27 @@
   }
 
   function createNativeBlockButton(tweet, documentRef = document) {
-    return createActionButton(tweet, BUTTON_KINDS.native, () => runNativeBlockFlow(tweet, documentRef));
+    const button = createActionButton(tweet, BUTTON_KINDS.native, () => runNativeBlockFlow(tweet, documentRef));
+    button.dataset.surface = 'tweet';
+    return button;
+  }
+
+  function createProfileBlockButton(documentRef = document) {
+    const screenName = namespace.readScreenNameFromProfilePage(documentRef);
+
+    if (!screenName) {
+      return null;
+    }
+
+    const button = createActionButton(
+      documentRef,
+      BUTTON_KINDS.native,
+      () => runProfileNativeBlockFlow(documentRef),
+      screenName
+    );
+
+    button.dataset.surface = 'profile';
+    return button;
   }
 
   function createApiBlockButton(tweet, options = {}) {
@@ -209,7 +246,7 @@
         namespace.setCurrentNativeButtonStyle(DEFAULT_PAGE_BLOCK_BUTTON_STYLE);
       })
       .finally(() => {
-        processNode(globalRef.document);
+        processNode(globalRef.document, globalRef.document);
       });
 
     const stopStyleObservation = observeStoredPageButtonStyle(globalRef);
@@ -226,7 +263,7 @@
       for (const mutation of mutations) {
         for (const node of mutation.addedNodes) {
           if (node?.nodeType === 1) {
-            processNode(node);
+            processNode(node, globalRef.document);
           }
         }
       }
@@ -242,9 +279,11 @@
     applyCurrentNativeButtonStyleToDocument,
     createApiBlockButton,
     createNativeBlockButton,
+    createProfileBlockButton,
     init,
     observeStoredPageButtonStyle,
     registerRuntimeMessageListener,
+    runProfileNativeBlockFlow,
     runNativeBlockFlow,
     syncStoredPageButtonStyle,
     waitForElement
@@ -267,6 +306,7 @@
       USER_BY_SCREEN_NAME_FEATURES,
       USER_BY_SCREEN_NAME_QUERY_IDS,
       WAIT_TIMEOUT_MS,
+      attachButtonToProfilePage: namespace.attachButtonToProfilePage,
       attachButtonToTweet,
       blockUserByScreenNameViaApi: namespace.blockUserByScreenNameViaApi,
       blockUsernamesViaApi: namespace.blockUsernamesViaApi,
@@ -276,8 +316,10 @@
       createApiBlockButton,
       createUsernameSet: namespace.createUsernameSet,
       createNativeBlockButton,
+      createProfileBlockButton,
       extractScreenNameFromHref: namespace.extractScreenNameFromHref,
       findActionRowContainer,
+      findProfileActionBar: namespace.findProfileActionBar,
       findPrimaryActionWrapper,
       getExtensionApi: namespace.getExtensionApi,
       getElementChildren,
@@ -294,10 +336,12 @@
       observeStoredPageButtonStyle,
       parseUserLookupRestId: namespace.parseUserLookupRestId,
       readCookieValue: namespace.readCookieValue,
+      readScreenNameFromProfilePage: namespace.readScreenNameFromProfilePage,
       readScreenNameFromTweet: namespace.readScreenNameFromTweet,
       registerRuntimeMessageListener,
       runImmediateBlockInPageContext: namespace.runImmediateBlockInPageContext,
       runApiBlockFlow: namespace.runApiBlockFlow,
+      runProfileNativeBlockFlow,
       runNativeBlockFlow,
       applyCurrentNativeButtonStyleToDocument,
       setCurrentNativeButtonStyle: namespace.setCurrentNativeButtonStyle,

@@ -46,7 +46,7 @@
   }
 
   function nodeMatchesOrContains(node, selector) {
-    if (!node || node.nodeType !== 1) {
+    if (!node || (node.nodeType !== 1 && node.nodeType !== 9)) {
       return false;
     }
 
@@ -55,6 +55,29 @@
     }
 
     return typeof node.querySelector === 'function' && Boolean(node.querySelector(selector));
+  }
+
+  function findManagedButton(rootNode) {
+    if (!rootNode) {
+      return null;
+    }
+
+    if (
+      typeof rootNode.getAttribute === 'function'
+      && rootNode.getAttribute(BLOCK_BUTTON_ATTRIBUTE) !== null
+    ) {
+      return rootNode;
+    }
+
+    for (const child of getElementChildren(rootNode)) {
+      const match = findManagedButton(child);
+
+      if (match) {
+        return match;
+      }
+    }
+
+    return null;
   }
 
   function findActionRowContainer(caretButton, tweet) {
@@ -141,6 +164,54 @@
     actionWrapper.insertBefore(nativeButton, referenceNode);
   }
 
+  function findProfileActionBar(profileActionsButton) {
+    const actionBar = profileActionsButton?.parentElement || null;
+
+    if (!actionBar || typeof actionBar.insertBefore !== 'function') {
+      return null;
+    }
+
+    return actionBar;
+  }
+
+  function attachButtonToProfilePage(documentRef = document) {
+    if (!documentRef || typeof documentRef.querySelector !== 'function') {
+      return;
+    }
+
+    const profileActionsButton = documentRef.querySelector(SELECTORS.profileActionsButton);
+
+    if (!profileActionsButton) {
+      return;
+    }
+
+    const actionBar = findProfileActionBar(profileActionsButton);
+
+    if (!actionBar) {
+      return;
+    }
+
+    const existingButton = findManagedButton(actionBar);
+    const nativeButton = existingButton || namespace.createProfileBlockButton?.(documentRef);
+
+    if (!nativeButton) {
+      return;
+    }
+
+    const actionBarChildren = getElementChildren(actionBar);
+    const profileActionsButtonIndex = actionBarChildren.indexOf(profileActionsButton);
+
+    if (
+      nativeButton.parentElement === actionBar
+      && profileActionsButtonIndex > 0
+      && actionBarChildren[profileActionsButtonIndex - 1] === nativeButton
+    ) {
+      return;
+    }
+
+    actionBar.insertBefore(nativeButton, profileActionsButton);
+  }
+
   function collectTweets(rootNode) {
     if (!rootNode || typeof rootNode.querySelectorAll !== 'function') {
       return [];
@@ -155,7 +226,7 @@
     return tweets.concat(Array.from(rootNode.querySelectorAll(SELECTORS.tweet)));
   }
 
-  function processNode(rootNode) {
+  function processNode(rootNode, documentRef = document) {
     const tweets = collectTweets(rootNode);
     const isOwnButton = rootNode?.nodeType === 1
       && typeof rootNode.matches === 'function'
@@ -172,14 +243,20 @@
       }
     }
 
+    if (nodeMatchesOrContains(rootNode, SELECTORS.profileActionsButton)) {
+      attachButtonToProfilePage(documentRef);
+    }
+
     for (const tweet of tweets) {
-      attachButtonToTweet(tweet);
+      attachButtonToTweet(tweet, documentRef);
     }
   }
 
   const domExports = {
+    attachButtonToProfilePage,
     attachButtonToTweet,
     collectTweets,
+    findProfileActionBar,
     findActionRowContainer,
     findPrimaryActionWrapper,
     getElementChildren,
