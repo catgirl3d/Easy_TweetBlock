@@ -8,6 +8,7 @@
     BLOCK_BUTTON_ATTRIBUTE,
     SELECTORS
   } = namespace;
+  const USER_CELL_ACTIONS_ATTRIBUTE = 'data-easy-tweetblock-user-cell-actions';
 
   function getElementChildren(node) {
     if (!node) {
@@ -126,6 +127,79 @@
     return null;
   }
 
+  function findAncestorUserCell(node) {
+    let current = node?.nodeType === 1 ? node : node?.parentElement || null;
+
+    while (current) {
+      if (typeof current.matches === 'function' && current.matches(SELECTORS.userCell)) {
+        return current;
+      }
+
+      current = current.parentElement || null;
+    }
+
+    return null;
+  }
+
+  function findFirstDescendant(rootNode, predicate) {
+    for (const child of getElementChildren(rootNode)) {
+      if (predicate(child)) {
+        return child;
+      }
+
+      const nestedMatch = findFirstDescendant(child, predicate);
+
+      if (nestedMatch) {
+        return nestedMatch;
+      }
+    }
+
+    return null;
+  }
+
+  function isButtonElement(node) {
+    if (!node) {
+      return false;
+    }
+
+    if (node.tagName === 'button' || node.tagName === 'BUTTON') {
+      return true;
+    }
+
+    return typeof node.matches === 'function' && node.matches('button');
+  }
+
+  function findDirectChildAncestor(ancestorNode, descendantNode) {
+    let current = descendantNode || null;
+
+    while (current?.parentElement && current.parentElement !== ancestorNode) {
+      current = current.parentElement;
+    }
+
+    return current?.parentElement === ancestorNode ? current : null;
+  }
+
+  function findUserCellActionButton(userCell) {
+    return findFirstDescendant(userCell, (node) => (
+      isButtonElement(node)
+      && node.getAttribute?.(BLOCK_BUTTON_ATTRIBUTE) === null
+    ));
+  }
+
+  function findUserCellActionBar(actionButton, userCell) {
+    let current = actionButton?.parentElement || null;
+
+    while (current && current !== userCell) {
+      if (findDirectChildAncestor(current, actionButton) && getElementChildren(current).length > 1) {
+        return current;
+      }
+
+      current = current.parentElement || null;
+    }
+
+    return actionButton?.parentElement || null;
+  }
+
   function attachButtonToTweet(tweet, documentRef = document) {
     if (!tweet) {
       return;
@@ -212,6 +286,57 @@
     actionBar.insertBefore(nativeButton, profileActionsButton);
   }
 
+  function attachButtonToUserCell(userCell, documentRef = document) {
+    if (!userCell) {
+      return;
+    }
+
+    const actionButton = findUserCellActionButton(userCell);
+
+    if (!actionButton) {
+      return;
+    }
+
+    const actionBar = findUserCellActionBar(actionButton, userCell);
+
+    if (!actionBar || typeof actionBar.insertBefore !== 'function') {
+      return;
+    }
+
+    const existingButton = findManagedButton(userCell);
+    const nativeButton = existingButton || namespace.createUserCellBlockButton?.(userCell, {
+      documentRef
+    });
+
+    if (!nativeButton) {
+      return;
+    }
+
+    const actionWrapper = findDirectChildAncestor(actionBar, actionButton) || actionButton.parentElement || null;
+
+    if (!actionWrapper || typeof actionWrapper.insertBefore !== 'function') {
+      return;
+    }
+
+    if (typeof actionWrapper.setAttribute === 'function') {
+      actionWrapper.setAttribute(USER_CELL_ACTIONS_ATTRIBUTE, 'true');
+    }
+
+    const actionWrapperChildren = getElementChildren(actionWrapper);
+    const nativeButtonIndex = actionWrapperChildren.indexOf(nativeButton);
+    const actionButtonIndex = actionWrapperChildren.indexOf(actionButton);
+
+    if (
+      nativeButton.parentElement === actionWrapper
+      && nativeButtonIndex !== -1
+      && actionButtonIndex === nativeButtonIndex + 1
+    ) {
+      return;
+    }
+
+    actionWrapper.insertBefore(nativeButton, actionButton);
+  }
+
   function collectTweets(rootNode) {
     if (!rootNode || typeof rootNode.querySelectorAll !== 'function') {
       return [];
@@ -226,8 +351,23 @@
     return tweets.concat(Array.from(rootNode.querySelectorAll(SELECTORS.tweet)));
   }
 
+  function collectUserCells(rootNode) {
+    if (!rootNode || typeof rootNode.querySelectorAll !== 'function') {
+      return [];
+    }
+
+    const userCells = [];
+
+    if (typeof rootNode.matches === 'function' && rootNode.matches(SELECTORS.userCell)) {
+      userCells.push(rootNode);
+    }
+
+    return userCells.concat(Array.from(rootNode.querySelectorAll(SELECTORS.userCell)));
+  }
+
   function processNode(rootNode, documentRef = document) {
     const tweets = collectTweets(rootNode);
+    const userCells = collectUserCells(rootNode);
     const isOwnButton = rootNode?.nodeType === 1
       && typeof rootNode.matches === 'function'
       && rootNode.matches(`[${BLOCK_BUTTON_ATTRIBUTE}]`);
@@ -243,6 +383,14 @@
       }
     }
 
+    if (!isOwnButton && subtreeContainsButton(rootNode)) {
+      const ancestorUserCell = findAncestorUserCell(rootNode);
+
+      if (ancestorUserCell && !userCells.includes(ancestorUserCell)) {
+        userCells.push(ancestorUserCell);
+      }
+    }
+
     if (nodeMatchesOrContains(rootNode, SELECTORS.profileActionsButton)) {
       attachButtonToProfilePage(documentRef);
     }
@@ -250,15 +398,24 @@
     for (const tweet of tweets) {
       attachButtonToTweet(tweet, documentRef);
     }
+
+    for (const userCell of userCells) {
+      attachButtonToUserCell(userCell, documentRef);
+    }
   }
 
   const domExports = {
     attachButtonToProfilePage,
     attachButtonToTweet,
+    attachButtonToUserCell,
     collectTweets,
+    collectUserCells,
+    findAncestorUserCell,
     findProfileActionBar,
     findActionRowContainer,
     findPrimaryActionWrapper,
+    findUserCellActionBar,
+    USER_CELL_ACTIONS_ATTRIBUTE,
     getElementChildren,
     processNode,
     subtreeContainsButton

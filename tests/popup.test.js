@@ -1006,6 +1006,43 @@ test('init restores persisted followers preview and username draft state', async
   assert.equal(loadStoredPopupState(storage).usernameDraftText, '@changeduser');
 });
 
+test('init ignores a persisted completed follower-run status and restores the default header copy', async (t) => {
+  const originalLocalStorage = globalThis.localStorage;
+  const storage = createLocalStorageStub();
+
+  globalThis.localStorage = storage;
+  t.after(() => {
+    if (originalLocalStorage === undefined) {
+      delete globalThis.localStorage;
+      return;
+    }
+
+    globalThis.localStorage = originalLocalStorage;
+  });
+
+  saveStoredPopupState({
+    statusMessage: 'Block run complete: blocked 3/3 accounts. Delay used: 1000 ms between requests.'
+  }, storage);
+
+  const { documentRef, elements } = createPopupDocument();
+
+  init(documentRef, { runtime: {}, tabs: {} }, {
+    ...sharedBlocklist,
+    async getStoredBatchBlockDelayMs() {
+      return 1000;
+    },
+    async getStoredPageBlockButtonStyle() {
+      return sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.icon;
+    },
+    async getStoredUsernames() {
+      return [];
+    }
+  });
+  await flushAsyncWork();
+
+  assert.equal(elements.status.textContent, 'Save usernames for later, or block the whole list immediately through any open X tab.');
+});
+
 test('init saves the blocklist, disables actions while saving, and reports invalid entries', async () => {
   const { documentRef, elements } = createPopupDocument();
   const deferredSave = createDeferred();
@@ -1292,7 +1329,7 @@ test('init scans followers in the active tab and blocks only the ready preview c
   });
   await flushAsyncWork();
 
-  assert.equal(elements.status.textContent, 'Block run complete: blocked 2/2 followers. Delay used: 1100 ms between requests.');
+  assert.equal(elements.status.textContent, 'Save usernames for later, or block the whole list immediately through any open X tab.');
   assert.equal(elements['followers-progress-label'].textContent, 'Block run complete');
   assert.equal(elements['followers-progress-count'].textContent, '2/2');
   assert.equal(elements['followers-progress-detail'].textContent, 'Blocked 2/2. Failed: 0. Delay used: 1100 ms between requests.');

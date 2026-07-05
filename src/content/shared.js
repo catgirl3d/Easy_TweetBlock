@@ -3,6 +3,7 @@
 
   const SELECTORS = Object.freeze({
     tweet: 'article[data-testid="tweet"]',
+    userCell: 'button[data-testid="UserCell"]',
     caretButton: 'button[data-testid="caret"]',
     grokButton: 'button[aria-label="Grok actions"]',
     profileActionsButton: 'button[data-testid="userActions"]',
@@ -50,6 +51,7 @@
     'share'
   ]);
   const BLOCK_ICON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><g><path d="M12 3.75c-4.55 0-8.25 3.69-8.25 8.25 0 1.92.66 3.68 1.75 5.08L17.09 5.5C15.68 4.4 13.92 3.75 12 3.75zm6.5 3.17L6.92 18.5c1.4 1.1 3.16 1.75 5.08 1.75 4.56 0 8.25-3.69 8.25-8.25 0-1.92-.65-3.68-1.75-5.08zM1.75 12C1.75 6.34 6.34 1.75 12 1.75S22.25 6.34 22.25 12 17.66 22.25 12 22.25 1.75 17.66 1.75 12z"></path></g></svg>';
+  const SUCCESS_ICON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><g><path d="M9.55 16.94 4.8 12.19l1.77-1.77 2.98 2.98 7.88-7.88 1.77 1.77-9.65 9.65z"></path></g></svg>';
 
   const contentState = namespace.contentState || {
     currentNativeButtonStyle: DEFAULT_PAGE_BLOCK_BUTTON_STYLE,
@@ -344,7 +346,23 @@
     return kind === BUTTON_KINDS.api ? 'API' : 'Block';
   }
 
-  function getButtonTitle(kind, screenName, state) {
+  function getButtonTitle(kind, screenName, state, surface = null) {
+    if (surface === 'user-cell') {
+      if (state === 'running') {
+        return screenName ? `Blocking @${screenName} from this list` : 'Blocking this account from this list';
+      }
+
+      if (state === 'success') {
+        return screenName ? `Blocked @${screenName} from this list` : 'Blocked this account from this list';
+      }
+
+      if (state === 'error') {
+        return screenName ? `Retry block for @${screenName} from this list` : 'Retry blocking this account from this list';
+      }
+
+      return screenName ? `Block @${screenName} from this list` : 'Block this account from this list';
+    }
+
     if (state === 'running') {
       if (kind === BUTTON_KINDS.api) {
         return screenName ? `Trying API block for @${screenName}` : 'Trying API block for this account';
@@ -378,10 +396,11 @@
 
   function setButtonState(button, state, screenName, kind = button?.dataset?.kind || BUTTON_KINDS.native) {
     const label = getButtonLabel(kind, state);
-    const title = getButtonTitle(kind, screenName, state);
+    const title = getButtonTitle(kind, screenName, state, button?.dataset?.surface || null);
     const displayStyle = kind === BUTTON_KINDS.native
       ? normalizePageButtonStyle(button?.dataset?.displayStyle || contentState.currentNativeButtonStyle)
       : PAGE_BUTTON_STYLES.text;
+    const shouldShowSuccessIcon = state === 'success' && button?.dataset?.surface === 'user-cell';
 
     button.dataset.state = state;
     button.dataset.displayStyle = displayStyle;
@@ -390,7 +409,7 @@
 
     if (displayStyle === PAGE_BUTTON_STYLES.icon) {
       button.textContent = '';
-      button.innerHTML = BLOCK_ICON_SVG;
+      button.innerHTML = shouldShowSuccessIcon ? SUCCESS_ICON_SVG : BLOCK_ICON_SVG;
     } else {
       button.innerHTML = '';
       button.textContent = label;

@@ -2,6 +2,7 @@
   const PAGE_LOG_PREFIX = '[Easy TweetBlock][page]';
   const POPUP_STATE_STORAGE_KEY = 'easyTweetBlockPopupState';
   const POPUP_LOG_PREFIX = '[Easy TweetBlock][popup]';
+  const DEFAULT_STATUS_MESSAGE = 'Save usernames for later, or block the whole list immediately through any open X tab.';
   const MAX_POPUP_DEBUG_ENTRIES = 120;
   const popupDebugEntriesCache = new Map();
 
@@ -45,6 +46,16 @@
     return Array.isArray(entries)
       ? entries.filter((entry) => typeof entry === 'string').slice(-MAX_POPUP_DEBUG_ENTRIES)
       : [];
+  }
+
+  function normalizeStoredStatusMessage(statusMessage) {
+    const normalizedMessage = typeof statusMessage === 'string' ? statusMessage.trim() : '';
+
+    if (!normalizedMessage || normalizedMessage.startsWith('Block run complete:')) {
+      return DEFAULT_STATUS_MESSAGE;
+    }
+
+    return normalizedMessage;
   }
 
   function setCachedPopupDebugEntries(entries, storageRef = globalThis.localStorage) {
@@ -1415,9 +1426,7 @@
         clearFollowersPreview();
       }
 
-      setStatus(typeof storedPopupState.statusMessage === 'string' && storedPopupState.statusMessage.trim()
-        ? storedPopupState.statusMessage
-        : 'Save usernames for later, or block the whole list immediately through any open X tab.');
+      setStatus(normalizeStoredStatusMessage(storedPopupState.statusMessage));
       setPopupView(shellElement, storedPopupState.view);
       isHydratingPopupState = false;
       setBusyState();
@@ -1782,7 +1791,7 @@
         }
 
         clearFollowersPreview('Preview cleared. Run a new scan for another batch.');
-        setStatus(`Block run complete: blocked ${successCount}/${results.length} ${sourceCopy.readyLabel}. Delay used: ${currentDelayMs} ms between requests.`);
+        setStatus(DEFAULT_STATUS_MESSAGE);
       } catch (error) {
         if (isFollowerRunCanceledError(error)) {
           const sourceCopy = getFollowersSourceCopy(currentFollowersPreview?.source || currentFollowersSource);

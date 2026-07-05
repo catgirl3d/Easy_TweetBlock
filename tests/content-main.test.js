@@ -19,6 +19,7 @@ const {
   applyCurrentNativeButtonStyleToDocument,
   attachButtonToProfilePage,
   attachButtonToTweet,
+  attachButtonToUserCell,
   blockFollowerCandidatesViaApi,
   blockUserByRestIdViaApi,
   blockUserByScreenNameViaApi,
@@ -28,6 +29,7 @@ const {
   buildXApiHeaders,
   cancelFollowerRun,
   collectTweets,
+  collectUserCells,
   createFollowerBlockCandidates,
   createApiBlockButton,
   createNativeBlockButton,
@@ -60,6 +62,7 @@ const {
   registerRuntimeConnectionListener,
   registerRuntimeMessageListener,
   resolveOnDemandFileUrlFromRuntime,
+  processNode,
   runProfileNativeBlockFlow,
   runNativeBlockFlow,
   scanFollowersForBlocking,
@@ -199,7 +202,24 @@ function createDocumentStub() {
     body: {},
     nodeType: 9,
     createElement(tagName) {
-      const element = createDomElement({ tagName });
+      const element = createDomElement({
+        nodeType: 1,
+        tagName
+      });
+
+      element.children = [];
+      Object.defineProperty(element, 'firstElementChild', {
+        get() {
+          return element.children[0] || null;
+        }
+      });
+      element.appendChild = (child) => {
+        insertChildBefore(element, child, null);
+      };
+      element.insertBefore = (child, referenceNode) => {
+        insertChildBefore(element, child, referenceNode);
+      };
+
       createdElements.push(element);
       return element;
     },
@@ -470,6 +490,98 @@ function createProfilePageDocument(screenName = 'Felixmfdo') {
   };
 }
 
+function createUserCellNode(screenName = 'Felixmfdo') {
+  const followButton = createDomElement({
+    nodeType: 1,
+    tagName: 'BUTTON',
+    matches(selector) {
+      return selector === 'button';
+    }
+  });
+  const followButtonWrapper = createDomElement({
+    nodeType: 1,
+    children: [followButton],
+    insertBefore(child, referenceNode) {
+      insertChildBefore(followButtonWrapper, child, referenceNode);
+    },
+    querySelector(selector) {
+      return selector === 'button' ? followButton : null;
+    }
+  });
+  const detailsColumn = {
+    nodeType: 1,
+    children: [],
+    querySelector() {
+      return null;
+    }
+  };
+  const assistiveText = {
+    nodeType: 1,
+    children: [],
+    querySelector() {
+      return null;
+    }
+  };
+  const actionRow = {
+    nodeType: 1,
+    get firstElementChild() {
+      return actionRow.children[0] || null;
+    },
+    children: [detailsColumn, followButtonWrapper, assistiveText],
+    insertBefore(child, referenceNode) {
+      insertChildBefore(actionRow, child, referenceNode);
+    },
+    querySelector(selector) {
+      return selector === 'button' ? followButton : null;
+    }
+  };
+
+  followButton.parentElement = followButtonWrapper;
+  followButtonWrapper.parentElement = actionRow;
+  detailsColumn.parentElement = actionRow;
+  assistiveText.parentElement = actionRow;
+
+  const userCell = {
+    nodeType: 1,
+    tagName: 'BUTTON',
+    matches(selector) {
+      return selector === 'button' || selector === SELECTORS.userCell;
+    },
+    querySelector(selector) {
+      if (selector === SELECTORS.permalink) {
+        return null;
+      }
+
+      if (selector === SELECTORS.profileLink) {
+        return {
+          getAttribute(name) {
+            return name === 'href' ? `/${screenName}` : null;
+          }
+        };
+      }
+
+      if (selector === SELECTORS.avatarContainer) {
+        return null;
+      }
+
+      return null;
+    },
+    querySelectorAll(selector) {
+      return selector === SELECTORS.userCell ? [] : [];
+    },
+    children: [actionRow]
+  };
+
+  actionRow.parentElement = userCell;
+
+  return {
+    actionRow,
+    followButton,
+    followButtonWrapper,
+    userCell
+  };
+}
+
 test('extractScreenNameFromHref reads a screen name from tweet permalinks', () => {
   assert.equal(extractScreenNameFromHref('/Felixmfdo/status/2072691291956068443'), 'Felixmfdo');
   assert.equal(extractScreenNameFromHref('https://x.com/Felixmfdo/status/2072691291956068443'), 'Felixmfdo');
@@ -589,6 +701,71 @@ test('setButtonState uses API-specific labels and titles for the experimental bu
   setButtonState(button, 'success', 'Felixmfdo');
   assert.equal(button.textContent, 'API ok');
   assert.equal(button.title, 'Blocked @Felixmfdo via internal API');
+});
+
+test('setButtonState uses list-specific titles for user cell buttons', () => {
+  const attributes = {};
+  const button = {
+    dataset: {
+      displayStyle: PAGE_BUTTON_STYLES.text,
+      kind: BUTTON_KINDS.native,
+      surface: 'user-cell'
+    },
+    disabled: false,
+    textContent: '',
+    title: '',
+    setAttribute(name, value) {
+      attributes[name] = value;
+    }
+  };
+
+  setButtonState(button, 'idle', 'Felixmfdo');
+  assert.equal(button.title, 'Block @Felixmfdo from this list');
+
+  setButtonState(button, 'success', 'Felixmfdo');
+  assert.equal(button.title, 'Blocked @Felixmfdo from this list');
+  assert.equal(attributes['aria-label'], 'Blocked @Felixmfdo from this list');
+});
+
+test('setButtonState swaps the icon after a successful block', () => {
+  const button = {
+    dataset: {
+      displayStyle: PAGE_BUTTON_STYLES.icon,
+      kind: BUTTON_KINDS.native,
+      surface: 'user-cell'
+    },
+    disabled: false,
+    innerHTML: '',
+    textContent: '',
+    title: '',
+    setAttribute() {}
+  };
+
+  setButtonState(button, 'idle', 'Felixmfdo');
+  assert.equal(button.innerHTML.includes('M12 3.75'), true);
+
+  setButtonState(button, 'success', 'Felixmfdo');
+  assert.equal(button.innerHTML.includes('M9.55 16.94'), true);
+  assert.equal(button.innerHTML.includes('M12 3.75'), false);
+});
+
+test('setButtonState keeps the block icon for non-list native buttons after success', () => {
+  const button = {
+    dataset: {
+      displayStyle: PAGE_BUTTON_STYLES.icon,
+      kind: BUTTON_KINDS.native,
+      surface: 'tweet'
+    },
+    disabled: false,
+    innerHTML: '',
+    textContent: '',
+    title: '',
+    setAttribute() {}
+  };
+
+  setButtonState(button, 'success', 'Felixmfdo');
+  assert.equal(button.innerHTML.includes('M12 3.75'), true);
+  assert.equal(button.innerHTML.includes('M9.55 16.94'), false);
 });
 
 test('waitForElement resolves when an element appears and rejects on timeout', async (t) => {
@@ -2098,6 +2275,29 @@ test('attachButtonToProfilePage inserts the native button before the profile act
   assert.equal(createdElements.length, 1);
 });
 
+test('attachButtonToUserCell inserts the native button into the follow action wrapper', (t) => {
+  const { createdElements, documentRef } = createDocumentStub();
+  const { actionRow, followButtonWrapper, userCell } = createUserCellNode('Milana62234788');
+
+  useGlobalOverrides(t, { document: documentRef });
+  setCurrentNativeButtonStyle(PAGE_BUTTON_STYLES.icon);
+
+  attachButtonToUserCell(userCell, documentRef);
+
+  assert.equal(createdElements.length, 1);
+  assert.equal(actionRow.children[1], followButtonWrapper);
+  assert.equal(followButtonWrapper.getAttribute('data-easy-tweetblock-user-cell-actions'), 'true');
+  assert.equal(followButtonWrapper.children[0].dataset.kind, BUTTON_KINDS.native);
+  assert.equal(followButtonWrapper.children[0].dataset.surface, 'user-cell');
+  assert.equal(followButtonWrapper.children[0].dataset.screenName, 'Milana62234788');
+
+  attachButtonToUserCell(userCell, documentRef);
+
+  assert.equal(createdElements.length, 1);
+  assert.equal(actionRow.children[1], followButtonWrapper);
+  assert.equal(followButtonWrapper.children[0].dataset.surface, 'user-cell');
+});
+
 test('collectTweets returns the root tweet and nested tweet descendants', () => {
   const nestedTweet = { id: 'nested' };
   const rootNode = {
@@ -2111,6 +2311,21 @@ test('collectTweets returns the root tweet and nested tweet descendants', () => 
 
   assert.deepEqual(collectTweets(rootNode), [rootNode, nestedTweet]);
   assert.deepEqual(collectTweets({}), []);
+});
+
+test('collectUserCells returns the root user cell and nested user cell descendants', () => {
+  const nestedUserCell = { id: 'nested-user-cell' };
+  const rootNode = {
+    matches(selector) {
+      return selector === SELECTORS.userCell;
+    },
+    querySelectorAll(selector) {
+      return selector === SELECTORS.userCell ? [nestedUserCell] : [];
+    }
+  };
+
+  assert.deepEqual(collectUserCells(rootNode), [rootNode, nestedUserCell]);
+  assert.deepEqual(collectUserCells({}), []);
 });
 
 test('collectTweets does not promote arbitrary descendant mutations to tweets', () => {
@@ -2131,6 +2346,23 @@ test('collectTweets does not promote arbitrary descendant mutations to tweets', 
   };
 
   assert.deepEqual(collectTweets(descendant), []);
+});
+
+test('processNode promotes nested follow-button mutations back to the parent user cell', (t) => {
+  const { createdElements, documentRef } = createDocumentStub();
+  const { actionRow, followButton, followButtonWrapper, userCell } = createUserCellNode('Milana62234788');
+
+  useGlobalOverrides(t, { document: documentRef });
+  setCurrentNativeButtonStyle(PAGE_BUTTON_STYLES.icon);
+
+  processNode(followButton, documentRef);
+
+  assert.equal(createdElements.length, 1);
+  assert.equal(actionRow.children[1], followButtonWrapper);
+  assert.equal(followButtonWrapper.getAttribute('data-easy-tweetblock-user-cell-actions'), 'true');
+  assert.equal(followButtonWrapper.children[0].dataset.surface, 'user-cell');
+  assert.equal(followButton.parentElement, followButtonWrapper);
+  assert.equal(userCell.children[0], actionRow);
 });
 
 test('createApiBlockButton marks success after a completed API block', async (t) => {

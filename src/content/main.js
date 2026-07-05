@@ -43,7 +43,9 @@
     USER_BY_SCREEN_NAME_FEATURES,
     USER_BY_SCREEN_NAME_QUERY_IDS,
     attachButtonToTweet,
+    attachButtonToUserCell,
     collectTweets,
+    collectUserCells,
     findActionRowContainer,
     findPrimaryActionWrapper,
     getElementChildren,
@@ -198,13 +200,17 @@
     return runNativeBlockFlowFromTriggerButton(profileActionsButton, documentRef);
   }
 
-  function createActionButton(targetRoot, kind, action, screenName = namespace.readScreenNameFromTweet(targetRoot)) {
+  function createActionButton(targetRoot, kind, action, screenName = namespace.readScreenNameFromTweet(targetRoot), surface = null) {
     const button = document.createElement('button');
 
     button.type = 'button';
     button.setAttribute(BLOCK_BUTTON_ATTRIBUTE, 'true');
     button.dataset.kind = kind;
     button.dataset.displayStyle = kind === BUTTON_KINDS.native ? namespace.getCurrentNativeButtonStyle() : PAGE_BUTTON_STYLES.text;
+
+    if (surface) {
+      button.dataset.surface = surface;
+    }
 
     namespace.setButtonState(button, 'idle', screenName, kind);
 
@@ -231,9 +237,7 @@
   }
 
   function createNativeBlockButton(tweet, documentRef = document) {
-    const button = createActionButton(tweet, BUTTON_KINDS.native, () => runNativeBlockFlow(tweet, documentRef));
-    button.dataset.surface = 'tweet';
-    return button;
+    return createActionButton(tweet, BUTTON_KINDS.native, () => runNativeBlockFlow(tweet, documentRef), undefined, 'tweet');
   }
 
   function createProfileBlockButton(documentRef = document) {
@@ -247,11 +251,27 @@
       documentRef,
       BUTTON_KINDS.native,
       () => runProfileNativeBlockFlow(documentRef),
-      screenName
+      screenName,
+      'profile'
     );
 
-    button.dataset.surface = 'profile';
     return button;
+  }
+
+  function createUserCellBlockButton(userCell, options = {}) {
+    const screenName = namespace.readScreenNameFromTweet(userCell);
+
+    if (!screenName) {
+      return null;
+    }
+
+    return createActionButton(
+      userCell,
+      BUTTON_KINDS.native,
+      () => namespace.runApiBlockFlow(userCell, options),
+      screenName,
+      'user-cell'
+    );
   }
 
   function createApiBlockButton(tweet, options = {}) {
@@ -543,6 +563,7 @@
     createApiBlockButton,
     createNativeBlockButton,
     createProfileBlockButton,
+    createUserCellBlockButton,
     finishFollowerRun,
     FOLLOWER_RUN_PORT_PREFIX,
     init,
@@ -575,6 +596,7 @@
       WAIT_TIMEOUT_MS,
       attachButtonToProfilePage: namespace.attachButtonToProfilePage,
       attachButtonToTweet,
+      attachButtonToUserCell: namespace.attachButtonToUserCell,
       FOLLOWERS_PAGE_SIZE: namespace.FOLLOWERS_PAGE_SIZE,
       FOLLOWERS_QUERY_IDS: namespace.FOLLOWERS_QUERY_IDS,
       FOLLOWING_QUERY_IDS: namespace.FOLLOWING_QUERY_IDS,
@@ -587,6 +609,7 @@
       buildXApiHeaders: namespace.buildXApiHeaders,
       cancelFollowerRun,
       collectTweets,
+      collectUserCells,
       createFollowerBlockCandidates: namespace.createFollowerBlockCandidates,
       discoverGraphqlQueryIds: namespace.discoverGraphqlQueryIds,
       extractGraphqlQueryIdsFromScriptText: namespace.extractGraphqlQueryIdsFromScriptText,
@@ -596,10 +619,13 @@
       createUsernameSet: namespace.createUsernameSet,
       createNativeBlockButton,
       createProfileBlockButton,
+      createUserCellBlockButton,
       extractScreenNameFromHref: namespace.extractScreenNameFromHref,
       findActionRowContainer,
+      findAncestorUserCell: namespace.findAncestorUserCell,
       findProfileActionBar: namespace.findProfileActionBar,
       findPrimaryActionWrapper,
+      findUserCellActionBar: namespace.findUserCellActionBar,
       getExtensionApi: namespace.getExtensionApi,
       getElementChildren,
       getClientLanguage: namespace.getClientLanguage,
@@ -627,6 +653,7 @@
       registerRuntimeConnectionListener,
       runImmediateBlockInPageContext: namespace.runImmediateBlockInPageContext,
       runApiBlockFlow: namespace.runApiBlockFlow,
+      processNode: namespace.processNode,
       runProfileNativeBlockFlow,
       runNativeBlockFlow,
       scanFollowersForBlocking: namespace.scanFollowersForBlocking,
