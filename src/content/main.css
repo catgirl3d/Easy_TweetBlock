@@ -36,12 +36,16 @@
   transition: background-color 120ms ease;
 }
 
-[data-easy-tweetblock-button][data-kind="native"][data-surface="profile"] {
+[data-easy-tweetblock-button][data-kind="native"][data-surface="profile"],
+[data-easy-tweetblock-button][data-kind="native"][data-surface="user-cell"] {
   box-sizing: border-box;
   color: rgb(15, 20, 25);
-  margin-bottom: 12px;
   flex-shrink: 0;
   margin-right: 8px;
+}
+
+[data-easy-tweetblock-button][data-kind="native"][data-surface="profile"] {
+  margin-bottom: 12px;
 }
 
 [data-easy-tweetblock-user-cell-actions] {
@@ -53,27 +57,12 @@
 }
 
 [data-easy-tweetblock-button][data-kind="native"][data-surface="user-cell"] {
-  box-sizing: border-box;
-  color: rgb(15, 20, 25);
-  flex-shrink: 0;
   height: 36px;
-  margin-right: 8px;
   min-width: 36px;
   padding: 0 14px;
 }
 
-[data-easy-tweetblock-button][data-kind="native"][data-surface="profile"][data-display-style="icon"] {
-  --etb-hit-size: 36px;
-
-  border: 1px solid rgb(207, 217, 222);
-  flex: 0 0 var(--etb-hit-size);
-  height: var(--etb-hit-size);
-  line-height: 1;
-  padding: 0;
-  position: relative;
-  width: var(--etb-hit-size);
-}
-
+[data-easy-tweetblock-button][data-kind="native"][data-surface="profile"][data-display-style="icon"],
 [data-easy-tweetblock-button][data-kind="native"][data-surface="user-cell"][data-display-style="icon"] {
   --etb-hit-size: 36px;
 
@@ -81,16 +70,15 @@
   flex: 0 0 var(--etb-hit-size);
   height: var(--etb-hit-size);
   line-height: 1;
-  min-width: var(--etb-hit-size);
   padding: 0;
   width: var(--etb-hit-size);
 }
 
-[data-easy-tweetblock-button][data-kind="native"][data-surface="profile"][data-display-style="icon"] svg {
-  height: 20px;
-  width: 20px;
+[data-easy-tweetblock-button][data-kind="native"][data-surface="user-cell"][data-display-style="icon"] {
+  min-width: var(--etb-hit-size);
 }
 
+[data-easy-tweetblock-button][data-kind="native"][data-surface="profile"][data-display-style="icon"] svg,
 [data-easy-tweetblock-button][data-kind="native"][data-surface="user-cell"][data-display-style="icon"] svg {
   height: 20px;
   width: 20px;
@@ -146,12 +134,12 @@
   opacity: 0.72;
 }
 
-[data-easy-tweetblock-button][data-state="success"] {
+[data-easy-tweetblock-button][data-kind="native"][data-surface="user-cell"][data-state="success"] {
   border-color: rgba(0, 186, 124, 0.45);
   color: rgb(0, 186, 124);
 }
 
-[data-easy-tweetblock-button][data-state="error"] {
+[data-easy-tweetblock-button][data-kind="native"][data-surface="user-cell"][data-state="error"] {
   border-color: rgba(255, 173, 31, 0.45);
   color: rgb(255, 173, 31);
 }
