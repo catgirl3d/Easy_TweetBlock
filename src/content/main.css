@@ -6,7 +6,6 @@
   border-radius: 9999px;
   cursor: pointer;
   display: inline-flex;
-  height: 32px;
   justify-content: center;
   margin: 0;
 }
@@ -50,6 +49,15 @@
   font-weight: 700;
   line-height: 20px;
   margin-right: 8px;
+}
+
+[data-easy-tweetblock-button][data-kind="native"][data-surface="tweet"]:not([data-display-style="icon"]) {
+  border: 1px solid;
+  color: rgb(113, 118, 123);
+  padding: 0px 13px;
+  margin-right: 7px;
+  font-family: "TwitterChirp", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 14px;
 }
 
 [data-easy-tweetblock-button][data-kind="native"][data-surface="profile"] {
@@ -104,6 +112,24 @@
   margin-right: 8px;
   min-width: 32px;
   padding: 0 14px;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+[data-easy-tweetblock-button][data-easy-tweetblock-action="save-to-list"][data-surface="user-cell"][data-display-style="icon"] {
+  align-items: center;
+  border: 1px solid rgba(29, 155, 240, 0.45);
+  border-radius: 9999px;
+  flex: 0 0 32px;
+  height: 32px;
+  justify-content: center;
+  min-width: 32px;
+  padding: 0;
+  width: 32px;
+}
+
+[data-easy-tweetblock-button][data-easy-tweetblock-action="save-to-list"][data-surface="user-cell"][data-display-style="icon"] svg {
+  height: 18px;
+  width: 18px;
 }
 
 [data-easy-tweetblock-button][data-kind="native"][data-surface="profile"][data-display-style="icon"],

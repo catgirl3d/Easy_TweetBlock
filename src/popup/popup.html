@@ -4,6 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Easy TweetBlock</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
@@ -41,8 +44,9 @@
             <input id="import-usernames-file" type="file" accept=".txt,.csv,.json,text/plain,text/csv,application/json" hidden>
             <div class="actions-row">
               <button id="import-usernames" class="secondary-button" type="button">Import</button>
-              <button id="block-now" class="secondary-button" type="button">Block listed now</button>
-              <button id="save-blocklist" class="primary-button" type="button">Save list</button>
+              <button id="clear-list" class="ghost-button" type="button">Clear</button>
+              <button id="block-now" class="danger-button" type="button">Block</button>
+              <button id="save-blocklist" class="primary-button" type="button">Save</button>
             </div>
           </section>
 
@@ -63,18 +67,40 @@
               <button id="back-to-main" class="ghost-button" type="button">Back</button>
               <h2>Settings</h2>
             </div>
-            <p class="settings-copy">These settings affect page button appearance, Add button visibility, and batch blocking from the popup.</p>
+            <p class="settings-copy">These settings affect block button appearance per surface, Add button appearance in user rows, visibility, and batch blocking from the popup.</p>
             <div class="setting-stack">
-              <label class="field-label setting-label" for="page-button-style-icon">Page button style</label>
-              <div class="segmented-control" role="group" aria-label="Page button style">
-                <button id="page-button-style-icon" class="segment-button" type="button">Icon</button>
-                <button id="page-button-style-text" class="segment-button" type="button">Text</button>
+              <label class="field-label setting-label" for="page-button-style-tweet-icon">Tweet button style</label>
+              <div class="segmented-control" role="group" aria-label="Tweet button style">
+                <button id="page-button-style-tweet-icon" class="segment-button" type="button">Icon</button>
+                <button id="page-button-style-tweet-text" class="segment-button" type="button">Text</button>
+              </div>
+            </div>
+            <div class="setting-stack">
+              <label class="field-label setting-label" for="page-button-style-profile-icon">Profile button style</label>
+              <div class="segmented-control" role="group" aria-label="Profile button style">
+                <button id="page-button-style-profile-icon" class="segment-button" type="button">Icon</button>
+                <button id="page-button-style-profile-text" class="segment-button" type="button">Text</button>
+              </div>
+            </div>
+            <div class="setting-stack">
+              <label class="field-label setting-label" for="page-button-style-user-cell-icon">User row button style</label>
+              <div class="segmented-control" role="group" aria-label="User row button style">
+                <button id="page-button-style-user-cell-icon" class="segment-button" type="button">Icon</button>
+                <button id="page-button-style-user-cell-text" class="segment-button" type="button">Text</button>
+              </div>
+            </div>
+            <div class="setting-stack">
+              <label class="field-label setting-label" for="user-cell-add-button-style-icon">Add button style</label>
+              <div class="segmented-control" role="group" aria-label="Add button style">
+                <button id="user-cell-add-button-style-icon" class="segment-button" type="button">Icon</button>
+                <button id="user-cell-add-button-style-text" class="segment-button" type="button">Text</button>
               </div>
             </div>
             <div class="setting-row">
               <label class="field-label setting-label" for="show-user-cell-add-button">Show Add button in user rows</label>
               <label class="toggle-checkbox-label" for="show-user-cell-add-button">
                 <input id="show-user-cell-add-button" class="toggle-checkbox" type="checkbox">
+                <span class="toggle-checkbox-switch"></span>
                 <span class="toggle-checkbox-text">Enabled</span>
               </label>
             </div>
@@ -120,9 +146,7 @@
               </div>
             </div>
             <div class="actions-row actions-row-wrap">
-              <button id="scan-followers-preview" class="secondary-button" type="button">Scan preview</button>
-              <button id="block-follower-candidates" class="primary-button" type="button">Block ready</button>
-              <button id="cancel-followers-run" class="danger-button" type="button" disabled>Cancel run</button>
+              <button id="scan-followers-preview" class="secondary-button" type="button">Scan</button>
             </div>
             <p id="followers-summary" class="followers-summary">Open a profile, followers, or following page in the active X tab, then run a preview scan.</p>
             <section id="followers-block-progress" class="block-progress" data-state="idle" aria-live="polite">
@@ -136,6 +160,11 @@
               <p id="followers-progress-detail" class="block-progress-detail">Preview accounts first, then start blocking.</p>
             </section>
             <pre id="followers-preview" class="followers-preview"></pre>
+            <div class="actions-row actions-row-wrap">
+              <button id="add-followers-to-list" class="ghost-button" type="button" disabled>Add to list</button>
+              <button id="block-follower-candidates" class="primary-button" type="button">Block</button>
+              <button id="cancel-followers-run" class="danger-button" type="button" disabled>Cancel</button>
+            </div>
             <div class="debug-header">
               <h3>Debug log</h3>
               <button id="clear-popup-debug-log" class="ghost-button ghost-button-small" type="button">Clear</button>
