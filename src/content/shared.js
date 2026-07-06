@@ -25,6 +25,11 @@
     scanFollowersForBlock: 'easy-tweetblock:scan-followers-for-block'
   });
   const BLOCK_BUTTON_ATTRIBUTE = 'data-easy-tweetblock-button';
+  const BUTTON_ACTION_ATTRIBUTE = 'data-easy-tweetblock-action';
+  const BUTTON_ACTIONS = Object.freeze({
+    block: 'block',
+    saveToList: 'save-to-list'
+  });
   const WAIT_INTERVAL_MS = 50;
   const WAIT_TIMEOUT_MS = 2500;
   const DEFAULT_BATCH_BLOCK_DELAY_MS = 1000;
@@ -330,7 +335,35 @@
     return readCookieValue(documentRef?.cookie || '', 'ct0');
   }
 
-  function getButtonLabel(kind, state) {
+  function getButtonAction(button) {
+    const action = button?.getAttribute?.(BUTTON_ACTION_ATTRIBUTE)
+      || button?.dataset?.easyTweetblockAction
+      || button?.dataset?.action;
+
+    return action === BUTTON_ACTIONS.saveToList ? BUTTON_ACTIONS.saveToList : BUTTON_ACTIONS.block;
+  }
+
+  function getButtonLabel(kind, state, action = BUTTON_ACTIONS.block) {
+    if (action === BUTTON_ACTIONS.saveToList) {
+      if (state === 'running') {
+        return 'Adding...';
+      }
+
+      if (state === 'listed') {
+        return 'In list';
+      }
+
+      if (state === 'success') {
+        return 'Added';
+      }
+
+      if (state === 'error') {
+        return 'Retry';
+      }
+
+      return 'Add';
+    }
+
     if (state === 'running') {
       return kind === BUTTON_KINDS.api ? 'API...' : 'Blocking...';
     }
@@ -346,7 +379,27 @@
     return kind === BUTTON_KINDS.api ? 'API' : 'Block';
   }
 
-  function getButtonTitle(kind, screenName, state, surface = null) {
+  function getButtonTitle(kind, screenName, state, surface = null, action = BUTTON_ACTIONS.block) {
+    if (action === BUTTON_ACTIONS.saveToList) {
+      if (state === 'running') {
+        return screenName ? `Adding @${screenName} to the active list` : 'Adding this account to the active list';
+      }
+
+      if (state === 'listed') {
+        return screenName ? `@${screenName} is already in the active list` : 'This account is already in the active list';
+      }
+
+      if (state === 'success') {
+        return screenName ? `Added @${screenName} to the active list` : 'Added this account to the active list';
+      }
+
+      if (state === 'error') {
+        return screenName ? `Retry adding @${screenName} to the active list` : 'Retry adding this account to the active list';
+      }
+
+      return screenName ? `Add @${screenName} to the active list` : 'Add this account to the active list';
+    }
+
     if (surface === 'user-cell') {
       if (state === 'running') {
         return screenName ? `Blocking @${screenName} from this list` : 'Blocking this account from this list';
@@ -395,17 +448,20 @@
   }
 
   function setButtonState(button, state, screenName, kind = button?.dataset?.kind || BUTTON_KINDS.native) {
-    const label = getButtonLabel(kind, state);
-    const title = getButtonTitle(kind, screenName, state, button?.dataset?.surface || null);
-    const displayStyle = kind === BUTTON_KINDS.native
+    const action = getButtonAction(button);
+    const label = getButtonLabel(kind, state, action);
+    const title = getButtonTitle(kind, screenName, state, button?.dataset?.surface || null, action);
+    const displayStyle = action === BUTTON_ACTIONS.saveToList
+      ? PAGE_BUTTON_STYLES.text
+      : kind === BUTTON_KINDS.native
       ? normalizePageButtonStyle(button?.dataset?.displayStyle || contentState.currentNativeButtonStyle)
       : PAGE_BUTTON_STYLES.text;
-    const shouldShowSuccessIcon = state === 'success' && button?.dataset?.surface === 'user-cell';
+    const shouldShowSuccessIcon = action === BUTTON_ACTIONS.block && state === 'success' && button?.dataset?.surface === 'user-cell';
 
     button.dataset.state = state;
     button.dataset.displayStyle = displayStyle;
     button.dataset.screenName = screenName || '';
-    button.disabled = state === 'running' || state === 'success';
+    button.disabled = state === 'running' || state === 'success' || state === 'listed';
 
     if (displayStyle === PAGE_BUTTON_STYLES.icon) {
       button.textContent = '';
@@ -421,6 +477,8 @@
 
   const sharedExports = {
     BLOCK_BUTTON_ATTRIBUTE,
+    BUTTON_ACTION_ATTRIBUTE,
+    BUTTON_ACTIONS,
     BUTTON_KINDS,
     DEFAULT_BATCH_BLOCK_DELAY_MS,
     DEFAULT_PAGE_BLOCK_BUTTON_STYLE,
@@ -437,6 +495,7 @@
     createAbortError,
     extractScreenNameFromHref,
     getButtonLabel,
+    getButtonAction,
     getButtonTitle,
     getClientLanguage,
     getCsrfToken,

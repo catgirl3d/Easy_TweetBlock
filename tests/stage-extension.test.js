@@ -19,6 +19,7 @@ test("stageExtension prepares a Chrome stage with sources and a manifest", () =>
     assert.equal(fs.existsSync(path.join(stageDir, "src", "content", "dom.js")), true);
     assert.equal(fs.existsSync(path.join(stageDir, "src", "content", "main.js")), true);
     assert.equal(fs.existsSync(path.join(stageDir, "src", "popup", "popup.html")), true);
+    assert.equal(fs.existsSync(path.join(stageDir, "src", "shared", "blocklist.js")), true);
     assert.equal(fs.existsSync(path.join(stageDir, "src", "shared", "content-script-files.js")), true);
   } finally {
     fs.rmSync(distDir, { recursive: true, force: true });

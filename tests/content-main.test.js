@@ -1,8 +1,12 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
+const sharedBlocklist = require('../src/shared/blocklist.js');
+
 const {
   BLOCK_BUTTON_ATTRIBUTE,
+  BUTTON_ACTION_ATTRIBUTE,
+  BUTTON_ACTIONS,
   BUTTON_KINDS,
   DEFAULT_BATCH_BLOCK_DELAY_MS,
   DEFAULT_PAGE_BLOCK_BUTTON_STYLE,
@@ -34,6 +38,7 @@ const {
   createApiBlockButton,
   createNativeBlockButton,
   createProfileBlockButton,
+  createUserCellListButton,
   discoverGraphqlQueryIds,
   extractGraphqlQueryIdsFromScriptText,
   extractXClientTransactionIndicesFromScriptText,
@@ -54,6 +59,7 @@ const {
   normalizePageButtonStyle,
   normalizeUsernameForMatching,
   observeStoredPageButtonStyle,
+  observeStoredUserCellAddButtonVisibility,
   parseFollowersPage,
   parseUserLookupRestId,
   readCookieValue,
@@ -70,7 +76,9 @@ const {
   setButtonState,
   sleep,
   startFollowerRun,
+  syncUserCellListButtons,
   syncStoredPageButtonStyle,
+  syncStoredUserCellAddButtonVisibility,
   tryGenerateXClientTransactionId,
   waitForElement
 } = require('../src/content/main.js');
@@ -107,6 +115,12 @@ function useGlobalOverrides(t, overrides) {
   });
 }
 
+function dataAttributeNameToDatasetKey(name) {
+  return String(name)
+    .slice('data-'.length)
+    .replace(/-([a-z])/g, (_match, letter) => letter.toUpperCase());
+}
+
 function createDomElement(overrides = {}) {
   const attributes = {};
   const listeners = new Map();
@@ -114,6 +128,7 @@ function createDomElement(overrides = {}) {
     attributes,
     dataset: {},
     disabled: false,
+    hidden: false,
     innerHTML: '',
     textContent: '',
     title: '',
@@ -140,6 +155,10 @@ function createDomElement(overrides = {}) {
     },
     setAttribute(name, value) {
       attributes[name] = value;
+
+      if (String(name).startsWith('data-')) {
+        element.dataset[dataAttributeNameToDatasetKey(name)] = String(value);
+      }
     },
     ...overrides
   };
@@ -247,6 +266,58 @@ function createDocumentStub() {
   return {
     createdElements,
     documentRef
+  };
+}
+
+function createStorageExtensionApi(initialStore = {}) {
+  const store = { ...initialStore };
+  const listeners = [];
+
+  return {
+    runtime: {},
+    storage: {
+      local: {
+        get(keys) {
+          const response = {};
+
+          for (const key of keys) {
+            response[key] = store[key];
+          }
+
+          return Promise.resolve(response);
+        },
+        set(payload) {
+          const changes = {};
+
+          for (const [key, value] of Object.entries(payload)) {
+            changes[key] = {
+              oldValue: store[key],
+              newValue: value
+            };
+            store[key] = value;
+          }
+
+          for (const listener of listeners) {
+            listener(changes, 'local');
+          }
+
+          return Promise.resolve();
+        }
+      },
+      onChanged: {
+        addListener(listener) {
+          listeners.push(listener);
+        },
+        removeListener(listener) {
+          const index = listeners.indexOf(listener);
+
+          if (index !== -1) {
+            listeners.splice(index, 1);
+          }
+        }
+      }
+    },
+    store
   };
 }
 
@@ -725,6 +796,38 @@ test('setButtonState uses list-specific titles for user cell buttons', () => {
   setButtonState(button, 'success', 'Felixmfdo');
   assert.equal(button.title, 'Blocked @Felixmfdo from this list');
   assert.equal(attributes['aria-label'], 'Blocked @Felixmfdo from this list');
+});
+
+test('setButtonState renders save-to-list labels and disables listed buttons', () => {
+  const attributes = {
+    'data-easy-tweetblock-action': BUTTON_ACTIONS.saveToList
+  };
+  const button = {
+    dataset: {
+      easyTweetblockAction: BUTTON_ACTIONS.saveToList,
+      surface: 'user-cell'
+    },
+    disabled: false,
+    getAttribute(name) {
+      return attributes[name] || null;
+    },
+    innerHTML: '',
+    textContent: '',
+    title: '',
+    setAttribute(name, value) {
+      attributes[name] = value;
+    }
+  };
+
+  setButtonState(button, 'idle', 'Felixmfdo');
+  assert.equal(button.textContent, 'Add');
+  assert.equal(button.title, 'Add @Felixmfdo to the active list');
+  assert.equal(button.disabled, false);
+
+  setButtonState(button, 'listed', 'Felixmfdo');
+  assert.equal(button.textContent, 'In list');
+  assert.equal(button.title, '@Felixmfdo is already in the active list');
+  assert.equal(button.disabled, true);
 });
 
 test('setButtonState swaps the icon after a successful block', () => {
@@ -2187,6 +2290,57 @@ test('syncStoredPageButtonStyle and observeStoredPageButtonStyle apply the saved
   assert.equal(button.innerHTML.includes('<svg'), true);
 });
 
+test('syncStoredUserCellAddButtonVisibility and observeStoredUserCellAddButtonVisibility hide and show Add buttons', async () => {
+  const listeners = [];
+  const button = createDomElement({
+    dataset: {
+      action: BUTTON_ACTIONS.saveToList,
+      easyTweetblockAction: BUTTON_ACTIONS.saveToList,
+      surface: 'user-cell'
+    }
+  });
+  button.setAttribute(BUTTON_ACTION_ATTRIBUTE, BUTTON_ACTIONS.saveToList);
+  const globalRef = {
+    chrome: {
+      runtime: {
+        lastError: null
+      },
+      storage: {
+        local: {
+          get(_keys, callback) {
+            callback({
+              [sharedBlocklist.USER_CELL_ADD_BUTTON_VISIBILITY_STORAGE_KEY]: false
+            });
+          }
+        },
+        onChanged: {
+          addListener(listener) {
+            listeners.push(listener);
+          },
+          removeListener() {}
+        }
+      }
+    },
+    document: {
+      querySelectorAll(selector) {
+        return selector === `[${BLOCK_BUTTON_ATTRIBUTE}][${BUTTON_ACTION_ATTRIBUTE}="${BUTTON_ACTIONS.saveToList}"]` ? [button] : [];
+      }
+    }
+  };
+
+  await syncStoredUserCellAddButtonVisibility(globalRef);
+  assert.equal(button.hidden, true);
+
+  observeStoredUserCellAddButtonVisibility(globalRef);
+  listeners[0]({
+    [sharedBlocklist.USER_CELL_ADD_BUTTON_VISIBILITY_STORAGE_KEY]: {
+      newValue: true
+    }
+  }, 'local');
+
+  assert.equal(button.hidden, false);
+});
+
 test('normalizeUsernameForMatching lowercases usernames for blocklist checks', () => {
   assert.equal(normalizeUsernameForMatching('@Felixmfdo'), 'felixmfdo');
   assert.equal(normalizeUsernameForMatching('/Felixmfdo'), 'felixmfdo');
@@ -2275,27 +2429,130 @@ test('attachButtonToProfilePage inserts the native button before the profile act
   assert.equal(createdElements.length, 1);
 });
 
-test('attachButtonToUserCell inserts the native button into the follow action wrapper', (t) => {
+test('attachButtonToUserCell inserts list and block buttons into the follow action wrapper', (t) => {
   const { createdElements, documentRef } = createDocumentStub();
-  const { actionRow, followButtonWrapper, userCell } = createUserCellNode('Milana62234788');
+  const { actionRow, followButton, followButtonWrapper, userCell } = createUserCellNode('Milana62234788');
 
   useGlobalOverrides(t, { document: documentRef });
   setCurrentNativeButtonStyle(PAGE_BUTTON_STYLES.icon);
 
   attachButtonToUserCell(userCell, documentRef);
 
-  assert.equal(createdElements.length, 1);
+  assert.equal(createdElements.length, 2);
   assert.equal(actionRow.children[1], followButtonWrapper);
   assert.equal(followButtonWrapper.getAttribute('data-easy-tweetblock-user-cell-actions'), 'true');
-  assert.equal(followButtonWrapper.children[0].dataset.kind, BUTTON_KINDS.native);
+  assert.equal(followButtonWrapper.children[0].dataset.easyTweetblockAction, BUTTON_ACTIONS.saveToList);
   assert.equal(followButtonWrapper.children[0].dataset.surface, 'user-cell');
   assert.equal(followButtonWrapper.children[0].dataset.screenName, 'Milana62234788');
+  assert.equal(followButtonWrapper.children[1].dataset.easyTweetblockAction, BUTTON_ACTIONS.block);
+  assert.equal(followButtonWrapper.children[1].dataset.kind, BUTTON_KINDS.native);
+  assert.equal(followButtonWrapper.children[2], followButton);
 
   attachButtonToUserCell(userCell, documentRef);
 
-  assert.equal(createdElements.length, 1);
+  assert.equal(createdElements.length, 2);
   assert.equal(actionRow.children[1], followButtonWrapper);
-  assert.equal(followButtonWrapper.children[0].dataset.surface, 'user-cell');
+  assert.equal(followButtonWrapper.children[0].dataset.easyTweetblockAction, BUTTON_ACTIONS.saveToList);
+  assert.equal(followButtonWrapper.children[1].dataset.easyTweetblockAction, BUTTON_ACTIONS.block);
+});
+
+test('attachButtonToUserCell hides the custom block button when the native action is already blocked', (t) => {
+  const { createdElements, documentRef } = createDocumentStub();
+  const { followButton, followButtonWrapper, userCell } = createUserCellNode('Milana62234788');
+
+  useGlobalOverrides(t, { document: documentRef });
+  followButton.textContent = 'Blocked';
+
+  attachButtonToUserCell(userCell, documentRef);
+  const blockButton = followButtonWrapper.children[1];
+
+  assert.equal(createdElements.length, 2);
+  assert.equal(followButtonWrapper.children[0].dataset.easyTweetblockAction, BUTTON_ACTIONS.saveToList);
+  assert.equal(followButtonWrapper.children[0].hidden, false);
+  assert.equal(blockButton.dataset.easyTweetblockAction, BUTTON_ACTIONS.block);
+  assert.equal(blockButton.hidden, true);
+
+  attachButtonToUserCell(userCell, documentRef);
+
+  assert.equal(createdElements.length, 2);
+  assert.equal(blockButton.hidden, true);
+});
+
+test('createUserCellListButton adds the username to the active list and reflects listed state', async (t) => {
+  const { documentRef } = createDocumentStub();
+  const { userCell } = createUserCellNode('Milana62234788');
+  const extensionApi = createStorageExtensionApi({
+    [sharedBlocklist.ACTIVE_USERNAME_LIST_ID_STORAGE_KEY]: 'blocklist',
+    [sharedBlocklist.USERNAME_LISTS_STORAGE_KEY]: [{
+      id: 'blocklist',
+      name: 'Blocklist',
+      usernames: []
+    }]
+  });
+
+  useGlobalOverrides(t, { document: documentRef });
+
+  const button = createUserCellListButton(userCell, {
+    documentRef,
+    extensionApi
+  });
+
+  assert.equal(button.dataset.easyTweetblockAction, BUTTON_ACTIONS.saveToList);
+  assert.equal(button.textContent, 'Add');
+
+  button.click();
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  assert.deepEqual(extensionApi.store[sharedBlocklist.USERNAME_LISTS_STORAGE_KEY][0].usernames, ['milana62234788']);
+  assert.equal(button.dataset.state, 'success');
+
+  syncUserCellListButtons({
+    querySelectorAll() {
+      return [button];
+    }
+  }, extensionApi.store[sharedBlocklist.USERNAME_LISTS_STORAGE_KEY][0], { extensionApi });
+  await flushAsyncWork();
+
+  assert.equal(button.dataset.state, 'listed');
+  assert.equal(button.textContent, 'In list');
+});
+
+test('createUserCellListButton shares the initial active-list storage read', async (t) => {
+  const { documentRef } = createDocumentStub();
+  const firstUserCell = createUserCellNode('Alice').userCell;
+  const secondUserCell = createUserCellNode('Bob').userCell;
+  const extensionApi = createStorageExtensionApi({
+    [sharedBlocklist.ACTIVE_USERNAME_LIST_ID_STORAGE_KEY]: 'blocklist',
+    [sharedBlocklist.USERNAME_LISTS_STORAGE_KEY]: [{
+      id: 'blocklist',
+      name: 'Blocklist',
+      usernames: ['bob']
+    }]
+  });
+  const getFromStorage = extensionApi.storage.local.get.bind(extensionApi.storage.local);
+  let storageGetCount = 0;
+  extensionApi.storage.local.get = (keys) => {
+    storageGetCount += 1;
+    return getFromStorage(keys);
+  };
+
+  useGlobalOverrides(t, { document: documentRef });
+
+  const firstButton = createUserCellListButton(firstUserCell, {
+    documentRef,
+    extensionApi
+  });
+  const secondButton = createUserCellListButton(secondUserCell, {
+    documentRef,
+    extensionApi
+  });
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  assert.equal(storageGetCount, 1);
+  assert.equal(firstButton.dataset.state, 'idle');
+  assert.equal(secondButton.dataset.state, 'listed');
 });
 
 test('collectTweets returns the root tweet and nested tweet descendants', () => {
@@ -2357,10 +2614,11 @@ test('processNode promotes nested follow-button mutations back to the parent use
 
   processNode(followButton, documentRef);
 
-  assert.equal(createdElements.length, 1);
+  assert.equal(createdElements.length, 2);
   assert.equal(actionRow.children[1], followButtonWrapper);
   assert.equal(followButtonWrapper.getAttribute('data-easy-tweetblock-user-cell-actions'), 'true');
-  assert.equal(followButtonWrapper.children[0].dataset.surface, 'user-cell');
+  assert.equal(followButtonWrapper.children[0].dataset.easyTweetblockAction, BUTTON_ACTIONS.saveToList);
+  assert.equal(followButtonWrapper.children[1].dataset.easyTweetblockAction, BUTTON_ACTIONS.block);
   assert.equal(followButton.parentElement, followButtonWrapper);
   assert.equal(userCell.children[0], actionRow);
 });
@@ -2848,7 +3106,7 @@ test('init installs styles, registers runtime messaging, and observes added twee
       target: documentRef.body
     });
     assert.equal(runtimeListeners.length, 1);
-    assert.equal(storageListeners.length, 1);
+    assert.equal(storageListeners.length, 3);
 
     observerCallback([{ addedNodes: [tweetNode] }]);
 

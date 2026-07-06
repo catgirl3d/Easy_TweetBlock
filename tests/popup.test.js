@@ -77,11 +77,66 @@ function createLocalStorageStub(initialValues = {}) {
   };
 }
 
+function createStorageExtensionApi(initialStore = {}) {
+  const store = { ...initialStore };
+  const listeners = [];
+
+  return {
+    runtime: {},
+    storage: {
+      local: {
+        get(keys) {
+          const response = {};
+
+          for (const key of keys) {
+            response[key] = store[key];
+          }
+
+          return Promise.resolve(response);
+        },
+        set(payload) {
+          const changes = {};
+
+          for (const [key, value] of Object.entries(payload)) {
+            changes[key] = {
+              oldValue: store[key],
+              newValue: value
+            };
+            store[key] = value;
+          }
+
+          for (const listener of listeners) {
+            listener(changes, 'local');
+          }
+
+          return Promise.resolve();
+        }
+      },
+      onChanged: {
+        addListener(listener) {
+          listeners.push(listener);
+        },
+        removeListener(listener) {
+          const index = listeners.indexOf(listener);
+
+          if (index !== -1) {
+            listeners.splice(index, 1);
+          }
+        }
+      }
+    },
+    store
+  };
+}
+
 function createPopupElement(overrides = {}) {
   const listeners = new Map();
   const element = {
+    children: [],
     dataset: {},
     disabled: false,
+    hidden: false,
+    parentElement: null,
     style: {},
     textContent: '',
     value: '',
@@ -109,6 +164,31 @@ function createPopupElement(overrides = {}) {
         });
       }
     },
+    contains(target) {
+      if (target === element) {
+        return true;
+      }
+
+      return element.children.some((child) => child?.contains?.(target) || child === target);
+    },
+    focus() {},
+    removeAttribute(name) {
+      delete element[name];
+    },
+    replaceChildren(...children) {
+      element.children = children;
+
+      for (const child of children) {
+        if (child && typeof child === 'object') {
+          child.parentElement = element;
+        }
+      }
+
+      element.textContent = children.map((child) => child?.textContent || '').join('');
+    },
+    setAttribute(name, value) {
+      element[name] = value;
+    },
     ...overrides
   };
 
@@ -135,27 +215,43 @@ function createPopupDocument() {
     'followers-source-followers': createPopupElement(),
     'followers-source-following': createPopupElement(),
     'followers-summary': createPopupElement(),
+    'delete-username-list': createPopupElement(),
+    'import-usernames': createPopupElement(),
+    'import-usernames-file': createPopupElement({ files: [] }),
+    'new-username-list': createPopupElement(),
     'open-settings': createPopupElement(),
     'open-followers': createPopupElement(),
     'popup-debug-log': createPopupElement({ scrollTop: 0, scrollHeight: 0 }),
     'page-button-style-icon': createPopupElement({ setAttribute() {} }),
     'page-button-style-text': createPopupElement({ setAttribute() {} }),
     'popup-shell': createPopupElement({ dataset: {} }),
+    'rename-username-list': createPopupElement(),
     'scan-followers-preview': createPopupElement(),
     'save-blocklist': createPopupElement(),
     'save-settings': createPopupElement(),
+    'show-user-cell-add-button': createPopupElement({ checked: false }),
     status: createPopupElement(),
     'username-blocklist': createPopupElement(),
+    'username-list-options': createPopupElement(),
+    'username-list-select-label': createPopupElement(),
+    'username-list-select': createPopupElement(),
     'username-count': createPopupElement()
   };
 
   return {
     documentRef: {
+      addEventListener() {},
       body: {
         textContent: ''
       },
       getElementById(id) {
         return elements[id] || null;
+      },
+      removeEventListener() {},
+      createElement(tagName) {
+        return createPopupElement({
+          tagName: String(tagName).toUpperCase()
+        });
       }
     },
     elements
@@ -902,6 +998,9 @@ test('init loads stored popup state and supports settings navigation', async () 
     async getStoredPageBlockButtonStyle() {
       return sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.text;
     },
+    async getStoredUserCellAddButtonVisibility() {
+      return false;
+    },
     async getStoredUsernames() {
       return ['alice', 'bob'];
     }
@@ -919,6 +1018,7 @@ test('init loads stored popup state and supports settings navigation', async () 
   assert.equal(elements['followers-scan-limit'].value, String(sharedFollowers.DEFAULT_FOLLOWERS_SCAN_LIMIT));
   assert.equal(elements['page-button-style-text'].dataset.active, 'true');
   assert.equal(elements['page-button-style-icon'].dataset.active, 'false');
+  assert.equal(elements['show-user-cell-add-button'].checked, false);
   assert.equal(elements.status.textContent, 'Save usernames for later, or block the whole list immediately through any open X tab.');
 
   elements['open-settings'].click();
@@ -935,6 +1035,7 @@ test('init loads stored popup state and supports settings navigation', async () 
   assert.equal(elements['popup-shell'].dataset.view, POPUP_VIEWS.main);
   assert.equal(elements['batch-block-delay-ms'].value, '1400');
   assert.equal(elements['page-button-style-text'].dataset.active, 'true');
+  assert.equal(elements['show-user-cell-add-button'].checked, false);
 
   elements['open-followers'].click();
   assert.equal(elements['popup-shell'].dataset.view, POPUP_VIEWS.followers);
@@ -971,7 +1072,12 @@ test('init restores persisted followers preview and username draft state', async
     },
     followersScanLimit: 80,
     statusMessage: 'Preview ready: 1 followers can be blocked from @targetuser.',
-    usernameDraftText: '@draftuser',
+    usernameDrafts: {
+      blocklist: {
+        baseText: '@saveduser',
+        text: '@draftuser'
+      }
+    },
     view: POPUP_VIEWS.followers
   }, storage);
 
@@ -998,12 +1104,284 @@ test('init restores persisted followers preview and username draft state', async
   assert.equal(elements['followers-scan-limit'].value, '80');
   assert.equal(elements['followers-preview'].textContent, '@alice');
   assert.equal(elements['followers-summary'].textContent.includes('Scanned 5 followers from @targetuser'), true);
-  assert.equal(elements.status.textContent, 'Preview ready: 1 followers can be blocked from @targetuser.');
+  assert.equal(elements.status.textContent, 'Save usernames for later, or block the whole list immediately through any open X tab.');
   assert.equal(elements['block-follower-candidates'].disabled, false);
 
   elements['username-blocklist'].value = '@changeduser';
   elements['username-blocklist'].dispatch('input');
-  assert.equal(loadStoredPopupState(storage).usernameDraftText, '@changeduser');
+  assert.equal(loadStoredPopupState(storage).usernameDrafts.blocklist.text, '@changeduser');
+});
+
+test('init loads, switches, saves, creates, renames, and deletes username lists', async (t) => {
+  const originalPrompt = globalThis.prompt;
+  const originalConfirm = globalThis.confirm;
+  const promptResponses = ['VIP', 'VIP renamed'];
+  globalThis.prompt = () => promptResponses.shift();
+  globalThis.confirm = () => true;
+  t.after(() => {
+    if (originalPrompt === undefined) {
+      delete globalThis.prompt;
+    } else {
+      globalThis.prompt = originalPrompt;
+    }
+
+    if (originalConfirm === undefined) {
+      delete globalThis.confirm;
+    } else {
+      globalThis.confirm = originalConfirm;
+    }
+  });
+
+  const extensionApi = createStorageExtensionApi({
+    [sharedBlocklist.ACTIVE_USERNAME_LIST_ID_STORAGE_KEY]: 'second',
+    [sharedBlocklist.USERNAME_LISTS_STORAGE_KEY]: [
+      { id: 'first', name: 'First', usernames: ['alice'] },
+      { id: 'second', name: 'Second', usernames: ['bob'] }
+    ]
+  });
+  const { documentRef, elements } = createPopupDocument();
+
+  init(documentRef, extensionApi, sharedBlocklist);
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  assert.equal(elements['username-list-select'].value, 'second');
+  assert.equal(elements['username-blocklist'].value, '@bob');
+
+  elements['username-list-select'].value = 'first';
+  elements['username-list-select'].change();
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  assert.equal(elements['username-blocklist'].value, '@alice');
+  elements['username-blocklist'].value = '@Alice @Charlie';
+  elements['save-blocklist'].click();
+  await flushAsyncWork();
+  await flushAsyncWork();
+  assert.deepEqual(extensionApi.store[sharedBlocklist.USERNAME_LISTS_STORAGE_KEY][0].usernames, ['alice', 'charlie']);
+
+  elements['new-username-list'].click();
+  await flushAsyncWork();
+  await flushAsyncWork();
+  assert.equal(extensionApi.store[sharedBlocklist.ACTIVE_USERNAME_LIST_ID_STORAGE_KEY], 'vip');
+  assert.equal(elements['username-list-select'].value, 'vip');
+
+  elements['rename-username-list'].click();
+  await flushAsyncWork();
+  await flushAsyncWork();
+  assert.equal(extensionApi.store[sharedBlocklist.USERNAME_LISTS_STORAGE_KEY].find((list) => list.id === 'vip').name, 'VIP renamed');
+
+  elements['delete-username-list'].click();
+  await flushAsyncWork();
+  await flushAsyncWork();
+  assert.equal(extensionApi.store[sharedBlocklist.USERNAME_LISTS_STORAGE_KEY].some((list) => list.id === 'vip'), false);
+  assert.notEqual(extensionApi.store[sharedBlocklist.ACTIVE_USERNAME_LIST_ID_STORAGE_KEY], 'vip');
+});
+
+test('init custom username list dropdown opens and switches the active list by option click', async () => {
+  const extensionApi = createStorageExtensionApi({
+    [sharedBlocklist.ACTIVE_USERNAME_LIST_ID_STORAGE_KEY]: 'second',
+    [sharedBlocklist.USERNAME_LISTS_STORAGE_KEY]: [
+      { id: 'first', name: 'First', usernames: ['alice'] },
+      { id: 'second', name: 'Second', usernames: ['bob'] }
+    ]
+  });
+  const { documentRef, elements } = createPopupDocument();
+
+  init(documentRef, extensionApi, sharedBlocklist);
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  elements['username-list-select'].click();
+
+  assert.equal(elements['username-list-options'].hidden, false);
+  assert.equal(elements['username-list-options'].children.length, 2);
+  assert.equal(elements['username-list-options'].children[0].textContent, 'First');
+  assert.equal(elements['username-list-options'].children[1].textContent, 'Second');
+
+  elements['username-list-options'].children[0].click();
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  assert.equal(extensionApi.store[sharedBlocklist.ACTIVE_USERNAME_LIST_ID_STORAGE_KEY], 'first');
+  assert.equal(elements['username-list-select'].value, 'first');
+  assert.equal(elements['username-list-select'].textContent, 'First');
+  assert.equal(elements['username-blocklist'].value, '@alice');
+  assert.equal(elements['username-list-options'].hidden, true);
+});
+
+test('init preserves a dirty username draft while renaming the active list', async (t) => {
+  const originalLocalStorage = globalThis.localStorage;
+  const originalPrompt = globalThis.prompt;
+  const storage = createLocalStorageStub();
+  globalThis.localStorage = storage;
+  globalThis.prompt = () => 'Renamed blocklist';
+  t.after(() => {
+    if (originalLocalStorage === undefined) {
+      delete globalThis.localStorage;
+    } else {
+      globalThis.localStorage = originalLocalStorage;
+    }
+
+    if (originalPrompt === undefined) {
+      delete globalThis.prompt;
+    } else {
+      globalThis.prompt = originalPrompt;
+    }
+  });
+  const extensionApi = createStorageExtensionApi({
+    [sharedBlocklist.ACTIVE_USERNAME_LIST_ID_STORAGE_KEY]: 'blocklist',
+    [sharedBlocklist.USERNAME_LISTS_STORAGE_KEY]: [
+      { id: 'blocklist', name: 'Blocklist', usernames: ['alice'] }
+    ]
+  });
+  const { documentRef, elements } = createPopupDocument();
+
+  init(documentRef, extensionApi, sharedBlocklist);
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  elements['username-blocklist'].value = '@alice\n@bob';
+  elements['username-blocklist'].dispatch('input');
+  elements['rename-username-list'].click();
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  assert.equal(extensionApi.store[sharedBlocklist.USERNAME_LISTS_STORAGE_KEY][0].name, 'Renamed blocklist');
+  assert.equal(elements['username-blocklist'].value, '@alice\n@bob');
+  assert.equal(loadStoredPopupState(storage).usernameDrafts.blocklist.text, '@alice\n@bob');
+  assert.equal(elements.status.textContent, 'Renamed list to Renamed blocklist.');
+});
+
+test('init imports usernames into the active list and JSON lists by name', async () => {
+  const extensionApi = createStorageExtensionApi({
+    [sharedBlocklist.ACTIVE_USERNAME_LIST_ID_STORAGE_KEY]: 'blocklist',
+    [sharedBlocklist.USERNAME_LISTS_STORAGE_KEY]: [
+      { id: 'blocklist', name: 'Blocklist', usernames: ['alice'] }
+    ]
+  });
+  const { documentRef, elements } = createPopupDocument();
+
+  init(documentRef, extensionApi, sharedBlocklist);
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  elements['import-usernames-file'].files = [{
+    name: 'names.csv',
+    text: () => Promise.resolve('@Bob,bad-name,Alice')
+  }];
+  elements['import-usernames-file'].change();
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  assert.deepEqual(extensionApi.store[sharedBlocklist.USERNAME_LISTS_STORAGE_KEY][0].usernames, ['alice', 'bob']);
+  assert.equal(elements.status.textContent, 'Imported 2 usernames into Blocklist. Skipped invalid values: bad-name.');
+
+  elements['import-usernames-file'].files = [{
+    name: 'lists.json',
+    text: () => Promise.resolve('{"lists":[{"name":"Blocklist","usernames":["Charlie"]},{"name":"VIP","usernames":["Dana"]}]}')
+  }];
+  elements['import-usernames-file'].change();
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  assert.deepEqual(extensionApi.store[sharedBlocklist.USERNAME_LISTS_STORAGE_KEY], [
+    { id: 'blocklist', name: 'Blocklist', usernames: ['alice', 'bob', 'charlie'] },
+    { id: 'vip', name: 'VIP', usernames: ['dana'] }
+  ]);
+});
+
+test('init protects incompatible drafts and reacts to external list changes', async (t) => {
+  const originalLocalStorage = globalThis.localStorage;
+  const storage = createLocalStorageStub();
+  globalThis.localStorage = storage;
+  t.after(() => {
+    if (originalLocalStorage === undefined) {
+      delete globalThis.localStorage;
+      return;
+    }
+
+    globalThis.localStorage = originalLocalStorage;
+  });
+  saveStoredPopupState({
+    usernameDrafts: {
+      blocklist: {
+        baseText: '@old',
+        text: '@stale_draft'
+      }
+    }
+  }, storage);
+  const extensionApi = createStorageExtensionApi({
+    [sharedBlocklist.ACTIVE_USERNAME_LIST_ID_STORAGE_KEY]: 'blocklist',
+    [sharedBlocklist.USERNAME_LISTS_STORAGE_KEY]: [
+      { id: 'blocklist', name: 'Blocklist', usernames: ['alice'] }
+    ]
+  });
+  const { documentRef, elements } = createPopupDocument();
+
+  init(documentRef, extensionApi, sharedBlocklist);
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  assert.equal(elements['username-blocklist'].value, '@alice');
+  assert.equal(elements.status.textContent, 'Unsaved draft was outdated; loaded the saved list.');
+
+  await sharedBlocklist.addUsernameToActiveList('Bob', extensionApi);
+  await flushAsyncWork();
+  await flushAsyncWork();
+  assert.equal(elements['username-blocklist'].value, '@alice\n@bob');
+
+  elements['username-blocklist'].value = '@local_draft';
+  elements['username-blocklist'].dispatch('input');
+  await sharedBlocklist.addUsernameToActiveList('Charlie', extensionApi);
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  assert.equal(elements['username-blocklist'].value, '@local_draft');
+  assert.equal(elements.status.textContent, 'The active list changed elsewhere; your unsaved edits were kept.');
+});
+
+test('init saves dirty username drafts without dropping external active-list additions', async () => {
+  const extensionApi = createStorageExtensionApi({
+    [sharedBlocklist.ACTIVE_USERNAME_LIST_ID_STORAGE_KEY]: 'blocklist',
+    [sharedBlocklist.USERNAME_LISTS_STORAGE_KEY]: [
+      { id: 'blocklist', name: 'Blocklist', usernames: ['alice'] }
+    ]
+  });
+  const { documentRef, elements } = createPopupDocument();
+
+  init(documentRef, extensionApi, sharedBlocklist);
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  elements['username-blocklist'].value = '@alice\n@bob';
+  elements['username-blocklist'].dispatch('input');
+
+  await sharedBlocklist.addUsernameToActiveList('Carol', extensionApi);
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  assert.equal(elements['username-blocklist'].value, '@alice\n@bob');
+  assert.equal(elements.status.textContent, 'The active list changed elsewhere; your unsaved edits were kept.');
+
+  elements['save-blocklist'].click();
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  assert.deepEqual(extensionApi.store[sharedBlocklist.USERNAME_LISTS_STORAGE_KEY][0].usernames, ['alice', 'carol', 'bob']);
+  assert.equal(elements['username-blocklist'].value, '@alice\n@carol\n@bob');
+  assert.equal(elements['username-count'].textContent, '3 usernames');
+  assert.equal(elements.status.textContent, 'Saved 3 usernames.');
+
+  elements['username-blocklist'].value = '@carol\n@bob';
+  elements['username-blocklist'].dispatch('input');
+  elements['save-blocklist'].click();
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  assert.deepEqual(extensionApi.store[sharedBlocklist.USERNAME_LISTS_STORAGE_KEY][0].usernames, ['carol', 'bob']);
+  assert.equal(elements['username-blocklist'].value, '@carol\n@bob');
+  assert.equal(elements.status.textContent, 'Saved 2 usernames.');
 });
 
 test('init ignores a persisted completed follower-run status and restores the default header copy', async (t) => {
@@ -1022,6 +1400,43 @@ test('init ignores a persisted completed follower-run status and restores the de
 
   saveStoredPopupState({
     statusMessage: 'Block run complete: blocked 3/3 accounts. Delay used: 1000 ms between requests.'
+  }, storage);
+
+  const { documentRef, elements } = createPopupDocument();
+
+  init(documentRef, { runtime: {}, tabs: {} }, {
+    ...sharedBlocklist,
+    async getStoredBatchBlockDelayMs() {
+      return 1000;
+    },
+    async getStoredPageBlockButtonStyle() {
+      return sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.icon;
+    },
+    async getStoredUsernames() {
+      return [];
+    }
+  });
+  await flushAsyncWork();
+
+  assert.equal(elements.status.textContent, 'Save usernames for later, or block the whole list immediately through any open X tab.');
+});
+
+test('init ignores a persisted list CRUD status and restores the default header copy', async (t) => {
+  const originalLocalStorage = globalThis.localStorage;
+  const storage = createLocalStorageStub();
+
+  globalThis.localStorage = storage;
+  t.after(() => {
+    if (originalLocalStorage === undefined) {
+      delete globalThis.localStorage;
+      return;
+    }
+
+    globalThis.localStorage = originalLocalStorage;
+  });
+
+  saveStoredPopupState({
+    statusMessage: 'Deleted list. Active list: Blocklist.'
   }, storage);
 
   const { documentRef, elements } = createPopupDocument();
@@ -1089,8 +1504,10 @@ test('init saves settings, updates the active delay, and returns to the main vie
   const { documentRef, elements } = createPopupDocument();
   const deferredDelaySave = createDeferred();
   const deferredStyleSave = createDeferred();
+  const deferredVisibilitySave = createDeferred();
   const savedDelayInputs = [];
   const savedStyles = [];
+  const savedVisibilityInputs = [];
   const blocklist = {
     ...sharedBlocklist,
     async getStoredBatchBlockDelayMs() {
@@ -1098,6 +1515,9 @@ test('init saves settings, updates the active delay, and returns to the main vie
     },
     async getStoredPageBlockButtonStyle() {
       return sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.icon;
+    },
+    async getStoredUserCellAddButtonVisibility() {
+      return true;
     },
     async getStoredUsernames() {
       return [];
@@ -1109,6 +1529,10 @@ test('init saves settings, updates the active delay, and returns to the main vie
     setStoredPageBlockButtonStyle(style) {
       savedStyles.push(style);
       return deferredStyleSave.promise;
+    },
+    setStoredUserCellAddButtonVisibility(isVisible) {
+      savedVisibilityInputs.push(isVisible);
+      return deferredVisibilitySave.promise;
     }
   };
 
@@ -1118,11 +1542,13 @@ test('init saves settings, updates the active delay, and returns to the main vie
   elements['open-settings'].click();
   elements['batch-block-delay-ms'].value = '2301';
   elements['page-button-style-text'].click();
+  elements['show-user-cell-add-button'].checked = false;
   elements['save-settings'].click();
   await flushAsyncWork();
 
   assert.equal(JSON.stringify(savedDelayInputs), JSON.stringify([2000]));
   assert.equal(JSON.stringify(savedStyles), JSON.stringify([sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.text]));
+  assert.equal(JSON.stringify(savedVisibilityInputs), JSON.stringify([false]));
   assert.equal(elements.status.textContent, 'Saving settings...');
   assert.equal(elements['save-blocklist'].disabled, true);
   assert.equal(elements['block-now'].disabled, true);
@@ -1130,11 +1556,13 @@ test('init saves settings, updates the active delay, and returns to the main vie
 
   deferredDelaySave.resolve(1900);
   deferredStyleSave.resolve(sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.text);
+  deferredVisibilitySave.resolve(false);
   await flushAsyncWork();
 
   assert.equal(elements['popup-shell'].dataset.view, POPUP_VIEWS.main);
   assert.equal(elements['batch-block-delay-ms'].value, '1900');
   assert.equal(elements['page-button-style-text'].dataset.active, 'true');
+  assert.equal(elements['show-user-cell-add-button'].checked, false);
   assert.equal(elements.status.textContent, 'Saved settings. Delay: 1900 ms. Style: text.');
   assert.equal(elements['save-blocklist'].disabled, false);
   assert.equal(elements['block-now'].disabled, false);
@@ -1143,6 +1571,7 @@ test('init saves settings, updates the active delay, and returns to the main vie
   elements['open-settings'].click();
   assert.equal(elements['batch-block-delay-ms'].value, '1900');
   assert.equal(elements['page-button-style-text'].dataset.active, 'true');
+  assert.equal(elements['show-user-cell-add-button'].checked, false);
 });
 
 test('init blocks the saved list through an open X tab and reports failures with the saved delay', async () => {

@@ -21,14 +21,28 @@
         <section class="view-panel view-panel-stack" data-view-panel="main">
           <section class="card">
             <div class="card-heading">
-              <h2>Username Blocklist</h2>
+              <h2>Username Lists</h2>
               <span id="username-count" class="count-pill">0 usernames</span>
+            </div>
+            <div class="list-toolbar">
+              <label id="username-list-select-label" class="field-label list-select-label">Active list</label>
+              <div class="list-select-dropdown">
+                <button id="username-list-select" class="list-select" type="button" aria-haspopup="listbox" aria-expanded="false"></button>
+                <div id="username-list-options" class="list-select-menu" role="listbox" aria-labelledby="username-list-select-label" hidden></div>
+              </div>
+              <div class="list-actions-row">
+                <button id="new-username-list" class="ghost-button ghost-button-small" type="button">New</button>
+                <button id="rename-username-list" class="ghost-button ghost-button-small" type="button">Rename</button>
+                <button id="delete-username-list" class="danger-button danger-button-small" type="button">Delete</button>
+              </div>
             </div>
             <label class="field-label" for="username-blocklist">One username per line. Leading `@` is optional.</label>
             <textarea id="username-blocklist" class="blocklist-input" rows="8" placeholder="@spamaccount&#10;another_handle"></textarea>
+            <input id="import-usernames-file" type="file" accept=".txt,.csv,.json,text/plain,text/csv,application/json" hidden>
             <div class="actions-row">
+              <button id="import-usernames" class="secondary-button" type="button">Import</button>
               <button id="block-now" class="secondary-button" type="button">Block listed now</button>
-              <button id="save-blocklist" class="primary-button" type="button">Save blocklist</button>
+              <button id="save-blocklist" class="primary-button" type="button">Save list</button>
             </div>
           </section>
 
@@ -49,13 +63,20 @@
               <button id="back-to-main" class="ghost-button" type="button">Back</button>
               <h2>Settings</h2>
             </div>
-            <p class="settings-copy">These settings affect the page button appearance and batch blocking from the popup.</p>
+            <p class="settings-copy">These settings affect page button appearance, Add button visibility, and batch blocking from the popup.</p>
             <div class="setting-stack">
               <label class="field-label setting-label" for="page-button-style-icon">Page button style</label>
               <div class="segmented-control" role="group" aria-label="Page button style">
                 <button id="page-button-style-icon" class="segment-button" type="button">Icon</button>
                 <button id="page-button-style-text" class="segment-button" type="button">Text</button>
               </div>
+            </div>
+            <div class="setting-row">
+              <label class="field-label setting-label" for="show-user-cell-add-button">Show Add button in user rows</label>
+              <label class="toggle-checkbox-label" for="show-user-cell-add-button">
+                <input id="show-user-cell-add-button" class="toggle-checkbox" type="checkbox">
+                <span class="toggle-checkbox-text">Enabled</span>
+              </label>
             </div>
             <div class="setting-row">
               <label class="field-label setting-label" for="batch-block-delay-ms">Delay between blocks</label>

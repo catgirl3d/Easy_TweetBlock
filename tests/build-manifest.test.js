@@ -33,6 +33,14 @@ test("buildManifest merges the Chrome overlay into the base manifest", () => {
   assert.deepEqual(manifest.content_scripts[0].js, CONTENT_SCRIPT_FILES);
 });
 
+test("content script files load shared blocklist before content main", () => {
+  assert.equal(CONTENT_SCRIPT_FILES.includes("src/shared/blocklist.js"), true);
+  assert.equal(
+    CONTENT_SCRIPT_FILES.indexOf("src/shared/blocklist.js") < CONTENT_SCRIPT_FILES.indexOf("src/content/main.js"),
+    true
+  );
+});
+
 test("buildManifest merges the Firefox overlay into the base manifest", () => {
   const manifest = buildManifest("firefox");
 

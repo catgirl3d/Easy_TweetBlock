@@ -3,6 +3,8 @@
   const POPUP_STATE_STORAGE_KEY = 'easyTweetBlockPopupState';
   const POPUP_LOG_PREFIX = '[Easy TweetBlock][popup]';
   const DEFAULT_STATUS_MESSAGE = 'Save usernames for later, or block the whole list immediately through any open X tab.';
+  const OUTDATED_USERNAME_DRAFT_STATUS = 'Unsaved draft was outdated; loaded the saved list.';
+  const EXTERNAL_USERNAME_LIST_CHANGE_STATUS = 'The active list changed elsewhere; your unsaved edits were kept.';
   const MAX_POPUP_DEBUG_ENTRIES = 120;
   const popupDebugEntriesCache = new Map();
 
@@ -51,11 +53,27 @@
   function normalizeStoredStatusMessage(statusMessage) {
     const normalizedMessage = typeof statusMessage === 'string' ? statusMessage.trim() : '';
 
-    if (!normalizedMessage || normalizedMessage.startsWith('Block run complete:')) {
-      return DEFAULT_STATUS_MESSAGE;
+    if (
+      normalizedMessage === OUTDATED_USERNAME_DRAFT_STATUS
+      || normalizedMessage === EXTERNAL_USERNAME_LIST_CHANGE_STATUS
+    ) {
+      return normalizedMessage;
     }
 
-    return normalizedMessage;
+    return DEFAULT_STATUS_MESSAGE;
+  }
+
+  function getPersistedStatusMessage(statusMessage) {
+    const normalizedMessage = typeof statusMessage === 'string' ? statusMessage.trim() : '';
+
+    if (
+      normalizedMessage === OUTDATED_USERNAME_DRAFT_STATUS
+      || normalizedMessage === EXTERNAL_USERNAME_LIST_CHANGE_STATUS
+    ) {
+      return normalizedMessage;
+    }
+
+    return '';
   }
 
   function setCachedPopupDebugEntries(entries, storageRef = globalThis.localStorage) {
@@ -926,9 +944,18 @@
     const shellElement = documentRef.getElementById('popup-shell');
     const statusElement = documentRef.getElementById('status');
     const textareaElement = documentRef.getElementById('username-blocklist');
+    const usernameListSelectLabelElement = documentRef.getElementById('username-list-select-label');
+    const usernameListSelectElement = documentRef.getElementById('username-list-select');
+    const usernameListOptionsElement = documentRef.getElementById('username-list-options');
+    const newUsernameListButton = documentRef.getElementById('new-username-list');
+    const renameUsernameListButton = documentRef.getElementById('rename-username-list');
+    const deleteUsernameListButton = documentRef.getElementById('delete-username-list');
+    const importUsernamesButton = documentRef.getElementById('import-usernames');
+    const importUsernamesFileInput = documentRef.getElementById('import-usernames-file');
     const delayInputElement = documentRef.getElementById('batch-block-delay-ms');
     const pageButtonStyleIconElement = documentRef.getElementById('page-button-style-icon');
     const pageButtonStyleTextElement = documentRef.getElementById('page-button-style-text');
+    const showUserCellAddButtonElement = documentRef.getElementById('show-user-cell-add-button');
     const openSettingsButton = documentRef.getElementById('open-settings');
     const openFollowersButton = documentRef.getElementById('open-followers');
     const backToMainButton = documentRef.getElementById('back-to-main');
@@ -961,6 +988,7 @@
     let currentFollowerRunTabId = null;
     let currentDelayMs = blocklist?.DEFAULT_BATCH_BLOCK_DELAY_MS;
     let currentPageButtonStyle = blocklist?.DEFAULT_PAGE_BLOCK_BUTTON_STYLE;
+    let currentShowUserCellAddButton = blocklist?.DEFAULT_USER_CELL_ADD_BUTTON_VISIBILITY;
     let currentFollowersBlockLimit = followers?.DEFAULT_FOLLOWERS_BLOCK_LIMIT;
     let currentFollowersBlockRunId = null;
     let currentFollowersPreview = null;
@@ -969,9 +997,19 @@
     let currentFollowersSource = followers?.DEFAULT_FOLLOWERS_SOURCE;
     let draftPageButtonStyle = currentPageButtonStyle;
     const storedPopupState = loadStoredPopupState();
+    let currentUsernameLists = [];
+    let currentActiveUsernameList = null;
+    let currentActiveUsernameListId = null;
+    let isUsernameDraftDirty = false;
+    let isUsernameListDropdownOpen = false;
+    let highlightedUsernameListIndex = -1;
+    let draftListId = null;
+    const usernameDrafts = storedPopupState.usernameDrafts && typeof storedPopupState.usernameDrafts === 'object' && !Array.isArray(storedPopupState.usernameDrafts)
+      ? { ...storedPopupState.usernameDrafts }
+      : {};
     let isHydratingPopupState = true;
 
-    if (!blocklist || !followers || !extensionApi || !shellElement || !statusElement || !textareaElement || !delayInputElement || !pageButtonStyleIconElement || !pageButtonStyleTextElement || !openSettingsButton || !openFollowersButton || !backToMainButton || !backFromFollowersButton || !saveButton || !saveSettingsButton || !blockNowButton || !cancelFollowersRunButton || !countElement || !followersBlockLimitElement || !followersScanLimitElement || !followersSummaryElement || !followersPreviewElement || !followersBlockProgressElement || !followersProgressCountElement || !followersProgressDetailElement || !followersProgressFillElement || !followersProgressLabelElement || !followersSourceFollowersElement || !followersSourceFollowingElement || !scanFollowersButton || !blockFollowerCandidatesButton || !popupDebugLogElement || !clearPopupDebugLogButton) {
+    if (!blocklist || !followers || !extensionApi || !shellElement || !statusElement || !textareaElement || !usernameListSelectLabelElement || !usernameListSelectElement || !usernameListOptionsElement || !newUsernameListButton || !renameUsernameListButton || !deleteUsernameListButton || !importUsernamesButton || !importUsernamesFileInput || !delayInputElement || !pageButtonStyleIconElement || !pageButtonStyleTextElement || !showUserCellAddButtonElement || !openSettingsButton || !openFollowersButton || !backToMainButton || !backFromFollowersButton || !saveButton || !saveSettingsButton || !blockNowButton || !cancelFollowersRunButton || !countElement || !followersBlockLimitElement || !followersScanLimitElement || !followersSummaryElement || !followersPreviewElement || !followersBlockProgressElement || !followersProgressCountElement || !followersProgressDetailElement || !followersProgressFillElement || !followersProgressLabelElement || !followersSourceFollowersElement || !followersSourceFollowingElement || !scanFollowersButton || !blockFollowerCandidatesButton || !popupDebugLogElement || !clearPopupDebugLogButton) {
       return;
     }
 
@@ -1014,8 +1052,8 @@
         followersPreview: currentFollowersPreview,
         followersScanLimit: currentFollowersScanLimit,
         followersSource: currentFollowersSource,
-        statusMessage: statusElement.textContent || '',
-        usernameDraftText: textareaElement.value || '',
+        statusMessage: getPersistedStatusMessage(statusElement.textContent || ''),
+        usernameDrafts,
         view: normalizePopupView(shellElement.dataset.view)
       });
     }
@@ -1027,6 +1065,439 @@
 
     function renderCount(usernames) {
       countElement.textContent = `${usernames.length} username${usernames.length === 1 ? '' : 's'}`;
+    }
+
+    function getActiveListStorageText(list = currentActiveUsernameList) {
+      return blocklist.serializeUsernameText(list?.usernames || []);
+    }
+
+    function getUsernameDraft(listId) {
+      const draft = usernameDrafts[listId];
+
+      if (!draft || typeof draft !== 'object' || typeof draft.text !== 'string' || typeof draft.baseText !== 'string') {
+        return null;
+      }
+
+      return draft;
+    }
+
+    function clearUsernameDraft(listId = currentActiveUsernameListId) {
+      if (!listId) {
+        return;
+      }
+
+      delete usernameDrafts[listId];
+
+      if (draftListId === listId) {
+        draftListId = null;
+      }
+    }
+
+    function persistUsernameDraft() {
+      const storageText = getActiveListStorageText();
+      const text = textareaElement.value || '';
+
+      isUsernameDraftDirty = text !== storageText;
+      draftListId = isUsernameDraftDirty ? currentActiveUsernameListId : null;
+
+      if (currentActiveUsernameListId) {
+        if (isUsernameDraftDirty) {
+          usernameDrafts[currentActiveUsernameListId] = {
+            baseText: storageText,
+            text
+          };
+        } else {
+          clearUsernameDraft(currentActiveUsernameListId);
+        }
+      }
+
+      renderCount(blocklist.parseUsernameText(text).usernames);
+      persistCurrentPopupState();
+    }
+
+    function dispatchUsernameListChange() {
+      if (typeof usernameListSelectElement.dispatchEvent === 'function' && typeof Event === 'function') {
+        usernameListSelectElement.dispatchEvent(new Event('change', { bubbles: true }));
+        return;
+      }
+
+      if (typeof usernameListSelectElement.change === 'function') {
+        usernameListSelectElement.change();
+        return;
+      }
+
+      if (typeof usernameListSelectElement.dispatch === 'function') {
+        usernameListSelectElement.dispatch('change');
+      }
+    }
+
+    function getCurrentActiveUsernameListIndex() {
+      return currentUsernameLists.findIndex((list) => list.id === currentActiveUsernameListId);
+    }
+
+    function normalizeHighlightedUsernameListIndex(index) {
+      if (!currentUsernameLists.length) {
+        return -1;
+      }
+
+      if (!Number.isFinite(index)) {
+        return getCurrentActiveUsernameListIndex() >= 0 ? getCurrentActiveUsernameListIndex() : 0;
+      }
+
+      const lastIndex = currentUsernameLists.length - 1;
+      return Math.max(0, Math.min(lastIndex, Math.round(index)));
+    }
+
+    function closeUsernameListDropdown({ preservePendingSelection = false } = {}) {
+      if (!isUsernameListDropdownOpen) {
+        return;
+      }
+
+      isUsernameListDropdownOpen = false;
+      highlightedUsernameListIndex = -1;
+
+      if (preservePendingSelection) {
+        usernameListSelectElement.dataset.open = 'false';
+        usernameListSelectElement.setAttribute('aria-expanded', 'false');
+        usernameListOptionsElement.hidden = true;
+
+        if (typeof usernameListSelectElement.removeAttribute === 'function') {
+          usernameListSelectElement.removeAttribute('aria-activedescendant');
+        }
+
+        return;
+      }
+
+      renderUsernameListSelect();
+    }
+
+    function openUsernameListDropdown({ highlightedIndex = null } = {}) {
+      if (usernameListSelectElement.disabled || !currentUsernameLists.length) {
+        return;
+      }
+
+      isUsernameListDropdownOpen = true;
+      highlightedUsernameListIndex = normalizeHighlightedUsernameListIndex(
+        highlightedIndex == null ? getCurrentActiveUsernameListIndex() : highlightedIndex
+      );
+      renderUsernameListSelect();
+    }
+
+    function toggleUsernameListDropdown() {
+      if (isUsernameListDropdownOpen) {
+        closeUsernameListDropdown();
+        return;
+      }
+
+      openUsernameListDropdown();
+    }
+
+    function moveHighlightedUsernameList(step) {
+      if (!currentUsernameLists.length) {
+        return;
+      }
+
+      if (!isUsernameListDropdownOpen) {
+        openUsernameListDropdown({
+          highlightedIndex: step > 0 ? 0 : currentUsernameLists.length - 1
+        });
+        return;
+      }
+
+      const lastIndex = currentUsernameLists.length - 1;
+      const currentIndex = normalizeHighlightedUsernameListIndex(highlightedUsernameListIndex);
+      const nextIndex = step > 0
+        ? (currentIndex >= lastIndex ? 0 : currentIndex + 1)
+        : (currentIndex <= 0 ? lastIndex : currentIndex - 1);
+
+      highlightedUsernameListIndex = nextIndex;
+      renderUsernameListSelect();
+    }
+
+    function selectUsernameListOption(listId) {
+      if (!listId || usernameListSelectElement.disabled) {
+        return;
+      }
+
+      usernameListSelectElement.value = listId;
+      closeUsernameListDropdown({ preservePendingSelection: listId !== currentActiveUsernameListId });
+
+      if (listId !== currentActiveUsernameListId) {
+        dispatchUsernameListChange();
+      }
+    }
+
+    function handleUsernameListSelectKeydown(event) {
+      switch (event.key) {
+        case 'ArrowDown':
+          event.preventDefault();
+          moveHighlightedUsernameList(1);
+          break;
+        case 'ArrowUp':
+          event.preventDefault();
+          moveHighlightedUsernameList(-1);
+          break;
+        case 'Home':
+          if (!isUsernameListDropdownOpen || !currentUsernameLists.length) {
+            return;
+          }
+
+          event.preventDefault();
+          highlightedUsernameListIndex = 0;
+          renderUsernameListSelect();
+          break;
+        case 'End':
+          if (!isUsernameListDropdownOpen || !currentUsernameLists.length) {
+            return;
+          }
+
+          event.preventDefault();
+          highlightedUsernameListIndex = currentUsernameLists.length - 1;
+          renderUsernameListSelect();
+          break;
+        case 'Enter':
+        case ' ':
+          event.preventDefault();
+
+          if (!isUsernameListDropdownOpen) {
+            openUsernameListDropdown();
+            return;
+          }
+
+          selectUsernameListOption(currentUsernameLists[normalizeHighlightedUsernameListIndex(highlightedUsernameListIndex)]?.id);
+          break;
+        case 'Escape':
+          if (!isUsernameListDropdownOpen) {
+            return;
+          }
+
+          event.preventDefault();
+          closeUsernameListDropdown();
+          break;
+        case 'Tab':
+          closeUsernameListDropdown();
+          break;
+        default:
+          break;
+      }
+    }
+
+    function renderUsernameListSelect() {
+      const activeList = currentUsernameLists.find((list) => list.id === currentActiveUsernameListId) || currentUsernameLists[0] || null;
+      const activeListId = activeList?.id || '';
+      const activeListName = activeList?.name || blocklist.DEFAULT_USERNAME_LIST_NAME || 'Blocklist';
+      const optionButtons = currentUsernameLists.map((list, index) => {
+        const option = typeof documentRef.createElement === 'function'
+          ? documentRef.createElement('button')
+          : { dataset: {} };
+        option.type = 'button';
+        option.className = 'list-select-option';
+        option.id = `username-list-option-${list.id}`;
+        option.textContent = list.name;
+        option.dataset.active = String(isUsernameListDropdownOpen && normalizeHighlightedUsernameListIndex(highlightedUsernameListIndex) === index);
+        option.dataset.selected = String(list.id === activeListId);
+        option.tabIndex = -1;
+
+        if (typeof option.setAttribute === 'function') {
+          option.setAttribute('role', 'option');
+          option.setAttribute('aria-selected', String(list.id === activeListId));
+        }
+
+        if (typeof option.addEventListener === 'function') {
+          option.addEventListener('click', (event) => {
+            event?.stopPropagation?.();
+            selectUsernameListOption(list.id);
+          });
+        }
+
+        return option;
+      });
+
+      if (typeof usernameListOptionsElement.replaceChildren === 'function') {
+        usernameListOptionsElement.replaceChildren(...optionButtons);
+      } else {
+        usernameListOptionsElement.children = optionButtons;
+      }
+
+      usernameListSelectElement.value = activeListId;
+      usernameListSelectElement.textContent = activeListName;
+      usernameListSelectElement.dataset.open = String(isUsernameListDropdownOpen);
+      usernameListSelectElement.setAttribute('aria-label', `Active list: ${activeListName}`);
+      usernameListSelectElement.setAttribute('aria-controls', 'username-list-options');
+      usernameListSelectElement.setAttribute('aria-expanded', String(isUsernameListDropdownOpen));
+
+      if (isUsernameListDropdownOpen && currentUsernameLists.length) {
+        usernameListSelectElement.setAttribute(
+          'aria-activedescendant',
+          `username-list-option-${currentUsernameLists[normalizeHighlightedUsernameListIndex(highlightedUsernameListIndex)]?.id || activeListId}`
+        );
+      } else if (typeof usernameListSelectElement.removeAttribute === 'function') {
+        usernameListSelectElement.removeAttribute('aria-activedescendant');
+      }
+
+      usernameListOptionsElement.hidden = !isUsernameListDropdownOpen || !currentUsernameLists.length;
+    }
+
+    function renderActiveUsernameList({ applyDraft = true } = {}) {
+      const storageText = getActiveListStorageText();
+      let nextText = storageText;
+      let draftStatus = null;
+      const draft = currentActiveUsernameListId ? getUsernameDraft(currentActiveUsernameListId) : null;
+
+      if (applyDraft && draft) {
+        if (draft.baseText === storageText) {
+          nextText = draft.text;
+        } else {
+          clearUsernameDraft(currentActiveUsernameListId);
+          draftStatus = OUTDATED_USERNAME_DRAFT_STATUS;
+        }
+      }
+
+      textareaElement.value = nextText;
+      isUsernameDraftDirty = nextText !== storageText;
+      draftListId = isUsernameDraftDirty ? currentActiveUsernameListId : null;
+      renderCount(blocklist.parseUsernameText(nextText).usernames);
+      renderUsernameListSelect();
+      return draftStatus;
+    }
+
+    async function readUsernameListState() {
+      if (extensionApi?.storage?.local && typeof blocklist.getStoredUsernameListState === 'function') {
+        const { activeList, lists } = await blocklist.getStoredUsernameListState(extensionApi);
+        const normalizedLists = blocklist.normalizeUsernameLists(lists);
+        const normalizedActiveList = activeList || normalizedLists[0] || blocklist.createUsernameList(blocklist.DEFAULT_USERNAME_LIST_NAME, []);
+
+        return {
+          activeList: normalizedActiveList,
+          lists: normalizedLists.length ? normalizedLists : [normalizedActiveList]
+        };
+      }
+
+      if (extensionApi?.storage?.local && typeof blocklist.getStoredUsernameLists === 'function' && typeof blocklist.getActiveUsernameList === 'function') {
+        const [lists, activeList] = await Promise.all([
+          blocklist.getStoredUsernameLists(extensionApi),
+          blocklist.getActiveUsernameList(extensionApi)
+        ]);
+        const normalizedLists = blocklist.normalizeUsernameLists(lists);
+        const normalizedActiveList = activeList || normalizedLists[0] || blocklist.createUsernameList(blocklist.DEFAULT_USERNAME_LIST_NAME, []);
+
+        return {
+          activeList: normalizedActiveList,
+          lists: normalizedLists.length ? normalizedLists : [normalizedActiveList]
+        };
+      }
+
+      const usernames = await blocklist.getStoredUsernames(extensionApi);
+      const fallbackList = {
+        id: blocklist.DEFAULT_USERNAME_LIST_ID || 'blocklist',
+        name: blocklist.DEFAULT_USERNAME_LIST_NAME || 'Blocklist',
+        usernames
+      };
+
+      return {
+        activeList: fallbackList,
+        lists: [fallbackList]
+      };
+    }
+
+    function setCurrentUsernameListState(lists, activeList) {
+      currentUsernameLists = blocklist.normalizeUsernameLists(lists);
+      currentActiveUsernameList = currentUsernameLists.find((list) => list.id === activeList?.id)
+        || activeList
+        || currentUsernameLists[0]
+        || null;
+      currentActiveUsernameListId = currentActiveUsernameList?.id || null;
+    }
+
+    async function refreshUsernameListStateFromStorage({ applyDraft = true } = {}) {
+      const { activeList, lists } = await readUsernameListState();
+
+      setCurrentUsernameListState(lists, activeList);
+      return renderActiveUsernameList({ applyDraft });
+    }
+
+    function updateCurrentActiveListUsernames(usernames) {
+      if (!currentActiveUsernameListId) {
+        return;
+      }
+
+      const normalizedUsernames = blocklist.normalizeStoredUsernames(usernames);
+      currentUsernameLists = currentUsernameLists.map((list) => list.id === currentActiveUsernameListId
+        ? { ...list, usernames: normalizedUsernames }
+        : list);
+      currentActiveUsernameList = currentUsernameLists.find((list) => list.id === currentActiveUsernameListId) || currentActiveUsernameList;
+    }
+
+    function getSetActiveUsernames() {
+      return extensionApi?.storage?.local && typeof blocklist.setActiveStoredUsernames === 'function'
+        ? blocklist.setActiveStoredUsernames
+        : blocklist.setStoredUsernames;
+    }
+
+    function hasUsernameListStorageApi() {
+      return Boolean(extensionApi?.storage?.local
+        && typeof blocklist.getStoredUsernameLists === 'function'
+        && typeof blocklist.setStoredUsernameLists === 'function');
+    }
+
+    function areUsernameListsEqual(leftUsernames, rightUsernames) {
+      if (leftUsernames.length !== rightUsernames.length) {
+        return false;
+      }
+
+      return leftUsernames.every((username, index) => username === rightUsernames[index]);
+    }
+
+    function mergeEditedUsernamesWithLatest(baseUsernames, editedUsernames, latestUsernames) {
+      const normalizedBaseUsernames = blocklist.normalizeStoredUsernames(baseUsernames);
+      const normalizedEditedUsernames = blocklist.normalizeStoredUsernames(editedUsernames);
+      const normalizedLatestUsernames = blocklist.normalizeStoredUsernames(latestUsernames);
+
+      if (areUsernameListsEqual(normalizedLatestUsernames, normalizedBaseUsernames)) {
+        return normalizedEditedUsernames;
+      }
+
+      const editedUsernameSet = new Set(normalizedEditedUsernames);
+      const removedBaseUsernames = new Set(
+        normalizedBaseUsernames.filter((username) => !editedUsernameSet.has(username))
+      );
+
+      return blocklist.normalizeStoredUsernames([
+        ...normalizedLatestUsernames.filter((username) => !removedBaseUsernames.has(username)),
+        ...normalizedEditedUsernames
+      ]);
+    }
+
+    function getCurrentDraftBaseUsernames() {
+      const draft = currentActiveUsernameListId ? getUsernameDraft(currentActiveUsernameListId) : null;
+      return blocklist.parseUsernameText(draft?.baseText ?? getActiveListStorageText()).usernames;
+    }
+
+    async function mutateCurrentActiveUsernameListUsernames(createNextUsernames) {
+      if (hasUsernameListStorageApi()) {
+        const latestLists = blocklist.normalizeUsernameLists(await blocklist.getStoredUsernameLists(extensionApi));
+        const targetListId = currentActiveUsernameListId || currentActiveUsernameList?.id || latestLists[0]?.id;
+        const targetList = targetListId
+          ? latestLists.find((list) => list.id === targetListId)
+          : latestLists[0];
+
+        if (!targetList) {
+          throw new Error('The active username list changed elsewhere. Reload the popup and try again.');
+        }
+
+        const savedUsernames = blocklist.normalizeStoredUsernames(createNextUsernames(targetList.usernames));
+        const nextLists = latestLists.map((list) => list.id === targetList.id
+          ? { ...list, usernames: savedUsernames }
+          : list);
+
+        await blocklist.setStoredUsernameLists(nextLists, extensionApi);
+        return savedUsernames;
+      }
+
+      const currentUsernames = currentActiveUsernameList?.usernames || [];
+      const nextUsernames = blocklist.normalizeStoredUsernames(createNextUsernames(currentUsernames));
+      const setActiveUsernames = getSetActiveUsernames();
+      return setActiveUsernames(nextUsernames, extensionApi);
     }
 
     function readDelayMs() {
@@ -1048,6 +1519,14 @@
       pageButtonStyleTextElement.dataset.active = String(draftPageButtonStyle === blocklist.PAGE_BLOCK_BUTTON_STYLES.text);
       pageButtonStyleIconElement.setAttribute('aria-pressed', String(draftPageButtonStyle === blocklist.PAGE_BLOCK_BUTTON_STYLES.icon));
       pageButtonStyleTextElement.setAttribute('aria-pressed', String(draftPageButtonStyle === blocklist.PAGE_BLOCK_BUTTON_STYLES.text));
+    }
+
+    function readShowUserCellAddButton() {
+      return blocklist.normalizeUserCellAddButtonVisibility(showUserCellAddButtonElement.checked);
+    }
+
+    function renderShowUserCellAddButton(isVisible) {
+      showUserCellAddButtonElement.checked = blocklist.normalizeUserCellAddButtonVisibility(isVisible);
     }
 
     function readFollowersBlockLimit() {
@@ -1311,9 +1790,18 @@
     function setBusyState() {
       const isAnyBusy = isSaving || isBlocking || isFollowersScanning || isFollowersBlocking;
 
+      if (isAnyBusy) {
+        closeUsernameListDropdown();
+      }
+
       saveButton.disabled = isAnyBusy;
       blockNowButton.disabled = isAnyBusy;
       saveSettingsButton.disabled = isAnyBusy;
+      usernameListSelectElement.disabled = isAnyBusy;
+      newUsernameListButton.disabled = isAnyBusy;
+      renameUsernameListButton.disabled = isAnyBusy || !currentActiveUsernameList;
+      deleteUsernameListButton.disabled = isAnyBusy || currentUsernameLists.length <= 1;
+      importUsernamesButton.disabled = isAnyBusy;
       openSettingsButton.disabled = isAnyBusy;
       openFollowersButton.disabled = isAnyBusy;
       backToMainButton.disabled = isAnyBusy;
@@ -1392,19 +1880,19 @@
     }
 
     async function loadBlocklist() {
-      const [usernames, delayMs, pageButtonStyle] = await Promise.all([
-        blocklist.getStoredUsernames(extensionApi),
+      const [usernameListState, delayMs, pageButtonStyle, showUserCellAddButton] = await Promise.all([
+        readUsernameListState(),
         blocklist.getStoredBatchBlockDelayMs(extensionApi),
-        blocklist.getStoredPageBlockButtonStyle(extensionApi)
+        blocklist.getStoredPageBlockButtonStyle(extensionApi),
+        blocklist.getStoredUserCellAddButtonVisibility(extensionApi)
       ]);
 
-      textareaElement.value = typeof storedPopupState.usernameDraftText === 'string'
-        ? storedPopupState.usernameDraftText
-        : blocklist.serializeUsernameText(usernames);
-      renderCount(blocklist.parseUsernameText(textareaElement.value).usernames);
+      setCurrentUsernameListState(usernameListState.lists, usernameListState.activeList);
+      const usernameDraftStatus = renderActiveUsernameList();
       renderDelay(delayMs);
       currentDelayMs = delayMs;
       currentPageButtonStyle = pageButtonStyle;
+      currentShowUserCellAddButton = showUserCellAddButton;
       currentFollowersBlockLimit = followers.normalizeFollowersBlockLimit(
         storedPopupState.followersBlockLimit ?? followers.DEFAULT_FOLLOWERS_BLOCK_LIMIT
       );
@@ -1418,6 +1906,7 @@
       renderFollowersScanLimit(currentFollowersScanLimit);
       renderFollowersSource(currentFollowersSource);
       renderPageButtonStyle(pageButtonStyle);
+      renderShowUserCellAddButton(showUserCellAddButton);
       const storedFollowersPreview = normalizeStoredFollowersPreview(storedPopupState.followersPreview);
 
       if (storedFollowersPreview) {
@@ -1426,7 +1915,7 @@
         clearFollowersPreview();
       }
 
-      setStatus(normalizeStoredStatusMessage(storedPopupState.statusMessage));
+      setStatus(usernameDraftStatus || normalizeStoredStatusMessage(storedPopupState.statusMessage));
       setPopupView(shellElement, storedPopupState.view);
       isHydratingPopupState = false;
       setBusyState();
@@ -1445,10 +1934,17 @@
       setStatus('Saving blocklist...');
 
       try {
-        const savedUsernames = await blocklist.setStoredUsernames(usernames, extensionApi);
+        const baseUsernames = getCurrentDraftBaseUsernames();
+        const savedUsernames = await mutateCurrentActiveUsernameListUsernames((latestUsernames) => (
+          mergeEditedUsernamesWithLatest(baseUsernames, usernames, latestUsernames)
+        ));
 
+        updateCurrentActiveListUsernames(savedUsernames);
         textareaElement.value = blocklist.serializeUsernameText(savedUsernames);
+        isUsernameDraftDirty = false;
+        clearUsernameDraft(currentActiveUsernameListId);
         renderCount(savedUsernames);
+        persistCurrentPopupState();
 
         if (invalidEntries.length) {
           setStatus(`Saved ${savedUsernames.length} usernames. Skipped invalid values: ${invalidEntries.slice(0, 3).join(', ')}`);
@@ -1471,21 +1967,25 @@
 
       const delayMs = readDelayMs();
       const pageButtonStyle = readPageButtonStyle();
+      const showUserCellAddButton = readShowUserCellAddButton();
 
       isSaving = true;
       setBusyState();
       setStatus('Saving settings...');
 
       try {
-        const [savedDelayMs, savedPageButtonStyle] = await Promise.all([
+        const [savedDelayMs, savedPageButtonStyle, savedShowUserCellAddButton] = await Promise.all([
           blocklist.setStoredBatchBlockDelayMs(delayMs, extensionApi),
-          blocklist.setStoredPageBlockButtonStyle(pageButtonStyle, extensionApi)
+          blocklist.setStoredPageBlockButtonStyle(pageButtonStyle, extensionApi),
+          blocklist.setStoredUserCellAddButtonVisibility(showUserCellAddButton, extensionApi)
         ]);
 
         currentDelayMs = savedDelayMs;
         renderDelay(savedDelayMs);
         currentPageButtonStyle = savedPageButtonStyle;
         renderPageButtonStyle(savedPageButtonStyle);
+        currentShowUserCellAddButton = savedShowUserCellAddButton;
+        renderShowUserCellAddButton(savedShowUserCellAddButton);
         setStatus(`Saved settings. Delay: ${savedDelayMs} ms. Style: ${savedPageButtonStyle}.`);
         showMainView();
       } catch (error) {
@@ -1517,11 +2017,18 @@
       });
 
       try {
-        const savedUsernames = await blocklist.setStoredUsernames(usernames, extensionApi);
+        const baseUsernames = getCurrentDraftBaseUsernames();
+        const savedUsernames = await mutateCurrentActiveUsernameListUsernames((latestUsernames) => (
+          mergeEditedUsernamesWithLatest(baseUsernames, usernames, latestUsernames)
+        ));
         const targetTab = await findUsableXTab(extensionApi);
 
+        updateCurrentActiveListUsernames(savedUsernames);
         textareaElement.value = blocklist.serializeUsernameText(savedUsernames);
+        isUsernameDraftDirty = false;
+        clearUsernameDraft(currentActiveUsernameListId);
         renderCount(savedUsernames);
+        persistCurrentPopupState();
 
         if (!targetTab?.id) {
           throw new Error('Open any x.com or twitter.com tab first.');
@@ -1833,6 +2340,202 @@
       }
     }
 
+    function promptForUsernameListName(message, defaultName = '') {
+      const rawName = typeof globalThis.prompt === 'function'
+        ? globalThis.prompt(message, defaultName)
+        : defaultName;
+
+      if (rawName === null) {
+        return null;
+      }
+
+      return blocklist.normalizeUsernameListName(rawName, defaultName || blocklist.DEFAULT_USERNAME_LIST_NAME);
+    }
+
+    async function switchActiveUsernameList(listId = usernameListSelectElement.value) {
+      if (!listId || isSaving || isBlocking || isFollowersScanning || isFollowersBlocking) {
+        return;
+      }
+
+      persistUsernameDraft();
+      await blocklist.setActiveUsernameListId(listId, extensionApi);
+      const draftStatus = await refreshUsernameListStateFromStorage();
+      setStatus(draftStatus || `Active list: ${currentActiveUsernameList?.name || 'Blocklist'}.`);
+      setBusyState();
+      persistCurrentPopupState();
+    }
+
+    async function createNewUsernameList() {
+      if (isSaving || isBlocking || isFollowersScanning || isFollowersBlocking) {
+        return;
+      }
+
+      persistUsernameDraft();
+      const listName = promptForUsernameListName('New list name', 'New list');
+
+      if (!listName) {
+        return;
+      }
+
+      const nextList = blocklist.createUsernameList(
+        listName,
+        [],
+        currentUsernameLists.map((list) => list.id)
+      );
+      await blocklist.setStoredUsernameLists([...currentUsernameLists, nextList], extensionApi);
+      await blocklist.setActiveUsernameListId(nextList.id, extensionApi);
+      await refreshUsernameListStateFromStorage();
+      setStatus(`Created list: ${nextList.name}.`);
+      setBusyState();
+      persistCurrentPopupState();
+    }
+
+    async function renameActiveUsernameList() {
+      if (!currentActiveUsernameList || isSaving || isBlocking || isFollowersScanning || isFollowersBlocking) {
+        return;
+      }
+
+      const listName = promptForUsernameListName('Rename list', currentActiveUsernameList.name);
+
+      if (!listName) {
+        return;
+      }
+
+      const nextLists = currentUsernameLists.map((list) => list.id === currentActiveUsernameListId
+        ? { ...list, name: listName }
+        : list);
+
+      await blocklist.setStoredUsernameLists(nextLists, extensionApi);
+      await refreshUsernameListStateFromStorage();
+      setStatus(`Renamed list to ${listName}.`);
+      setBusyState();
+      persistCurrentPopupState();
+    }
+
+    async function deleteActiveUsernameList() {
+      if (!currentActiveUsernameList || currentUsernameLists.length <= 1 || isSaving || isBlocking || isFollowersScanning || isFollowersBlocking) {
+        return;
+      }
+
+      if (typeof globalThis.confirm === 'function' && !globalThis.confirm(`Delete list "${currentActiveUsernameList.name}"?`)) {
+        return;
+      }
+
+      const deletedListId = currentActiveUsernameListId;
+      const deletedListIndex = currentUsernameLists.findIndex((list) => list.id === deletedListId);
+      const nextLists = currentUsernameLists.filter((list) => list.id !== deletedListId);
+      const nextActiveList = nextLists[Math.max(0, Math.min(deletedListIndex, nextLists.length - 1))] || nextLists[0];
+
+      clearUsernameDraft(deletedListId);
+      await blocklist.setStoredUsernameLists(nextLists, extensionApi);
+      await blocklist.setActiveUsernameListId(nextActiveList.id, extensionApi);
+      await refreshUsernameListStateFromStorage();
+      setStatus(`Deleted list. Active list: ${currentActiveUsernameList?.name || nextActiveList.name}.`);
+      setBusyState();
+      persistCurrentPopupState();
+    }
+
+    function readImportFile(file) {
+      if (!file) {
+        return Promise.resolve('');
+      }
+
+      if (typeof file.text === 'function') {
+        return file.text();
+      }
+
+      return new Promise((resolve, reject) => {
+        if (typeof FileReader !== 'function') {
+          reject(new Error('File import is not available in this browser context.'));
+          return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+        reader.onerror = () => reject(reader.error || new Error('Failed to read import file.'));
+        reader.readAsText(file);
+      });
+    }
+
+    async function importUsernameText(text, fileName = '') {
+      if (isSaving || isBlocking || isFollowersScanning || isFollowersBlocking) {
+        return;
+      }
+
+      const parsedImport = blocklist.parseUsernameImport(text, fileName);
+      const invalidSuffix = parsedImport.invalidEntries.length
+        ? ` Skipped invalid values: ${parsedImport.invalidEntries.slice(0, 3).join(', ')}.`
+        : '';
+
+      if (parsedImport.lists.length) {
+        const latestLists = hasUsernameListStorageApi()
+          ? blocklist.normalizeUsernameLists(await blocklist.getStoredUsernameLists(extensionApi))
+          : currentUsernameLists;
+        const nextLists = blocklist.mergeUsernameLists(latestLists, parsedImport.lists);
+
+        await blocklist.setStoredUsernameLists(nextLists, extensionApi);
+        await refreshUsernameListStateFromStorage();
+        setStatus(`Imported ${parsedImport.lists.length} list${parsedImport.lists.length === 1 ? '' : 's'}.${invalidSuffix}`);
+        setBusyState();
+        persistCurrentPopupState();
+        return;
+      }
+
+      if (!parsedImport.usernames.length) {
+        setStatus(`No valid usernames found in import.${invalidSuffix}`);
+        return;
+      }
+
+      const visibleUsernames = blocklist.parseUsernameText(textareaElement.value).usernames;
+      const savedUsernames = await mutateCurrentActiveUsernameListUsernames((latestUsernames) => ([
+        ...latestUsernames,
+        ...visibleUsernames,
+        ...parsedImport.usernames
+      ]));
+
+      updateCurrentActiveListUsernames(savedUsernames);
+      textareaElement.value = blocklist.serializeUsernameText(savedUsernames);
+      isUsernameDraftDirty = false;
+      clearUsernameDraft(currentActiveUsernameListId);
+      renderCount(savedUsernames);
+      setStatus(`Imported ${parsedImport.usernames.length} username${parsedImport.usernames.length === 1 ? '' : 's'} into ${currentActiveUsernameList?.name || 'the active list'}.${invalidSuffix}`);
+      setBusyState();
+      persistCurrentPopupState();
+    }
+
+    async function importUsernameFile(file) {
+      const text = await readImportFile(file);
+      await importUsernameText(text, file?.name || '');
+    }
+
+    function observePopupUsernameLists() {
+      if (typeof blocklist.observeActiveUsernameList !== 'function') {
+        return () => {};
+      }
+
+      return blocklist.observeActiveUsernameList(() => {
+        if (isHydratingPopupState) {
+          return;
+        }
+
+        if (isUsernameDraftDirty) {
+          setStatus(EXTERNAL_USERNAME_LIST_CHANGE_STATUS);
+          return;
+        }
+
+        void refreshUsernameListStateFromStorage()
+          .then((draftStatus) => {
+            if (draftStatus) {
+              setStatus(draftStatus);
+            }
+            setBusyState();
+          })
+          .catch((error) => {
+            logPopupError('Failed to refresh username lists after storage change.', error);
+          });
+      }, extensionApi);
+    }
+
     saveButton.addEventListener('click', () => {
       handleAsyncPopupAction('saveBlocklist', saveBlocklist);
     });
@@ -1843,6 +2546,55 @@
 
     blockNowButton.addEventListener('click', () => {
       handleAsyncPopupAction('blockListedNow', blockListedNow);
+    });
+
+    usernameListSelectLabelElement.addEventListener('click', () => {
+      if (typeof usernameListSelectElement.focus === 'function') {
+        usernameListSelectElement.focus();
+      }
+
+      if (!usernameListSelectElement.disabled) {
+        toggleUsernameListDropdown();
+      }
+    });
+
+    usernameListSelectElement.addEventListener('click', () => {
+      toggleUsernameListDropdown();
+    });
+
+    usernameListSelectElement.addEventListener('keydown', handleUsernameListSelectKeydown);
+
+    usernameListSelectElement.addEventListener('change', () => {
+      handleAsyncPopupAction('switchActiveUsernameList', () => switchActiveUsernameList());
+    });
+
+    newUsernameListButton.addEventListener('click', () => {
+      handleAsyncPopupAction('createNewUsernameList', createNewUsernameList);
+    });
+
+    renameUsernameListButton.addEventListener('click', () => {
+      handleAsyncPopupAction('renameActiveUsernameList', renameActiveUsernameList);
+    });
+
+    deleteUsernameListButton.addEventListener('click', () => {
+      handleAsyncPopupAction('deleteActiveUsernameList', deleteActiveUsernameList);
+    });
+
+    importUsernamesButton.addEventListener('click', () => {
+      if (typeof importUsernamesFileInput.click === 'function') {
+        importUsernamesFileInput.click();
+      }
+    });
+
+    importUsernamesFileInput.addEventListener('change', (event) => {
+      const [file] = Array.from(event?.target?.files || importUsernamesFileInput.files || []);
+
+      if (!file) {
+        return;
+      }
+
+      handleAsyncPopupAction('importUsernameFile', () => importUsernameFile(file));
+      importUsernamesFileInput.value = '';
     });
 
     scanFollowersButton.addEventListener('click', () => {
@@ -1860,6 +2612,7 @@
     openSettingsButton.addEventListener('click', () => {
       renderDelay(currentDelayMs);
       renderPageButtonStyle(currentPageButtonStyle);
+      renderShowUserCellAddButton(currentShowUserCellAddButton);
       showSettingsView();
     });
 
@@ -1873,6 +2626,7 @@
     backToMainButton.addEventListener('click', () => {
       renderDelay(currentDelayMs);
       renderPageButtonStyle(currentPageButtonStyle);
+      renderShowUserCellAddButton(currentShowUserCellAddButton);
       showMainView();
     });
 
@@ -1903,11 +2657,6 @@
       renderDelay(readDelayMs());
     });
 
-    function persistUsernameDraft() {
-      renderCount(blocklist.parseUsernameText(textareaElement.value).usernames);
-      persistCurrentPopupState();
-    }
-
     textareaElement.addEventListener('input', persistUsernameDraft);
     textareaElement.addEventListener('change', persistUsernameDraft);
 
@@ -1936,6 +2685,36 @@
 
     if (extensionApi.runtime?.onMessage?.addListener) {
       extensionApi.runtime.onMessage.addListener(handleFollowerBlockProgressMessage);
+    }
+
+    const stopUsernameListObservation = observePopupUsernameLists();
+
+    const handleDocumentClick = (event) => {
+      if (!isUsernameListDropdownOpen) {
+        return;
+      }
+
+      const dropdownContainer = usernameListSelectElement.parentElement;
+      const eventTarget = event?.target;
+
+      if (dropdownContainer?.contains?.(eventTarget) || usernameListSelectLabelElement?.contains?.(eventTarget)) {
+        return;
+      }
+
+      closeUsernameListDropdown();
+    };
+
+    if (typeof documentRef.addEventListener === 'function') {
+      documentRef.addEventListener('click', handleDocumentClick);
+    }
+
+    if (typeof globalThis.addEventListener === 'function') {
+      globalThis.addEventListener('unload', stopUsernameListObservation, { once: true });
+      globalThis.addEventListener('unload', () => {
+        if (typeof documentRef.removeEventListener === 'function') {
+          documentRef.removeEventListener('click', handleDocumentClick);
+        }
+      }, { once: true });
     }
 
     renderPageButtonStyle(currentPageButtonStyle);

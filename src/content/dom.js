@@ -6,6 +6,8 @@
   const namespace = globalThis.EasyTweetBlockContent || (globalThis.EasyTweetBlockContent = {});
   const {
     BLOCK_BUTTON_ATTRIBUTE,
+    BUTTON_ACTION_ATTRIBUTE,
+    BUTTON_ACTIONS,
     SELECTORS
   } = namespace;
   const USER_CELL_ACTIONS_ATTRIBUTE = 'data-easy-tweetblock-user-cell-actions';
@@ -72,6 +74,42 @@
 
     for (const child of getElementChildren(rootNode)) {
       const match = findManagedButton(child);
+
+      if (match) {
+        return match;
+      }
+    }
+
+    return null;
+  }
+
+  function readManagedButtonAction(button) {
+    const action = button?.getAttribute?.(BUTTON_ACTION_ATTRIBUTE)
+      || button?.dataset?.easyTweetblockAction
+      || button?.dataset?.action;
+
+    if (action === BUTTON_ACTIONS?.saveToList) {
+      return BUTTON_ACTIONS.saveToList;
+    }
+
+    return button?.getAttribute?.(BLOCK_BUTTON_ATTRIBUTE) !== null ? BUTTON_ACTIONS?.block : null;
+  }
+
+  function findManagedButtonByAction(rootNode, action) {
+    if (!rootNode || !action) {
+      return null;
+    }
+
+    if (
+      typeof rootNode.getAttribute === 'function'
+      && rootNode.getAttribute(BLOCK_BUTTON_ATTRIBUTE) !== null
+      && readManagedButtonAction(rootNode) === action
+    ) {
+      return rootNode;
+    }
+
+    for (const child of getElementChildren(rootNode)) {
+      const match = findManagedButtonByAction(child, action);
 
       if (match) {
         return match;
@@ -200,6 +238,37 @@
     return actionButton?.parentElement || null;
   }
 
+  function readUserCellActionButtonText(actionButton) {
+    if (!actionButton) {
+      return '';
+    }
+
+    const rawText = [
+      actionButton.textContent,
+      actionButton.innerText,
+      actionButton.getAttribute?.('aria-label'),
+      actionButton.title
+    ].find((value) => typeof value === 'string' && value.trim());
+
+    return typeof rawText === 'string'
+      ? rawText.trim().replace(/\s+/g, ' ').toLowerCase()
+      : '';
+  }
+
+  function syncUserCellBlockButtonVisibility(button, actionButton) {
+    if (!button || readManagedButtonAction(button) !== BUTTON_ACTIONS.block) {
+      return;
+    }
+
+    const normalizedText = readUserCellActionButtonText(actionButton);
+    const isBlocked = normalizedText.includes('blocked') || normalizedText.includes('unblock');
+    button.hidden = isBlocked;
+
+    if (typeof button.setAttribute === 'function') {
+      button.setAttribute('aria-hidden', String(isBlocked));
+    }
+  }
+
   function attachButtonToTweet(tweet, documentRef = document) {
     if (!tweet) {
       return;
@@ -303,12 +372,16 @@
       return;
     }
 
-    const existingButton = findManagedButton(userCell);
-    const nativeButton = existingButton || namespace.createUserCellBlockButton?.(userCell, {
+    const existingBlockButton = findManagedButtonByAction(userCell, BUTTON_ACTIONS.block);
+    const existingListButton = findManagedButtonByAction(userCell, BUTTON_ACTIONS.saveToList);
+    const listButton = existingListButton || namespace.createUserCellListButton?.(userCell, {
+      documentRef
+    });
+    const nativeButton = existingBlockButton || namespace.createUserCellBlockButton?.(userCell, {
       documentRef
     });
 
-    if (!nativeButton) {
+    if (!nativeButton && !listButton) {
       return;
     }
 
@@ -323,18 +396,36 @@
     }
 
     const actionWrapperChildren = getElementChildren(actionWrapper);
+    const listButtonIndex = actionWrapperChildren.indexOf(listButton);
     const nativeButtonIndex = actionWrapperChildren.indexOf(nativeButton);
     const actionButtonIndex = actionWrapperChildren.indexOf(actionButton);
 
+    if (nativeButton) {
+      syncUserCellBlockButtonVisibility(nativeButton, actionButton);
+    }
+
     if (
-      nativeButton.parentElement === actionWrapper
-      && nativeButtonIndex !== -1
-      && actionButtonIndex === nativeButtonIndex + 1
+      (!listButton || listButton.parentElement === actionWrapper)
+      && (!nativeButton || nativeButton.parentElement === actionWrapper)
+      && (!listButton || listButtonIndex !== -1)
+      && (!nativeButton || nativeButtonIndex !== -1)
+      && (!listButton || !nativeButton || nativeButtonIndex === listButtonIndex + 1)
+      && actionButtonIndex === (nativeButton ? nativeButtonIndex + 1 : listButtonIndex + 1)
     ) {
       return;
     }
 
-    actionWrapper.insertBefore(nativeButton, actionButton);
+    if (nativeButton) {
+      actionWrapper.insertBefore(nativeButton, actionButton);
+    }
+
+    if (listButton) {
+      actionWrapper.insertBefore(listButton, nativeButton || actionButton);
+    }
+
+    if (nativeButton) {
+      syncUserCellBlockButtonVisibility(nativeButton, actionButton);
+    }
   }
 
   function collectTweets(rootNode) {
@@ -411,6 +502,7 @@
     collectTweets,
     collectUserCells,
     findAncestorUserCell,
+    findManagedButtonByAction,
     findProfileActionBar,
     findActionRowContainer,
     findPrimaryActionWrapper,
