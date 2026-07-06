@@ -889,6 +889,11 @@ test('setButtonState renders save-to-list labels and keeps listed buttons clicka
   assert.equal(button.title, 'Removing @Felixmfdo from the active list');
   assert.equal(button.disabled, true);
 
+  setButtonState(button, 'error-remove', 'Felixmfdo');
+  assert.equal(button.textContent, 'Retry remove');
+  assert.equal(button.title, 'Retry removing @Felixmfdo from the active list');
+  assert.equal(button.disabled, false);
+
   setCurrentUserCellAddButtonStyle(DEFAULT_USER_CELL_ADD_BUTTON_STYLE);
 });
 
@@ -924,6 +929,9 @@ test('setButtonState renders save-to-list icons (plus and checkmark) in icon mod
 
   setButtonState(button, 'running-remove', 'Felixmfdo');
   assert.equal(button.innerHTML.includes('M9.55 16.94'), true); // CHECK_ICON_SVG path remains present while removing
+
+  setButtonState(button, 'error-remove', 'Felixmfdo');
+  assert.equal(button.innerHTML.includes('M9.55 16.94'), true); // CHECK_ICON_SVG path remains present for remove retry
 
   setButtonState(button, 'success', 'Felixmfdo');
   assert.equal(button.innerHTML.includes('M9.55 16.94'), true); // CHECK_ICON_SVG path present
@@ -2759,15 +2767,6 @@ test('createUserCellListButton toggles the username in the active list on repeat
   await flushAsyncWork();
 
   assert.deepEqual(extensionApi.store[sharedBlocklist.USERNAME_LISTS_STORAGE_KEY][0].usernames, ['milana62234788']);
-  assert.equal(button.dataset.state, 'success');
-
-  syncUserCellListButtons({
-    querySelectorAll() {
-      return [button];
-    }
-  }, extensionApi.store[sharedBlocklist.USERNAME_LISTS_STORAGE_KEY][0], { extensionApi });
-  await flushAsyncWork();
-
   assert.equal(button.dataset.state, 'listed');
   assert.equal(button.textContent, 'Remove');
 
@@ -2812,8 +2811,47 @@ test('createUserCellListButton uses the configured Add button icon on creation a
   await flushAsyncWork();
 
   assert.deepEqual(extensionApi.store[sharedBlocklist.USERNAME_LISTS_STORAGE_KEY][0].usernames, ['milana62234788']);
-  assert.equal(button.dataset.state, 'success');
+  assert.equal(button.dataset.state, 'listed');
   assert.equal(button.innerHTML.includes('M9.55 16.94'), true);
+});
+
+test('createUserCellListButton keeps remove retry semantics when removal fails', async (t) => {
+  const { documentRef } = createDocumentStub();
+  const { userCell } = createUserCellNode('Milana62234788');
+  const extensionApi = createStorageExtensionApi({
+    [sharedBlocklist.ACTIVE_USERNAME_LIST_ID_STORAGE_KEY]: 'blocklist',
+    [sharedBlocklist.USERNAME_LISTS_STORAGE_KEY]: [{
+      id: 'blocklist',
+      name: 'Blocklist',
+      usernames: ['milana62234788']
+    }]
+  });
+
+  useGlobalOverrides(t, { document: documentRef });
+  setCurrentUserCellAddButtonStyle(PAGE_BUTTON_STYLES.text);
+  t.after(() => {
+    setCurrentUserCellAddButtonStyle(DEFAULT_USER_CELL_ADD_BUTTON_STYLE);
+  });
+
+  const button = createUserCellListButton(userCell, {
+    documentRef,
+    extensionApi
+  });
+  await flushAsyncWork();
+
+  assert.equal(button.dataset.state, 'listed');
+
+  extensionApi.storage.local.set = () => Promise.reject(new Error('storage set failed'));
+
+  button.click();
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  assert.deepEqual(extensionApi.store[sharedBlocklist.USERNAME_LISTS_STORAGE_KEY][0].usernames, ['milana62234788']);
+  assert.equal(button.dataset.state, 'error-remove');
+  assert.equal(button.textContent, 'Retry remove');
+  assert.equal(button.title, 'Retry removing @Milana62234788 from the active list');
+  assert.equal(button.disabled, false);
 });
 
 test('createUserCellListButton shares the initial active-list storage read', async (t) => {

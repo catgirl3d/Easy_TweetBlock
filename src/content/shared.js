@@ -436,6 +436,10 @@
         return 'Removing...';
       }
 
+      if (state === 'error-remove') {
+        return 'Retry remove';
+      }
+
       if (state === 'listed') {
         return 'Remove';
       }
@@ -492,6 +496,10 @@
 
       if (state === 'running-remove') {
         return screenName ? `Removing @${screenName} from the active list` : 'Removing this account from the active list';
+      }
+
+      if (state === 'error-remove') {
+        return screenName ? `Retry removing @${screenName} from the active list` : 'Retry removing this account from the active list';
       }
 
       if (state === 'listed') {
@@ -589,7 +597,7 @@
     if (displayStyle === PAGE_BUTTON_STYLES.icon) {
       button.textContent = '';
       if (action === BUTTON_ACTIONS.saveToList) {
-        button.innerHTML = (state === 'listed' || state === 'running-remove' || state === 'success') ? CHECK_ICON_SVG : ADD_ICON_SVG;
+        button.innerHTML = (state === 'listed' || state === 'running-remove' || state === 'error-remove' || state === 'success') ? CHECK_ICON_SVG : ADD_ICON_SVG;
       } else {
         button.innerHTML = BLOCK_ICON_SVG;
       }

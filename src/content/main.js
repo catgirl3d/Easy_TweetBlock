@@ -263,8 +263,11 @@
         namespace.setButtonState(button, successState, screenName, kind || BUTTON_KINDS.native);
       } catch (error) {
         const actionLabel = buttonAction === BUTTON_ACTIONS.saveToList ? 'list save' : `${kind} block`;
+        const errorState = typeof actionOptions.getErrorState === 'function'
+          ? actionOptions.getErrorState(error, button)
+          : 'error';
         logContentError(`Failed to complete ${actionLabel} flow.`, error);
-        namespace.setButtonState(button, 'error', screenName, kind || BUTTON_KINDS.native);
+        namespace.setButtonState(button, errorState, screenName, kind || BUTTON_KINDS.native);
       }
     });
 
@@ -751,10 +754,15 @@
       BUTTON_ACTIONS.saveToList,
       {
         getRunningState(currentButton) {
-          return currentButton?.dataset?.state === 'listed' ? 'running-remove' : 'running';
+          return currentButton?.dataset?.state === 'listed' || currentButton?.dataset?.state === 'error-remove'
+            ? 'running-remove'
+            : 'running';
         },
         getSuccessState(result) {
-          return result?.removed ? 'idle' : 'success';
+          return result?.removed ? 'idle' : 'listed';
+        },
+        getErrorState(_error, currentButton) {
+          return currentButton?.dataset?.state === 'running-remove' ? 'error-remove' : 'error';
         }
       }
     );
