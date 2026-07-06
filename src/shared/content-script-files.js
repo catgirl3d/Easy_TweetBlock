@@ -3,6 +3,8 @@
     'src/content/main.css'
   ]);
   const CONTENT_SCRIPT_FILES = Object.freeze([
+    'src/shared/storage.js',
+    'src/shared/settings.js',
     'src/content/shared.js',
     'src/shared/blocklist.js',
     'src/shared/followers.js',

@@ -20,6 +20,8 @@
   }
 
   if (typeof module !== 'undefined' && module.exports) {
+    require('../shared/storage.js');
+    require('../shared/settings.js');
     require('./shared.js');
     require('../shared/blocklist.js');
     require('./x-client-transaction.js');
@@ -61,7 +63,7 @@
   } = namespace;
   const FOLLOWER_RUN_PORT_PREFIX = 'easy-tweetblock:follower-run:';
   const DEFAULT_USER_CELL_ADD_BUTTON_STYLE = namespace.DEFAULT_USER_CELL_ADD_BUTTON_STYLE || PAGE_BUTTON_STYLES.icon;
-  const DEFAULT_USER_CELL_ADD_BUTTON_VISIBILITY = true;
+  const DEFAULT_USER_CELL_ADD_BUTTON_VISIBILITY = namespace.DEFAULT_USER_CELL_ADD_BUTTON_VISIBILITY ?? true;
   const activeUsernameListPromiseByExtensionApi = new WeakMap();
 
   function normalizeFollowerRunId(runId) {
@@ -485,10 +487,8 @@
   }
 
   function normalizeUserCellAddButtonVisibility(value) {
-    const blocklistApi = getBlocklistSharedApi();
-
-    if (typeof blocklistApi?.normalizeUserCellAddButtonVisibility === 'function') {
-      return blocklistApi.normalizeUserCellAddButtonVisibility(value);
+    if (typeof namespace.normalizeUserCellAddButtonVisibility === 'function') {
+      return namespace.normalizeUserCellAddButtonVisibility(value);
     }
 
     return value !== false;
@@ -606,10 +606,8 @@
   }
 
   async function syncStoredUserCellAddButtonVisibility(globalRef = globalThis) {
-    const blocklistApi = getBlocklistSharedApi();
-    const extensionApi = namespace.getExtensionApi(globalRef);
-    const isVisible = typeof blocklistApi?.getStoredUserCellAddButtonVisibility === 'function'
-      ? await blocklistApi.getStoredUserCellAddButtonVisibility(extensionApi)
+    const isVisible = typeof namespace.getStoredUserCellAddButtonVisibility === 'function'
+      ? await namespace.getStoredUserCellAddButtonVisibility(globalRef)
       : DEFAULT_USER_CELL_ADD_BUTTON_VISIBILITY;
 
     setCurrentUserCellAddButtonVisibility(isVisible);
@@ -618,10 +616,8 @@
   }
 
   async function syncStoredUserCellAddButtonStyle(globalRef = globalThis) {
-    const blocklistApi = getBlocklistSharedApi();
-    const extensionApi = namespace.getExtensionApi(globalRef);
-    const style = typeof blocklistApi?.getStoredUserCellAddButtonStyle === 'function'
-      ? await blocklistApi.getStoredUserCellAddButtonStyle(extensionApi)
+    const style = typeof namespace.getStoredUserCellAddButtonStyle === 'function'
+      ? await namespace.getStoredUserCellAddButtonStyle(globalRef)
       : DEFAULT_USER_CELL_ADD_BUTTON_STYLE;
 
     setCurrentUserCellAddButtonStyle(style);
@@ -630,10 +626,9 @@
   }
 
   function observeStoredUserCellAddButtonVisibility(globalRef = globalThis) {
-    const blocklistApi = getBlocklistSharedApi();
     const extensionApi = namespace.getExtensionApi(globalRef);
     const onChangedApi = extensionApi?.storage?.onChanged;
-    const storageKey = blocklistApi?.USER_CELL_ADD_BUTTON_VISIBILITY_STORAGE_KEY;
+    const storageKey = namespace.USER_CELL_ADD_BUTTON_VISIBILITY_STORAGE_KEY;
 
     if (!storageKey || !onChangedApi?.addListener) {
       return () => {};
@@ -658,10 +653,9 @@
   }
 
   function observeStoredUserCellAddButtonStyle(globalRef = globalThis) {
-    const blocklistApi = getBlocklistSharedApi();
     const extensionApi = namespace.getExtensionApi(globalRef);
     const onChangedApi = extensionApi?.storage?.onChanged;
-    const storageKey = blocklistApi?.USER_CELL_ADD_BUTTON_STYLE_STORAGE_KEY;
+    const storageKey = namespace.USER_CELL_ADD_BUTTON_STYLE_STORAGE_KEY;
 
     if (!storageKey || !onChangedApi?.addListener) {
       return () => {};
@@ -1142,6 +1136,7 @@
       DEFAULT_PAGE_BLOCK_BUTTON_STYLE,
       DEFAULT_PAGE_BLOCK_BUTTON_STYLES,
       DEFAULT_USER_CELL_ADD_BUTTON_STYLE,
+      DEFAULT_USER_CELL_ADD_BUTTON_VISIBILITY,
       MAX_BATCH_BLOCK_DELAY_MS,
       MESSAGE_TYPES,
       MIN_BATCH_BLOCK_DELAY_MS,
@@ -1199,6 +1194,7 @@
       getCsrfToken: namespace.getCsrfToken,
       getStoredPageButtonStyles: namespace.getStoredPageButtonStyles,
       getStoredUserCellAddButtonStyle: namespace.getStoredUserCellAddButtonStyle,
+      getStoredUserCellAddButtonVisibility: namespace.getStoredUserCellAddButtonVisibility,
       fetchFollowersPage: namespace.fetchFollowersPage,
       finishFollowerRun,
       FOLLOWER_RUN_PORT_PREFIX,
@@ -1208,6 +1204,7 @@
       normalizeFollowerBlockCandidate: namespace.normalizeFollowerBlockCandidate,
       normalizePageButtonStyle: namespace.normalizePageButtonStyle,
       normalizePageButtonStyles: namespace.normalizePageButtonStyles,
+      normalizeUserCellAddButtonVisibility: namespace.normalizeUserCellAddButtonVisibility,
       normalizeUsernameForMatching: namespace.normalizeUsernameForMatching,
       observeStoredPageButtonStyle,
       observeStoredUserCellAddButtonStyle,

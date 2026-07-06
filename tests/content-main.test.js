@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const sharedBlocklist = require('../src/shared/blocklist.js');
+const sharedSettings = require('../src/shared/settings.js');
 
 const {
   BLOCK_BUTTON_ATTRIBUTE,
@@ -2483,7 +2484,7 @@ test('syncStoredUserCellAddButtonVisibility and observeStoredUserCellAddButtonVi
         local: {
           get(_keys, callback) {
             callback({
-              [sharedBlocklist.USER_CELL_ADD_BUTTON_VISIBILITY_STORAGE_KEY]: false
+              [sharedSettings.USER_CELL_ADD_BUTTON_VISIBILITY_STORAGE_KEY]: false
             });
           }
         },
@@ -2507,7 +2508,7 @@ test('syncStoredUserCellAddButtonVisibility and observeStoredUserCellAddButtonVi
 
   observeStoredUserCellAddButtonVisibility(globalRef);
   listeners[0]({
-    [sharedBlocklist.USER_CELL_ADD_BUTTON_VISIBILITY_STORAGE_KEY]: {
+    [sharedSettings.USER_CELL_ADD_BUTTON_VISIBILITY_STORAGE_KEY]: {
       newValue: true
     }
   }, 'local');

@@ -3,6 +3,7 @@ const test = require('node:test');
 
 const sharedBlocklist = require('../src/shared/blocklist.js');
 const sharedFollowers = require('../src/shared/followers.js');
+const sharedSettings = require('../src/shared/settings.js');
 const {
   CONTENT_SCRIPT_CSS_FILES,
   CONTENT_SCRIPT_FILES,
@@ -1000,28 +1001,31 @@ test('init loads stored popup state and supports settings navigation', async () 
   const { documentRef, elements } = createPopupDocument();
   const blocklist = {
     ...sharedBlocklist,
+    async getStoredUsernames() {
+      return ['alice', 'bob'];
+    }
+  };
+  const settings = {
+    ...sharedSettings,
     async getStoredBatchBlockDelayMs() {
       return 1400;
     },
     async getStoredPageBlockButtonStyles() {
       return {
-        [sharedBlocklist.PAGE_BUTTON_STYLE_SURFACES.tweet]: sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.text,
-        [sharedBlocklist.PAGE_BUTTON_STYLE_SURFACES.profile]: sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.icon,
-        [sharedBlocklist.PAGE_BUTTON_STYLE_SURFACES.userCell]: sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.text
+        [sharedSettings.PAGE_BUTTON_STYLE_SURFACES.tweet]: sharedSettings.PAGE_BLOCK_BUTTON_STYLES.text,
+        [sharedSettings.PAGE_BUTTON_STYLE_SURFACES.profile]: sharedSettings.PAGE_BLOCK_BUTTON_STYLES.icon,
+        [sharedSettings.PAGE_BUTTON_STYLE_SURFACES.userCell]: sharedSettings.PAGE_BLOCK_BUTTON_STYLES.text
       };
     },
     async getStoredUserCellAddButtonStyle() {
-      return sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.icon;
+      return sharedSettings.PAGE_BLOCK_BUTTON_STYLES.icon;
     },
     async getStoredUserCellAddButtonVisibility() {
       return false;
-    },
-    async getStoredUsernames() {
-      return ['alice', 'bob'];
     }
   };
 
-  init(documentRef, { runtime: {}, tabs: {} }, blocklist);
+  init(documentRef, { runtime: {}, tabs: {} }, blocklist, sharedFollowers, settings);
 
   assert.equal(elements['popup-shell'].dataset.view, POPUP_VIEWS.main);
   await flushAsyncWork();
@@ -1109,12 +1113,6 @@ test('init restores persisted followers preview and username draft state', async
 
   init(documentRef, { runtime: {}, tabs: {} }, {
     ...sharedBlocklist,
-    async getStoredBatchBlockDelayMs() {
-      return 1000;
-    },
-    async getStoredPageBlockButtonStyles() {
-      return sharedBlocklist.DEFAULT_PAGE_BLOCK_BUTTON_STYLES;
-    },
     async getStoredUsernames() {
       return ['saveduser'];
     }
@@ -1470,12 +1468,6 @@ test('init ignores a persisted completed follower-run status and restores the de
 
   init(documentRef, { runtime: {}, tabs: {} }, {
     ...sharedBlocklist,
-    async getStoredBatchBlockDelayMs() {
-      return 1000;
-    },
-    async getStoredPageBlockButtonStyles() {
-      return sharedBlocklist.DEFAULT_PAGE_BLOCK_BUTTON_STYLES;
-    },
     async getStoredUsernames() {
       return [];
     }
@@ -1507,12 +1499,6 @@ test('init ignores a persisted list CRUD status and restores the default header 
 
   init(documentRef, { runtime: {}, tabs: {} }, {
     ...sharedBlocklist,
-    async getStoredBatchBlockDelayMs() {
-      return 1000;
-    },
-    async getStoredPageBlockButtonStyles() {
-      return sharedBlocklist.DEFAULT_PAGE_BLOCK_BUTTON_STYLES;
-    },
     async getStoredUsernames() {
       return [];
     }
@@ -1528,9 +1514,6 @@ test('init saves the blocklist, disables actions while saving, and reports inval
   const persistedUsernames = [];
   const blocklist = {
     ...sharedBlocklist,
-    async getStoredBatchBlockDelayMs() {
-      return 1000;
-    },
     async getStoredUsernames() {
       return [];
     },
@@ -1576,24 +1559,27 @@ test('init saves settings, updates the active delay, and returns to the main vie
   const savedVisibilityInputs = [];
   const blocklist = {
     ...sharedBlocklist,
+    async getStoredUsernames() {
+      return [];
+    }
+  };
+  const settings = {
+    ...sharedSettings,
     async getStoredBatchBlockDelayMs() {
       return 1400;
     },
     async getStoredPageBlockButtonStyles() {
       return {
-        [sharedBlocklist.PAGE_BUTTON_STYLE_SURFACES.tweet]: sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.icon,
-        [sharedBlocklist.PAGE_BUTTON_STYLE_SURFACES.profile]: sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.icon,
-        [sharedBlocklist.PAGE_BUTTON_STYLE_SURFACES.userCell]: sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.text
+        [sharedSettings.PAGE_BUTTON_STYLE_SURFACES.tweet]: sharedSettings.PAGE_BLOCK_BUTTON_STYLES.icon,
+        [sharedSettings.PAGE_BUTTON_STYLE_SURFACES.profile]: sharedSettings.PAGE_BLOCK_BUTTON_STYLES.icon,
+        [sharedSettings.PAGE_BUTTON_STYLE_SURFACES.userCell]: sharedSettings.PAGE_BLOCK_BUTTON_STYLES.text
       };
     },
     async getStoredUserCellAddButtonStyle() {
-      return sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.icon;
+      return sharedSettings.PAGE_BLOCK_BUTTON_STYLES.icon;
     },
     async getStoredUserCellAddButtonVisibility() {
       return true;
-    },
-    async getStoredUsernames() {
-      return [];
     },
     setStoredBatchBlockDelayMs(delayMs) {
       savedDelayInputs.push(delayMs);
@@ -1613,7 +1599,7 @@ test('init saves settings, updates the active delay, and returns to the main vie
     }
   };
 
-  init(documentRef, { runtime: {}, tabs: {} }, blocklist);
+  init(documentRef, { runtime: {}, tabs: {} }, blocklist, sharedFollowers, settings);
   await flushAsyncWork();
 
   elements['open-settings'].click();
@@ -1628,11 +1614,11 @@ test('init saves settings, updates the active delay, and returns to the main vie
 
   assert.equal(JSON.stringify(savedDelayInputs), JSON.stringify([2000]));
   assert.equal(JSON.stringify(savedStyles), JSON.stringify([{
-    [sharedBlocklist.PAGE_BUTTON_STYLE_SURFACES.tweet]: sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.text,
-    [sharedBlocklist.PAGE_BUTTON_STYLE_SURFACES.profile]: sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.text,
-    [sharedBlocklist.PAGE_BUTTON_STYLE_SURFACES.userCell]: sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.icon
+    [sharedSettings.PAGE_BUTTON_STYLE_SURFACES.tweet]: sharedSettings.PAGE_BLOCK_BUTTON_STYLES.text,
+    [sharedSettings.PAGE_BUTTON_STYLE_SURFACES.profile]: sharedSettings.PAGE_BLOCK_BUTTON_STYLES.text,
+    [sharedSettings.PAGE_BUTTON_STYLE_SURFACES.userCell]: sharedSettings.PAGE_BLOCK_BUTTON_STYLES.icon
   }]));
-  assert.equal(JSON.stringify(savedAddStyles), JSON.stringify([sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.text]));
+  assert.equal(JSON.stringify(savedAddStyles), JSON.stringify([sharedSettings.PAGE_BLOCK_BUTTON_STYLES.text]));
   assert.equal(JSON.stringify(savedVisibilityInputs), JSON.stringify([false]));
   assert.equal(elements.status.textContent, 'Saving settings...');
   assert.equal(elements['save-blocklist'].disabled, true);
@@ -1641,11 +1627,11 @@ test('init saves settings, updates the active delay, and returns to the main vie
 
   deferredDelaySave.resolve(1900);
   deferredStylesSave.resolve({
-    [sharedBlocklist.PAGE_BUTTON_STYLE_SURFACES.tweet]: sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.text,
-    [sharedBlocklist.PAGE_BUTTON_STYLE_SURFACES.profile]: sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.text,
-    [sharedBlocklist.PAGE_BUTTON_STYLE_SURFACES.userCell]: sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.icon
+    [sharedSettings.PAGE_BUTTON_STYLE_SURFACES.tweet]: sharedSettings.PAGE_BLOCK_BUTTON_STYLES.text,
+    [sharedSettings.PAGE_BUTTON_STYLE_SURFACES.profile]: sharedSettings.PAGE_BLOCK_BUTTON_STYLES.text,
+    [sharedSettings.PAGE_BUTTON_STYLE_SURFACES.userCell]: sharedSettings.PAGE_BLOCK_BUTTON_STYLES.icon
   });
-  deferredAddStyleSave.resolve(sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.text);
+  deferredAddStyleSave.resolve(sharedSettings.PAGE_BLOCK_BUTTON_STYLES.text);
   deferredVisibilitySave.resolve(false);
   await flushAsyncWork();
 
@@ -1675,14 +1661,17 @@ test('init blocks the saved list through an open X tab and reports failures with
   const sentMessages = [];
   const blocklist = {
     ...sharedBlocklist,
-    async getStoredBatchBlockDelayMs() {
-      return 1300;
-    },
     async getStoredUsernames() {
       return [];
     },
     async setStoredUsernames(usernames) {
       return usernames;
+    }
+  };
+  const settings = {
+    ...sharedSettings,
+    async getStoredBatchBlockDelayMs() {
+      return 1300;
     }
   };
   const extensionApi = {
@@ -1708,7 +1697,7 @@ test('init blocks the saved list through an open X tab and reports failures with
     }
   };
 
-  init(documentRef, extensionApi, blocklist);
+  init(documentRef, extensionApi, blocklist, sharedFollowers, settings);
   await flushAsyncWork();
 
   elements['username-blocklist'].value = '@Alice @Bob bad-name';
@@ -1735,9 +1724,6 @@ test('init requires at least one valid username before blocking', async () => {
 
   init(documentRef, { runtime: {}, tabs: {} }, {
     ...sharedBlocklist,
-    async getStoredBatchBlockDelayMs() {
-      return 1000;
-    },
     async getStoredUsernames() {
       return [];
     }
@@ -1758,11 +1744,14 @@ test('init scans followers in the active tab and blocks only the ready preview c
   const runtimeListeners = [];
   const blocklist = {
     ...sharedBlocklist,
-    async getStoredBatchBlockDelayMs() {
-      return 1100;
-    },
     async getStoredUsernames() {
       return [];
+    }
+  };
+  const settings = {
+    ...sharedSettings,
+    async getStoredBatchBlockDelayMs() {
+      return 1100;
     }
   };
   const extensionApi = {
@@ -1825,7 +1814,7 @@ test('init scans followers in the active tab and blocks only the ready preview c
     }
   };
 
-  init(documentRef, extensionApi, blocklist, sharedFollowers);
+  init(documentRef, extensionApi, blocklist, sharedFollowers, settings);
   await flushAsyncWork();
 
   elements['open-followers'].click();
@@ -1887,9 +1876,6 @@ test('init can cancel an active follower block run', async () => {
   let activeBlockRunId = null;
   const blocklist = {
     ...sharedBlocklist,
-    async getStoredBatchBlockDelayMs() {
-      return 1000;
-    },
     async getStoredUsernames() {
       return [];
     }
@@ -1987,9 +1973,6 @@ test('init scans following when the following source is selected', async () => {
   const messages = [];
   const blocklist = {
     ...sharedBlocklist,
-    async getStoredBatchBlockDelayMs() {
-      return 1000;
-    },
     async getStoredUsernames() {
       return [];
     }
@@ -2054,12 +2037,6 @@ test('init renders fatal popup text when the initial popup load rejects', async 
   const { documentRef } = createPopupDocument();
   const blocklist = {
     ...sharedBlocklist,
-    async getStoredBatchBlockDelayMs() {
-      return 1000;
-    },
-    async getStoredPageBlockButtonStyles() {
-      return sharedBlocklist.DEFAULT_PAGE_BLOCK_BUTTON_STYLES;
-    },
     async getStoredUsernames() {
       throw new Error('storage exploded');
     }

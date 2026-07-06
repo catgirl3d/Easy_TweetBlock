@@ -33,8 +33,23 @@ test("buildManifest merges the Chrome overlay into the base manifest", () => {
   assert.deepEqual(manifest.content_scripts[0].js, CONTENT_SCRIPT_FILES);
 });
 
-test("content script files load shared blocklist before content main", () => {
+test("content script files load storage, settings, and shared modules before content main", () => {
+  assert.equal(CONTENT_SCRIPT_FILES.includes("src/shared/storage.js"), true);
+  assert.equal(CONTENT_SCRIPT_FILES.includes("src/shared/settings.js"), true);
+  assert.equal(CONTENT_SCRIPT_FILES.includes("src/content/shared.js"), true);
   assert.equal(CONTENT_SCRIPT_FILES.includes("src/shared/blocklist.js"), true);
+  assert.equal(
+    CONTENT_SCRIPT_FILES.indexOf("src/shared/storage.js") < CONTENT_SCRIPT_FILES.indexOf("src/shared/settings.js"),
+    true
+  );
+  assert.equal(
+    CONTENT_SCRIPT_FILES.indexOf("src/shared/settings.js") < CONTENT_SCRIPT_FILES.indexOf("src/content/shared.js"),
+    true
+  );
+  assert.equal(
+    CONTENT_SCRIPT_FILES.indexOf("src/content/shared.js") < CONTENT_SCRIPT_FILES.indexOf("src/shared/blocklist.js"),
+    true
+  );
   assert.equal(
     CONTENT_SCRIPT_FILES.indexOf("src/shared/blocklist.js") < CONTENT_SCRIPT_FILES.indexOf("src/content/main.js"),
     true

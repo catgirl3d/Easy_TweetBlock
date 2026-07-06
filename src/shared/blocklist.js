@@ -3,32 +3,16 @@
   const ACTIVE_USERNAME_LIST_ID_STORAGE_KEY = 'activeUsernameListId';
   const DEFAULT_USERNAME_LIST_ID = 'blocklist';
   const DEFAULT_USERNAME_LIST_NAME = 'Blocklist';
-  const BATCH_BLOCK_DELAY_MS_STORAGE_KEY = 'batchBlockDelayMs';
-  const PAGE_BLOCK_BUTTON_STYLES_STORAGE_KEY = 'pageBlockButtonStyles';
-  const USER_CELL_ADD_BUTTON_STYLE_STORAGE_KEY = 'userCellAddButtonStyle';
-  const USER_CELL_ADD_BUTTON_VISIBILITY_STORAGE_KEY = 'showUserCellAddButton';
-  const DEFAULT_BATCH_BLOCK_DELAY_MS = 1000;
-  const DEFAULT_PAGE_BLOCK_BUTTON_STYLE = 'icon';
-  const PAGE_BUTTON_STYLE_SURFACES = Object.freeze({
-    profile: 'profile',
-    tweet: 'tweet',
-    userCell: 'user-cell'
-  });
-  const DEFAULT_PAGE_BLOCK_BUTTON_STYLES = Object.freeze({
-    [PAGE_BUTTON_STYLE_SURFACES.tweet]: DEFAULT_PAGE_BLOCK_BUTTON_STYLE,
-    [PAGE_BUTTON_STYLE_SURFACES.profile]: DEFAULT_PAGE_BLOCK_BUTTON_STYLE,
-    [PAGE_BUTTON_STYLE_SURFACES.userCell]: DEFAULT_PAGE_BLOCK_BUTTON_STYLE
-  });
-  const DEFAULT_USER_CELL_ADD_BUTTON_STYLE = DEFAULT_PAGE_BLOCK_BUTTON_STYLE;
-  const DEFAULT_USER_CELL_ADD_BUTTON_VISIBILITY = true;
-  const MIN_BATCH_BLOCK_DELAY_MS = 500;
-  const MAX_BATCH_BLOCK_DELAY_MS = 2000;
-  const PAGE_BLOCK_BUTTON_STYLES = Object.freeze({
-    icon: 'icon',
-    text: 'text'
-  });
   const USERNAME_PATTERN = /^[A-Za-z0-9_]{1,15}$/;
   const USERNAME_LIST_ID_PATTERN = /^[A-Za-z0-9_-]{1,80}$/;
+  const storageApi = globalThis.EasyTweetBlockStorage
+    || (typeof module !== 'undefined' && module.exports ? require('./storage.js') : null);
+
+  if (!storageApi) {
+    throw new Error('Missing Easy TweetBlock storage API.');
+  }
+
+  const { callStorageGet, callStorageSet, getExtensionApi } = storageApi;
 
   function normalizeUsername(value) {
     if (typeof value !== 'string') {
@@ -204,116 +188,6 @@
     return lists[0]?.id || DEFAULT_USERNAME_LIST_ID;
   }
 
-  function normalizeBatchBlockDelayMs(value) {
-    const numericValue = Number(value);
-
-    if (!Number.isFinite(numericValue)) {
-      return DEFAULT_BATCH_BLOCK_DELAY_MS;
-    }
-
-    const roundedValue = Math.round(numericValue);
-    return Math.min(MAX_BATCH_BLOCK_DELAY_MS, Math.max(MIN_BATCH_BLOCK_DELAY_MS, roundedValue));
-  }
-
-  function normalizePageBlockButtonStyle(value) {
-    return value === PAGE_BLOCK_BUTTON_STYLES.text
-      ? PAGE_BLOCK_BUTTON_STYLES.text
-      : DEFAULT_PAGE_BLOCK_BUTTON_STYLE;
-  }
-
-  function normalizePageButtonStyleSurface(value) {
-    return value === PAGE_BUTTON_STYLE_SURFACES.profile || value === PAGE_BUTTON_STYLE_SURFACES.userCell
-      ? value
-      : PAGE_BUTTON_STYLE_SURFACES.tweet;
-  }
-
-  function normalizePageBlockButtonStyles(value) {
-    if (typeof value === 'string') {
-      const normalizedStyle = normalizePageBlockButtonStyle(value);
-      return {
-        [PAGE_BUTTON_STYLE_SURFACES.tweet]: normalizedStyle,
-        [PAGE_BUTTON_STYLE_SURFACES.profile]: normalizedStyle,
-        [PAGE_BUTTON_STYLE_SURFACES.userCell]: normalizedStyle
-      };
-    }
-
-    const styles = value && typeof value === 'object' && !Array.isArray(value)
-      ? value
-      : DEFAULT_PAGE_BLOCK_BUTTON_STYLES;
-
-    return {
-      [PAGE_BUTTON_STYLE_SURFACES.tweet]: normalizePageBlockButtonStyle(styles[PAGE_BUTTON_STYLE_SURFACES.tweet]),
-      [PAGE_BUTTON_STYLE_SURFACES.profile]: normalizePageBlockButtonStyle(styles[PAGE_BUTTON_STYLE_SURFACES.profile]),
-      [PAGE_BUTTON_STYLE_SURFACES.userCell]: normalizePageBlockButtonStyle(styles[PAGE_BUTTON_STYLE_SURFACES.userCell])
-    };
-  }
-
-  function normalizeUserCellAddButtonVisibility(value) {
-    return value !== false;
-  }
-
-  function getExtensionApi(extensionApi = globalThis.browser || globalThis.chrome) {
-    return extensionApi || null;
-  }
-
-  function callStorageGet(storageArea, query, extensionApi) {
-    if (!storageArea) {
-      return Promise.resolve({});
-    }
-
-    try {
-      const maybePromise = storageArea.get(query);
-
-      if (maybePromise && typeof maybePromise.then === 'function') {
-        return maybePromise.then((value) => value || {});
-      }
-    } catch {
-      // Fall through to callback mode for older Chrome-style APIs.
-    }
-
-    return new Promise((resolve, reject) => {
-      storageArea.get(query, (value) => {
-        const lastError = extensionApi?.runtime?.lastError;
-
-        if (lastError) {
-          reject(new Error(lastError.message || String(lastError)));
-          return;
-        }
-
-        resolve(value || {});
-      });
-    });
-  }
-
-  function callStorageSet(storageArea, payload, extensionApi) {
-    if (!storageArea) {
-      return Promise.resolve();
-    }
-
-    try {
-      const maybePromise = storageArea.set(payload);
-
-      if (maybePromise && typeof maybePromise.then === 'function') {
-        return maybePromise;
-      }
-    } catch {
-      // Fall through to callback mode for older Chrome-style APIs.
-    }
-
-    return new Promise((resolve, reject) => {
-      storageArea.set(payload, () => {
-        const lastError = extensionApi?.runtime?.lastError;
-
-        if (lastError) {
-          reject(new Error(lastError.message || String(lastError)));
-          return;
-        }
-
-        resolve();
-      });
-    });
-  }
-
   async function readUsernameListState(extensionApi = getExtensionApi()) {
     const storageArea = extensionApi?.storage?.local;
     const storedValues = await callStorageGet(storageArea, [
@@ -484,74 +358,6 @@
 
   async function setStoredUsernames(usernames, extensionApi = getExtensionApi()) {
     return setActiveStoredUsernames(usernames, extensionApi);
-  }
-
-  async function getStoredBatchBlockDelayMs(extensionApi = getExtensionApi()) {
-    const storageArea = extensionApi?.storage?.local;
-    const storedValues = await callStorageGet(storageArea, [BATCH_BLOCK_DELAY_MS_STORAGE_KEY], extensionApi);
-    return normalizeBatchBlockDelayMs(storedValues?.[BATCH_BLOCK_DELAY_MS_STORAGE_KEY]);
-  }
-
-  async function setStoredBatchBlockDelayMs(delayMs, extensionApi = getExtensionApi()) {
-    const normalizedDelayMs = normalizeBatchBlockDelayMs(delayMs);
-    const storageArea = extensionApi?.storage?.local;
-
-    await callStorageSet(storageArea, {
-      [BATCH_BLOCK_DELAY_MS_STORAGE_KEY]: normalizedDelayMs
-    }, extensionApi);
-
-    return normalizedDelayMs;
-  }
-
-  async function getStoredPageBlockButtonStyles(extensionApi = getExtensionApi()) {
-    const storageArea = extensionApi?.storage?.local;
-    const storedValues = await callStorageGet(storageArea, [PAGE_BLOCK_BUTTON_STYLES_STORAGE_KEY], extensionApi);
-    return normalizePageBlockButtonStyles(storedValues?.[PAGE_BLOCK_BUTTON_STYLES_STORAGE_KEY]);
-  }
-
-  async function setStoredPageBlockButtonStyles(styles, extensionApi = getExtensionApi()) {
-    const normalizedStyles = normalizePageBlockButtonStyles(styles);
-    const storageArea = extensionApi?.storage?.local;
-
-    await callStorageSet(storageArea, {
-      [PAGE_BLOCK_BUTTON_STYLES_STORAGE_KEY]: normalizedStyles
-    }, extensionApi);
-
-    return normalizedStyles;
-  }
-
-  async function getStoredUserCellAddButtonVisibility(extensionApi = getExtensionApi()) {
-    const storageArea = extensionApi?.storage?.local;
-    const storedValues = await callStorageGet(storageArea, [USER_CELL_ADD_BUTTON_VISIBILITY_STORAGE_KEY], extensionApi);
-    return normalizeUserCellAddButtonVisibility(storedValues?.[USER_CELL_ADD_BUTTON_VISIBILITY_STORAGE_KEY]);
-  }
-
-  async function getStoredUserCellAddButtonStyle(extensionApi = getExtensionApi()) {
-    const storageArea = extensionApi?.storage?.local;
-    const storedValues = await callStorageGet(storageArea, [USER_CELL_ADD_BUTTON_STYLE_STORAGE_KEY], extensionApi);
-    return normalizePageBlockButtonStyle(storedValues?.[USER_CELL_ADD_BUTTON_STYLE_STORAGE_KEY]);
-  }
-
-  async function setStoredUserCellAddButtonVisibility(isVisible, extensionApi = getExtensionApi()) {
-    const normalizedVisibility = normalizeUserCellAddButtonVisibility(isVisible);
-    const storageArea = extensionApi?.storage?.local;
-
-    await callStorageSet(storageArea, {
-      [USER_CELL_ADD_BUTTON_VISIBILITY_STORAGE_KEY]: normalizedVisibility
-    }, extensionApi);
-
-    return normalizedVisibility;
-  }
-
-  async function setStoredUserCellAddButtonStyle(style, extensionApi = getExtensionApi()) {
-    const normalizedStyle = normalizePageBlockButtonStyle(style);
-    const storageArea = extensionApi?.storage?.local;
-
-    await callStorageSet(storageArea, {
-      [USER_CELL_ADD_BUTTON_STYLE_STORAGE_KEY]: normalizedStyle
-    }, extensionApi);
-
-    return normalizedStyle;
   }
 
   function hasUsernameListStorageChange(changes) {
@@ -734,41 +540,19 @@
 
   const blocklistApi = {
     ACTIVE_USERNAME_LIST_ID_STORAGE_KEY,
-    BATCH_BLOCK_DELAY_MS_STORAGE_KEY,
-    DEFAULT_USER_CELL_ADD_BUTTON_VISIBILITY,
-    DEFAULT_USER_CELL_ADD_BUTTON_STYLE,
-    DEFAULT_BATCH_BLOCK_DELAY_MS,
-    DEFAULT_PAGE_BLOCK_BUTTON_STYLE,
-    DEFAULT_PAGE_BLOCK_BUTTON_STYLES,
     DEFAULT_USERNAME_LIST_ID,
     DEFAULT_USERNAME_LIST_NAME,
-    MAX_BATCH_BLOCK_DELAY_MS,
-    MIN_BATCH_BLOCK_DELAY_MS,
-    PAGE_BLOCK_BUTTON_STYLES,
-    PAGE_BLOCK_BUTTON_STYLES_STORAGE_KEY,
-    PAGE_BUTTON_STYLE_SURFACES,
-    USER_CELL_ADD_BUTTON_STYLE_STORAGE_KEY,
-    USER_CELL_ADD_BUTTON_VISIBILITY_STORAGE_KEY,
     USERNAME_LISTS_STORAGE_KEY,
     USERNAME_PATTERN,
     addUsernameToActiveList,
     createUsernameList,
     createUsernameListId,
     getActiveUsernameList,
-    getStoredBatchBlockDelayMs,
-    getStoredPageBlockButtonStyles,
-    getStoredUserCellAddButtonStyle,
-    getStoredUserCellAddButtonVisibility,
     getStoredUsernameListState,
     getStoredUsernameLists,
     getStoredUsernames,
     isUsernameInActiveList,
     mergeUsernameLists,
-    normalizeBatchBlockDelayMs,
-    normalizePageBlockButtonStyle,
-    normalizePageBlockButtonStyles,
-    normalizePageButtonStyleSurface,
-    normalizeUserCellAddButtonVisibility,
     normalizeStoredUsernames,
     normalizeUsername,
     normalizeUsernameListName,
@@ -780,10 +564,6 @@
     serializeUsernameText,
     setActiveStoredUsernames,
     setActiveUsernameListId,
-    setStoredBatchBlockDelayMs,
-    setStoredPageBlockButtonStyles,
-    setStoredUserCellAddButtonStyle,
-    setStoredUserCellAddButtonVisibility,
     setStoredUsernameLists,
     setStoredUsernames,
     toggleUsernameInActiveList
