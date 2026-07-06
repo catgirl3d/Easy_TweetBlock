@@ -247,12 +247,15 @@
         return;
       }
 
-      namespace.setButtonState(button, 'running', screenName, kind || BUTTON_KINDS.native);
+      const runningState = typeof actionOptions.getRunningState === 'function'
+        ? actionOptions.getRunningState(button)
+        : 'running';
+      namespace.setButtonState(button, runningState, screenName, kind || BUTTON_KINDS.native);
 
       try {
         const result = await action();
         const successState = typeof actionOptions.getSuccessState === 'function'
-          ? actionOptions.getSuccessState(result)
+          ? actionOptions.getSuccessState(result, button)
           : 'success';
         namespace.setButtonState(button, successState, screenName, kind || BUTTON_KINDS.native);
       } catch (error) {
@@ -265,8 +268,58 @@
     return button;
   }
 
+  function getUserCellBlockMode(button) {
+    return button?.dataset?.userCellBlockMode === 'unblock' ? 'unblock' : 'block';
+  }
+
+  function setUserCellBlockMode(button, mode) {
+    if (button?.dataset) {
+      button.dataset.userCellBlockMode = mode === 'unblock' ? 'unblock' : 'block';
+    }
+  }
+
+  function setUserCellBlockRestId(button, restId) {
+    if (!button?.dataset) {
+      return;
+    }
+
+    if (restId) {
+      button.dataset.userRestId = String(restId);
+      return;
+    }
+
+    delete button.dataset.userRestId;
+  }
+
   function createNativeBlockButton(tweet, documentRef = document) {
     return createActionButton(tweet, BUTTON_KINDS.native, () => runNativeBlockFlow(tweet, documentRef), undefined, 'tweet');
+  }
+
+  function setManagedButtonVisibility(button, isVisible) {
+    if (!button) {
+      return;
+    }
+
+    const isHidden = !Boolean(isVisible);
+    button.hidden = isHidden;
+
+    if (button.style) {
+      if (isHidden) {
+        if (typeof button.style.setProperty === 'function') {
+          button.style.setProperty('display', 'none', 'important');
+        } else {
+          button.style.display = 'none';
+        }
+      } else if (typeof button.style.removeProperty === 'function') {
+        button.style.removeProperty('display');
+      } else {
+        button.style.display = '';
+      }
+    }
+
+    if (typeof button.setAttribute === 'function') {
+      button.setAttribute('aria-hidden', String(isHidden));
+    }
   }
 
   function createProfileBlockButton(documentRef = document) {
@@ -276,10 +329,15 @@
       return null;
     }
 
-    const button = createActionButton(
+    let button = null;
+    button = createActionButton(
       documentRef,
       BUTTON_KINDS.native,
-      () => runProfileNativeBlockFlow(documentRef),
+      async () => {
+        const result = await runProfileNativeBlockFlow(documentRef);
+        setManagedButtonVisibility(button, false);
+        return result;
+      },
       screenName,
       'profile'
     );
@@ -294,14 +352,78 @@
       return null;
     }
 
-    return createActionButton(
+    let button = null;
+    const action = async () => {
+      if (getUserCellBlockMode(button) === 'unblock') {
+        const restId = button?.dataset?.userRestId || null;
+        const result = restId
+          ? await namespace.unblockUserByRestIdViaApi(restId, {
+            ...options,
+            screenName
+          })
+          : await namespace.unblockUserByScreenNameViaApi(screenName, options);
+
+        setUserCellBlockMode(button, 'block');
+        setUserCellBlockRestId(button, null);
+        setUserCellNativeActionButtonVisibility(options.actionButton, false);
+
+        return {
+          mode: 'unblock',
+          ...result
+        };
+      }
+
+      const result = await namespace.runApiBlockFlow(userCell, options);
+      setUserCellBlockMode(button, 'unblock');
+      setUserCellBlockRestId(button, result?.restId || null);
+      setUserCellNativeActionButtonVisibility(options.actionButton, true);
+
+      return {
+        mode: 'block',
+        ...result
+      };
+    };
+
+    button = createActionButton(
       userCell,
       BUTTON_KINDS.native,
-      () => namespace.runApiBlockFlow(userCell, options),
+      action,
       screenName,
       'user-cell',
-      BUTTON_ACTIONS.block
+      BUTTON_ACTIONS.block,
+      {
+        getRunningState(currentButton) {
+          return getUserCellBlockMode(currentButton) === 'unblock' ? 'running-unblock' : 'running';
+        },
+        getSuccessState(result) {
+          return result?.mode === 'unblock' ? 'idle' : 'blocked';
+        }
+      }
     );
+
+    setUserCellBlockMode(button, 'block');
+    button.addEventListener('mouseenter', () => {
+      if (button.dataset.state === 'blocked') {
+        namespace.setButtonState(button, 'unblock', screenName, BUTTON_KINDS.native);
+      }
+    });
+    button.addEventListener('mouseleave', () => {
+      if (button.dataset.state === 'unblock') {
+        namespace.setButtonState(button, 'blocked', screenName, BUTTON_KINDS.native);
+      }
+    });
+    button.addEventListener('focus', () => {
+      if (button.dataset.state === 'blocked') {
+        namespace.setButtonState(button, 'unblock', screenName, BUTTON_KINDS.native);
+      }
+    });
+    button.addEventListener('blur', () => {
+      if (button.dataset.state === 'unblock') {
+        namespace.setButtonState(button, 'blocked', screenName, BUTTON_KINDS.native);
+      }
+    });
+
+    return button;
   }
 
   function getExtensionApiForOptions(options = {}, globalRef = globalThis) {
@@ -422,6 +544,26 @@
     if (typeof button.setAttribute === 'function') {
       button.setAttribute('aria-hidden', String(isBlocked));
     }
+  }
+
+  function setUserCellNativeActionButtonVisibility(actionButton, isHidden) {
+    if (!actionButton) {
+      return;
+    }
+
+    setManagedButtonVisibility(actionButton, !Boolean(isHidden));
+
+    if (actionButton.dataset) {
+      actionButton.dataset.easyTweetblockHiddenByBlock = String(Boolean(isHidden));
+    }
+  }
+
+  function syncUserCellNativeActionButtonVisibility(button, actionButton) {
+    if (!button || namespace.getButtonAction(button) !== BUTTON_ACTIONS.block || button.dataset?.surface !== 'user-cell') {
+      return;
+    }
+
+    setUserCellNativeActionButtonVisibility(actionButton, getUserCellBlockMode(button) === 'unblock');
   }
 
   async function syncStoredUserCellAddButtonVisibility(globalRef = globalThis) {
@@ -885,6 +1027,7 @@
     runProfileNativeBlockFlow,
     runNativeBlockFlow,
     syncUserCellBlockButtonVisibility,
+    syncUserCellNativeActionButtonVisibility,
     startFollowerRun,
     syncStoredPageButtonStyle,
     syncStoredUserCellAddButtonVisibility,
@@ -919,6 +1062,8 @@
       blockFollowerCandidatesViaApi: namespace.blockFollowerCandidatesViaApi,
       blockUserByRestIdViaApi: namespace.blockUserByRestIdViaApi,
       blockUserByScreenNameViaApi: namespace.blockUserByScreenNameViaApi,
+      unblockUserByRestIdViaApi: namespace.unblockUserByRestIdViaApi,
+      unblockUserByScreenNameViaApi: namespace.unblockUserByScreenNameViaApi,
       blockUsernamesViaApi: namespace.blockUsernamesViaApi,
       buildFollowersLookupUrls: namespace.buildFollowersLookupUrls,
       buildUserLookupUrls: namespace.buildUserLookupUrls,
@@ -982,11 +1127,13 @@
       applyCurrentNativeButtonStyleToDocument,
       setCurrentNativeButtonStyle: namespace.setCurrentNativeButtonStyle,
       setButtonState: namespace.setButtonState,
+      setUserCellNativeActionButtonVisibility,
       sleep: namespace.sleep,
       startFollowerRun,
       syncUserCellListButtonState,
       syncUserCellListButtons,
       syncUserCellBlockButtonVisibility,
+      syncUserCellNativeActionButtonVisibility,
       subtreeContainsButton,
       syncStoredPageButtonStyle,
       syncStoredUserCellAddButtonVisibility,

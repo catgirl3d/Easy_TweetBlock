@@ -27,6 +27,7 @@ const {
   blockFollowerCandidatesViaApi,
   blockUserByRestIdViaApi,
   blockUserByScreenNameViaApi,
+  unblockUserByRestIdViaApi,
   blockUsernamesViaApi,
   buildFollowersLookupUrls,
   buildUserLookupUrls,
@@ -38,6 +39,7 @@ const {
   createApiBlockButton,
   createNativeBlockButton,
   createProfileBlockButton,
+  createUserCellBlockButton,
   createUserCellListButton,
   discoverGraphqlQueryIds,
   extractGraphqlQueryIdsFromScriptText,
@@ -130,6 +132,19 @@ function createDomElement(overrides = {}) {
     disabled: false,
     hidden: false,
     innerHTML: '',
+    style: {
+      display: '',
+      removeProperty(name) {
+        if (name === 'display') {
+          this.display = '';
+        }
+      },
+      setProperty(name, value) {
+        if (name === 'display') {
+          this.display = value;
+        }
+      }
+    },
     textContent: '',
     title: '',
     addEventListener(type, listener) {
@@ -147,6 +162,19 @@ function createDomElement(overrides = {}) {
           stopPropagation() {},
           target: element,
           type: 'click'
+        });
+      }
+    },
+    dispatch(type) {
+      const typeListeners = listeners.get(type) || [];
+
+      for (const listener of typeListeners) {
+        listener({
+          currentTarget: element,
+          preventDefault() {},
+          stopPropagation() {},
+          target: element,
+          type
         });
       }
     },
@@ -780,7 +808,8 @@ test('setButtonState uses list-specific titles for user cell buttons', () => {
     dataset: {
       displayStyle: PAGE_BUTTON_STYLES.text,
       kind: BUTTON_KINDS.native,
-      surface: 'user-cell'
+      surface: 'user-cell',
+      userCellBlockMode: 'block'
     },
     disabled: false,
     textContent: '',
@@ -796,6 +825,21 @@ test('setButtonState uses list-specific titles for user cell buttons', () => {
   setButtonState(button, 'success', 'Felixmfdo');
   assert.equal(button.title, 'Blocked @Felixmfdo from this list');
   assert.equal(attributes['aria-label'], 'Blocked @Felixmfdo from this list');
+
+  button.dataset.userCellBlockMode = 'unblock';
+  setButtonState(button, 'unblock', 'Felixmfdo');
+  assert.equal(button.textContent, 'Unblock');
+  assert.equal(button.title, 'Unblock @Felixmfdo from this list');
+  assert.equal(button.disabled, false);
+
+  setButtonState(button, 'running-unblock', 'Felixmfdo');
+  assert.equal(button.textContent, 'Unblocking...');
+  assert.equal(button.title, 'Unblocking @Felixmfdo from this list');
+
+  setButtonState(button, 'error', 'Felixmfdo');
+  assert.equal(button.textContent, 'Retry unblock');
+  assert.equal(button.title, 'Retry unblock for @Felixmfdo from this list');
+  assert.equal(attributes['aria-label'], 'Retry unblock for @Felixmfdo from this list');
 });
 
 test('setButtonState renders save-to-list labels and disables listed buttons', () => {
@@ -830,7 +874,7 @@ test('setButtonState renders save-to-list labels and disables listed buttons', (
   assert.equal(button.disabled, true);
 });
 
-test('setButtonState swaps the icon after a successful block', () => {
+test('setButtonState keeps the block icon for user-cell success states in icon mode', () => {
   const button = {
     dataset: {
       displayStyle: PAGE_BUTTON_STYLES.icon,
@@ -848,8 +892,10 @@ test('setButtonState swaps the icon after a successful block', () => {
   assert.equal(button.innerHTML.includes('M12 3.75'), true);
 
   setButtonState(button, 'success', 'Felixmfdo');
-  assert.equal(button.innerHTML.includes('M9.55 16.94'), true);
-  assert.equal(button.innerHTML.includes('M12 3.75'), false);
+  assert.equal(button.innerHTML.includes('M12 3.75'), true);
+
+  setButtonState(button, 'blocked', 'Felixmfdo');
+  assert.equal(button.innerHTML.includes('M12 3.75'), true);
 });
 
 test('setButtonState keeps the block icon for non-list native buttons after success', () => {
@@ -1902,6 +1948,36 @@ test('blockUserByRestIdViaApi posts the block request directly without a lookup'
   assert.equal(requestedUrls[0].options.body, 'user_id=2057563419742486528');
 });
 
+test('unblockUserByRestIdViaApi posts the unblock request directly without a lookup', async () => {
+  const requestedUrls = [];
+
+  async function fetchImpl(url, options = {}) {
+    requestedUrls.push({ options, url });
+    return {
+      ok: true,
+      async json() {
+        return { ok: true };
+      }
+    };
+  }
+
+  const result = await unblockUserByRestIdViaApi('2057563419742486528', {
+    documentRef: {
+      cookie: 'ct0=token123',
+      documentElement: { lang: 'en-US' },
+      location: { origin: 'https://x.com' }
+    },
+    fetchImpl,
+    screenName: 'Felixmfdo'
+  });
+
+  assert.equal(result.restId, '2057563419742486528');
+  assert.equal(result.screenName, 'felixmfdo');
+  assert.equal(requestedUrls.length, 1);
+  assert.equal(requestedUrls[0].url.endsWith('/i/api/1.1/blocks/destroy.json'), true);
+  assert.equal(requestedUrls[0].options.body, 'user_id=2057563419742486528');
+});
+
 test('blockUserByRestIdViaApi includes generated x-client-transaction-id when available', async (t) => {
   const requestedHeaders = [];
   const originalGenerator = globalThis.EasyTweetBlockContent.tryGenerateXClientTransactionId;
@@ -2699,6 +2775,194 @@ test('createApiBlockButton marks errors as retryable when the API flow fails', a
   assert.equal(button.textContent, 'Retry');
 });
 
+test('createUserCellBlockButton supports unblock and restores the native follow action', async (t) => {
+  const { documentRef } = createDocumentStub();
+  const { followButton, userCell } = createUserCellNode('Felixmfdo');
+  const requestedUrls = [];
+
+  useGlobalOverrides(t, { document: documentRef });
+  setCurrentNativeButtonStyle(PAGE_BUTTON_STYLES.text);
+  t.after(() => {
+    setCurrentNativeButtonStyle(PAGE_BUTTON_STYLES.icon);
+  });
+
+  const button = createUserCellBlockButton(userCell, {
+    actionButton: followButton,
+    documentRef: {
+      cookie: 'ct0=token123',
+      documentElement: { lang: 'en-US' },
+      location: { origin: 'https://x.com' }
+    },
+    async fetchImpl(url, options = {}) {
+      requestedUrls.push({ options, url });
+
+      if (options.method === 'POST') {
+        return {
+          ok: true,
+          async json() {
+            return { ok: true };
+          }
+        };
+      }
+
+      return {
+        ok: true,
+        async json() {
+          return {
+            data: {
+              user: {
+                result: {
+                  rest_id: '111'
+                }
+              }
+            }
+          };
+        }
+      };
+    },
+    cache: new Map(),
+    queryIds: ['workingQueryId']
+  });
+
+  button.click();
+  await flushAsyncWork();
+
+  assert.equal(button.dataset.state, 'blocked');
+  assert.equal(button.dataset.userCellBlockMode, 'unblock');
+  assert.equal(button.dataset.userRestId, '111');
+  assert.equal(followButton.hidden, true);
+  assert.equal(followButton.style.display, 'none');
+
+  button.dispatch('mouseenter');
+  assert.equal(button.dataset.state, 'unblock');
+  assert.equal(button.textContent, 'Unblock');
+
+  button.click();
+  await flushAsyncWork();
+
+  assert.equal(button.dataset.state, 'idle');
+  assert.equal(button.dataset.userCellBlockMode, 'block');
+  assert.equal(button.dataset.userRestId, undefined);
+  assert.equal(button.textContent, 'Block');
+  assert.equal(followButton.hidden, false);
+  assert.equal(followButton.style.display, '');
+  assert.equal(requestedUrls.length, 3);
+  assert.equal(requestedUrls[1].url.endsWith('/i/api/1.1/blocks/create.json'), true);
+  assert.equal(requestedUrls[2].url.endsWith('/i/api/1.1/blocks/destroy.json'), true);
+});
+
+test('createUserCellBlockButton retries a failed unblock without restoring follow state early', async (t) => {
+  const { documentRef } = createDocumentStub();
+  const { followButton, userCell } = createUserCellNode('Felixmfdo');
+  const requestedUrls = [];
+  const originalError = console.error;
+  let unblockAttempts = 0;
+
+  useGlobalOverrides(t, { document: documentRef });
+  setCurrentNativeButtonStyle(PAGE_BUTTON_STYLES.text);
+  console.error = () => {};
+  t.after(() => {
+    setCurrentNativeButtonStyle(PAGE_BUTTON_STYLES.icon);
+    console.error = originalError;
+  });
+
+  const button = createUserCellBlockButton(userCell, {
+    actionButton: followButton,
+    documentRef: {
+      cookie: 'ct0=token123',
+      documentElement: { lang: 'en-US' },
+      location: { origin: 'https://x.com' }
+    },
+    async fetchImpl(url, options = {}) {
+      requestedUrls.push({ options, url });
+
+      if (url.endsWith('/i/api/1.1/blocks/destroy.json')) {
+        unblockAttempts += 1;
+
+        if (unblockAttempts === 1) {
+          return {
+            ok: false,
+            status: 500,
+            async text() {
+              return 'temporary unblock failure';
+            }
+          };
+        }
+
+        return {
+          ok: true,
+          async json() {
+            return { ok: true };
+          }
+        };
+      }
+
+      if (options.method === 'POST') {
+        return {
+          ok: true,
+          async json() {
+            return { ok: true };
+          }
+        };
+      }
+
+      return {
+        ok: true,
+        async json() {
+          return {
+            data: {
+              user: {
+                result: {
+                  rest_id: '111'
+                }
+              }
+            }
+          };
+        }
+      };
+    },
+    cache: new Map(),
+    queryIds: ['workingQueryId']
+  });
+
+  button.click();
+  await flushAsyncWork();
+
+  assert.equal(button.dataset.state, 'blocked');
+  assert.equal(button.dataset.userCellBlockMode, 'unblock');
+  assert.equal(button.dataset.userRestId, '111');
+  assert.equal(followButton.hidden, true);
+  assert.equal(followButton.style.display, 'none');
+
+  button.dispatch('mouseenter');
+  assert.equal(button.dataset.state, 'unblock');
+
+  button.click();
+  await flushAsyncWork();
+
+  assert.equal(button.dataset.state, 'error');
+  assert.equal(button.dataset.userCellBlockMode, 'unblock');
+  assert.equal(button.dataset.userRestId, '111');
+  assert.equal(button.textContent, 'Retry unblock');
+  assert.equal(button.title, 'Retry unblock for @Felixmfdo from this list');
+  assert.equal(followButton.hidden, true);
+  assert.equal(followButton.style.display, 'none');
+
+  button.click();
+  await flushAsyncWork();
+
+  assert.equal(button.dataset.state, 'idle');
+  assert.equal(button.dataset.userCellBlockMode, 'block');
+  assert.equal(button.dataset.userRestId, undefined);
+  assert.equal(button.textContent, 'Block');
+  assert.equal(followButton.hidden, false);
+  assert.equal(followButton.style.display, '');
+  assert.equal(unblockAttempts, 2);
+  assert.equal(requestedUrls.length, 4);
+  assert.equal(requestedUrls[2].url.endsWith('/i/api/1.1/blocks/destroy.json'), true);
+  assert.equal(requestedUrls[3].url.endsWith('/i/api/1.1/blocks/destroy.json'), true);
+});
+
 test('createNativeBlockButton runs the native flow and updates state on success', async (t) => {
   const { documentRef } = createDocumentStub();
   const clickOrder = [];
@@ -2799,6 +3063,8 @@ test('createProfileBlockButton runs the profile native flow and updates state on
 
   assert.deepEqual(clickOrder, ['profile-actions', 'menu', 'confirm']);
   assert.equal(button.dataset.state, 'success');
+  assert.equal(button.hidden, true);
+  assert.equal(button.style.display, 'none');
 });
 
 test('runProfileNativeBlockFlow requires the profile actions button', async () => {

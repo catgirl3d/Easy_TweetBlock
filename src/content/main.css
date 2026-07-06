@@ -124,16 +124,6 @@
 
 [data-easy-tweetblock-button][data-kind="native"][data-surface="profile"][data-display-style="icon"],
 [data-easy-tweetblock-button][data-kind="native"][data-surface="user-cell"][data-display-style="icon"] {
-  border: 1px solid rgb(207, 217, 222);
-  flex: 0 0 var(--etb-hit-size);
-  height: var(--etb-hit-size);
-  line-height: 1;
-  padding: 0;
-  width: var(--etb-hit-size);
-}
-
-[data-easy-tweetblock-button][data-kind="native"][data-surface="profile"][data-display-style="icon"],
-[data-easy-tweetblock-button][data-kind="native"][data-surface="user-cell"][data-display-style="icon"] {
   min-width: var(--etb-hit-size);
 }
 
@@ -209,12 +199,27 @@
   color: rgb(29, 155, 240);
 }
 
-[data-easy-tweetblock-button][data-state="running"] {
+[data-easy-tweetblock-button][data-state="running"],
+[data-easy-tweetblock-button][data-state="running-unblock"] {
   opacity: 0.72;
 }
 
-[data-easy-tweetblock-button][data-kind="native"][data-surface="user-cell"][data-state="success"] {
-  color: red;
+[data-easy-tweetblock-button][data-kind="native"][data-surface="user-cell"][data-state="success"],
+[data-easy-tweetblock-button][data-kind="native"][data-surface="user-cell"][data-state="blocked"],
+[data-easy-tweetblock-button][data-kind="native"][data-surface="user-cell"][data-state="unblock"],
+[data-easy-tweetblock-button][data-kind="native"][data-surface="user-cell"][data-state="running-unblock"] {
+  border-color: rgba(0, 0, 0, 0);
+  background-color: rgb(244, 33, 46);
+  color: rgb(255, 255, 255);
+  margin-right: 0px;
+}
+
+[data-easy-tweetblock-button][data-kind="native"][data-surface="user-cell"][data-state="blocked"]:hover:not(:disabled),
+[data-easy-tweetblock-button][data-kind="native"][data-surface="user-cell"][data-state="unblock"]:hover:not(:disabled),
+[data-easy-tweetblock-button][data-kind="native"][data-surface="user-cell"][data-state="running-unblock"]:hover:not(:disabled) {
+  background: rgb(244, 33, 46);
+  border-color: rgba(0, 0, 0, 0);
+  color: rgb(255, 255, 255);
 }
 
 [data-easy-tweetblock-button][data-easy-tweetblock-action="save-to-list"][data-surface="user-cell"][data-state="listed"],
@@ -223,11 +228,7 @@
   color: rgb(0, 186, 124);
 }
 
-[data-easy-tweetblock-button][data-kind="native"][data-surface="user-cell"][data-state="error"] {
-  border-color: rgba(255, 173, 31, 0.45);
-  color: rgb(255, 173, 31);
-}
-
+[data-easy-tweetblock-button][data-kind="native"][data-surface="user-cell"][data-state="error"],
 [data-easy-tweetblock-button][data-easy-tweetblock-action="save-to-list"][data-surface="user-cell"][data-state="error"] {
   border-color: rgba(255, 173, 31, 0.45);
   color: rgb(255, 173, 31);

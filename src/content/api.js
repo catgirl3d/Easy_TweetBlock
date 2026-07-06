@@ -1237,6 +1237,105 @@
     });
   }
 
+  async function unblockUserByRestIdViaApi(restId, options = {}) {
+    const normalizedRestId = normalizeRestId(restId);
+
+    if (!normalizedRestId) {
+      throw new Error('Unable to resolve a valid user ID for API unblock.');
+    }
+
+    const {
+      documentRef = document,
+      fetchImpl = globalThis.fetch,
+      baseOrigin = documentRef?.location?.origin || 'https://x.com',
+      signal = null,
+      screenName = null
+    } = options;
+    signal?.throwIfAborted?.();
+
+    const unblockPath = '/i/api/1.1/blocks/destroy.json';
+    const requestHeaders = await buildSignedXApiHeaders('POST', unblockPath, {
+      baseOrigin,
+      documentRef,
+      extraHeaders: {
+        'content-type': 'application/x-www-form-urlencoded'
+      },
+      fetchImpl,
+      signal
+    });
+
+    const unblockResponse = await fetchImpl(new URL(unblockPath, baseOrigin).toString(), {
+      method: 'POST',
+      headers: requestHeaders,
+      body: new URLSearchParams({
+        user_id: normalizedRestId
+      }).toString(),
+      credentials: 'include',
+      mode: 'cors',
+      signal
+    });
+
+    if (!unblockResponse.ok) {
+      let responseBody = '';
+
+      try {
+        responseBody = await unblockResponse.text();
+      } catch {
+        responseBody = '';
+      }
+
+      throw new Error(`Unblock API failed with ${unblockResponse.status}${responseBody ? `: ${responseBody.slice(0, 200)}` : ''}`);
+    }
+
+    let payload = null;
+
+    try {
+      payload = await unblockResponse.json();
+    } catch {
+      payload = null;
+    }
+
+    return {
+      payload,
+      restId: normalizedRestId,
+      screenName: namespace.normalizeUsernameForMatching(screenName)
+    };
+  }
+
+  async function unblockUserByScreenNameViaApi(screenName, options = {}) {
+    const normalizedUsername = namespace.normalizeUsernameForMatching(screenName);
+
+    if (!normalizedUsername) {
+      throw new Error('Unable to resolve a valid username for API unblock.');
+    }
+
+    const {
+      documentRef = document,
+      fetchImpl = globalThis.fetch,
+      baseOrigin = documentRef?.location?.origin || 'https://x.com',
+      queryIds = USER_BY_SCREEN_NAME_QUERY_IDS,
+      cache = namespace.getUserRestIdCache(),
+      signal = null
+    } = options;
+    signal?.throwIfAborted?.();
+
+    const restId = await lookupUserRestId(normalizedUsername, {
+      cache,
+      documentRef,
+      fetchImpl,
+      baseOrigin,
+      queryIds,
+      signal
+    });
+    return unblockUserByRestIdViaApi(restId, {
+      baseOrigin,
+      documentRef,
+      fetchImpl,
+      signal,
+      screenName: normalizedUsername
+    });
+  }
+
   async function blockFollowerCandidatesViaApi(candidates, options = {}) {
     const normalizedCandidates = createFollowerBlockCandidates(candidates);
     const normalizedDelayMs = namespace.normalizeBatchBlockDelayMs(options.delayMs);
@@ -1388,10 +1487,12 @@
     FOLLOWING_QUERY_IDS,
     blockFollowerCandidatesViaApi,
     blockUserByRestIdViaApi,
+    unblockUserByRestIdViaApi,
     USER_BY_SCREEN_NAME_FIELD_TOGGLES,
     USER_BY_SCREEN_NAME_FEATURES,
     USER_BY_SCREEN_NAME_QUERY_IDS,
     blockUserByScreenNameViaApi,
+    unblockUserByScreenNameViaApi,
     blockUsernamesViaApi,
     buildFollowersLookupUrls,
     buildUserLookupUrls,

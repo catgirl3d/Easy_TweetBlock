@@ -56,7 +56,6 @@
     'share'
   ]);
   const BLOCK_ICON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><g><path d="M12 3.75c-4.55 0-8.25 3.69-8.25 8.25 0 1.92.66 3.68 1.75 5.08L17.09 5.5C15.68 4.4 13.92 3.75 12 3.75zm6.5 3.17L6.92 18.5c1.4 1.1 3.16 1.75 5.08 1.75 4.56 0 8.25-3.69 8.25-8.25 0-1.92-.65-3.68-1.75-5.08zM1.75 12C1.75 6.34 6.34 1.75 12 1.75S22.25 6.34 22.25 12 17.66 22.25 12 22.25 1.75 17.66 1.75 12z"></path></g></svg>';
-  const SUCCESS_ICON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><g><path d="M9.55 16.94 4.8 12.19l1.77-1.77 2.98 2.98 7.88-7.88 1.77 1.77-9.65 9.65z"></path></g></svg>';
 
   const contentState = namespace.contentState || {
     currentNativeButtonStyle: DEFAULT_PAGE_BLOCK_BUTTON_STYLE,
@@ -343,7 +342,7 @@
     return action === BUTTON_ACTIONS.saveToList ? BUTTON_ACTIONS.saveToList : BUTTON_ACTIONS.block;
   }
 
-  function getButtonLabel(kind, state, action = BUTTON_ACTIONS.block) {
+  function getButtonLabel(kind, state, action = BUTTON_ACTIONS.block, surface = null, mode = null) {
     if (action === BUTTON_ACTIONS.saveToList) {
       if (state === 'running') {
         return 'Adding...';
@@ -364,6 +363,24 @@
       return 'Add';
     }
 
+    if (surface === 'user-cell') {
+      if (state === 'running-unblock') {
+        return 'Unblocking...';
+      }
+
+      if (state === 'blocked') {
+        return 'Blocked';
+      }
+
+      if (state === 'unblock') {
+        return 'Unblock';
+      }
+
+      if (state === 'error' && mode === 'unblock') {
+        return 'Retry unblock';
+      }
+    }
+
     if (state === 'running') {
       return kind === BUTTON_KINDS.api ? 'API...' : 'Blocking...';
     }
@@ -379,7 +396,7 @@
     return kind === BUTTON_KINDS.api ? 'API' : 'Block';
   }
 
-  function getButtonTitle(kind, screenName, state, surface = null, action = BUTTON_ACTIONS.block) {
+  function getButtonTitle(kind, screenName, state, surface = null, action = BUTTON_ACTIONS.block, mode = null) {
     if (action === BUTTON_ACTIONS.saveToList) {
       if (state === 'running') {
         return screenName ? `Adding @${screenName} to the active list` : 'Adding this account to the active list';
@@ -401,15 +418,27 @@
     }
 
     if (surface === 'user-cell') {
+      if (state === 'running-unblock') {
+        return screenName ? `Unblocking @${screenName} from this list` : 'Unblocking this account from this list';
+      }
+
+      if (state === 'unblock') {
+        return screenName ? `Unblock @${screenName} from this list` : 'Unblock this account from this list';
+      }
+
       if (state === 'running') {
         return screenName ? `Blocking @${screenName} from this list` : 'Blocking this account from this list';
       }
 
-      if (state === 'success') {
+      if (state === 'success' || state === 'blocked') {
         return screenName ? `Blocked @${screenName} from this list` : 'Blocked this account from this list';
       }
 
       if (state === 'error') {
+        if (mode === 'unblock') {
+          return screenName ? `Retry unblock for @${screenName} from this list` : 'Retry unblocking this account from this list';
+        }
+
         return screenName ? `Retry block for @${screenName} from this list` : 'Retry blocking this account from this list';
       }
 
@@ -449,23 +478,23 @@
 
   function setButtonState(button, state, screenName, kind = button?.dataset?.kind || BUTTON_KINDS.native) {
     const action = getButtonAction(button);
-    const label = getButtonLabel(kind, state, action);
-    const title = getButtonTitle(kind, screenName, state, button?.dataset?.surface || null, action);
+    const surface = button?.dataset?.surface || null;
+    const mode = button?.dataset?.userCellBlockMode || null;
+    const label = getButtonLabel(kind, state, action, surface, mode);
+    const title = getButtonTitle(kind, screenName, state, surface, action, mode);
     const displayStyle = action === BUTTON_ACTIONS.saveToList
       ? PAGE_BUTTON_STYLES.text
       : kind === BUTTON_KINDS.native
       ? normalizePageButtonStyle(button?.dataset?.displayStyle || contentState.currentNativeButtonStyle)
       : PAGE_BUTTON_STYLES.text;
-    const shouldShowSuccessIcon = action === BUTTON_ACTIONS.block && state === 'success' && button?.dataset?.surface === 'user-cell';
-
     button.dataset.state = state;
     button.dataset.displayStyle = displayStyle;
     button.dataset.screenName = screenName || '';
-    button.disabled = state === 'running' || state === 'success' || state === 'listed';
+    button.disabled = state === 'running' || state === 'running-unblock' || state === 'success' || state === 'listed';
 
     if (displayStyle === PAGE_BUTTON_STYLES.icon) {
       button.textContent = '';
-      button.innerHTML = shouldShowSuccessIcon ? SUCCESS_ICON_SVG : BLOCK_ICON_SVG;
+      button.innerHTML = BLOCK_ICON_SVG;
     } else {
       button.innerHTML = '';
       button.textContent = label;

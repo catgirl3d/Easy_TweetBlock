@@ -378,6 +378,7 @@
       documentRef
     });
     const nativeButton = existingBlockButton || namespace.createUserCellBlockButton?.(userCell, {
+      actionButton,
       documentRef
     });
 
@@ -402,6 +403,7 @@
 
     if (nativeButton) {
       syncUserCellBlockButtonVisibility(nativeButton, actionButton);
+      namespace.syncUserCellNativeActionButtonVisibility?.(nativeButton, actionButton);
     }
 
     if (
@@ -425,6 +427,7 @@
 
     if (nativeButton) {
       syncUserCellBlockButtonVisibility(nativeButton, actionButton);
+      namespace.syncUserCellNativeActionButtonVisibility?.(nativeButton, actionButton);
     }
   }
 
