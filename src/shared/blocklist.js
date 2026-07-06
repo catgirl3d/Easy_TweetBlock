@@ -256,12 +256,24 @@
     return activeList;
   }
 
-  async function setActiveStoredUsernames(usernames, extensionApi = getExtensionApi()) {
-    const normalizedUsernames = normalizeStoredUsernames(usernames);
-    const { activeListId, lists } = await readUsernameListState(extensionApi);
-    const nextLists = lists.map((list) => list.id === activeListId
-      ? { ...list, usernames: normalizedUsernames }
-      : list);
+  async function updateActiveListUsernames(createNextUsernames, extensionApi = getExtensionApi()) {
+    const { activeList, activeListId, lists } = await readUsernameListState(extensionApi);
+    const nextUsernamesValue = createNextUsernames(activeList);
+
+    if (nextUsernamesValue === null) {
+      return {
+        activeList,
+        activeListId,
+        list: activeList,
+        lists,
+        updated: false,
+        usernames: activeList.usernames
+      };
+    }
+
+    const nextUsernames = normalizeStoredUsernames(nextUsernamesValue);
+    const nextList = { ...activeList, usernames: nextUsernames };
+    const nextLists = lists.map((list) => list.id === activeListId ? nextList : list);
     const storageArea = extensionApi?.storage?.local;
 
     await callStorageSet(storageArea, {
@@ -269,7 +281,19 @@
       [USERNAME_LISTS_STORAGE_KEY]: nextLists
     }, extensionApi);
 
-    return normalizedUsernames;
+    return {
+      activeList,
+      activeListId,
+      list: nextList,
+      lists: nextLists,
+      updated: true,
+      usernames: nextUsernames
+    };
+  }
+
+  async function setActiveStoredUsernames(usernames, extensionApi = getExtensionApi()) {
+    const result = await updateActiveListUsernames(() => usernames, extensionApi);
+    return result.usernames;
   }
 
   async function addUsernameToActiveList(username, extensionApi = getExtensionApi()) {
@@ -279,33 +303,28 @@
       throw new Error('Invalid username.');
     }
 
-    const { activeList, activeListId, lists } = await readUsernameListState(extensionApi);
+    const result = await updateActiveListUsernames((activeList) => {
+      if (activeList.usernames.includes(normalizedUsername)) {
+        return null;
+      }
 
-    if (activeList.usernames.includes(normalizedUsername)) {
+      return [...activeList.usernames, normalizedUsername];
+    }, extensionApi);
+
+    if (!result.updated) {
       return {
         added: false,
-        list: activeList,
+        list: result.list,
         username: normalizedUsername,
-        usernames: activeList.usernames
+        usernames: result.usernames
       };
     }
 
-    const nextUsernames = normalizeStoredUsernames([...activeList.usernames, normalizedUsername]);
-    const nextLists = lists.map((list) => list.id === activeListId
-      ? { ...list, usernames: nextUsernames }
-      : list);
-    const storageArea = extensionApi?.storage?.local;
-
-    await callStorageSet(storageArea, {
-      [ACTIVE_USERNAME_LIST_ID_STORAGE_KEY]: activeListId,
-      [USERNAME_LISTS_STORAGE_KEY]: nextLists
-    }, extensionApi);
-
     return {
       added: true,
-      list: { ...activeList, usernames: nextUsernames },
+      list: result.list,
       username: normalizedUsername,
-      usernames: nextUsernames
+      usernames: result.usernames
     };
   }
 
@@ -316,27 +335,20 @@
       throw new Error('Invalid username.');
     }
 
-    const { activeList, activeListId, lists } = await readUsernameListState(extensionApi);
-    const wasListed = activeList.usernames.includes(normalizedUsername);
-    const nextUsernames = wasListed
-      ? activeList.usernames.filter((storedUsername) => storedUsername !== normalizedUsername)
-      : normalizeStoredUsernames([...activeList.usernames, normalizedUsername]);
-    const nextLists = lists.map((list) => list.id === activeListId
-      ? { ...list, usernames: nextUsernames }
-      : list);
-    const storageArea = extensionApi?.storage?.local;
-
-    await callStorageSet(storageArea, {
-      [ACTIVE_USERNAME_LIST_ID_STORAGE_KEY]: activeListId,
-      [USERNAME_LISTS_STORAGE_KEY]: nextLists
+    let wasListed = false;
+    const result = await updateActiveListUsernames((activeList) => {
+      wasListed = activeList.usernames.includes(normalizedUsername);
+      return wasListed
+        ? activeList.usernames.filter((storedUsername) => storedUsername !== normalizedUsername)
+        : [...activeList.usernames, normalizedUsername];
     }, extensionApi);
 
     return {
       added: !wasListed,
       removed: wasListed,
-      list: { ...activeList, usernames: nextUsernames },
+      list: result.list,
       username: normalizedUsername,
-      usernames: nextUsernames
+      usernames: result.usernames
     };
   }
 

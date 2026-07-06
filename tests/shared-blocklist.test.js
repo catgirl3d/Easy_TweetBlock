@@ -251,6 +251,62 @@ test('active list wrappers read, write, switch, add usernames without duplicates
   });
 });
 
+test('active list username mutations persist active id and only update the active list', async () => {
+  const extensionApi = createPromiseExtensionApi({
+    [ACTIVE_USERNAME_LIST_ID_STORAGE_KEY]: 'watchlist',
+    [USERNAME_LISTS_STORAGE_KEY]: [
+      { id: 'blocklist', name: 'Blocklist', usernames: ['alice'] },
+      { id: 'watchlist', name: 'Watchlist', usernames: ['bob'] }
+    ]
+  });
+  const storedPayloads = [];
+  const storageSet = extensionApi.storage.local.set.bind(extensionApi.storage.local);
+  extensionApi.storage.local.set = (payload) => {
+    storedPayloads.push(payload);
+    return storageSet(payload);
+  };
+
+  await setActiveStoredUsernames(['Carol'], extensionApi);
+
+  assert.deepEqual(storedPayloads[0], {
+    [ACTIVE_USERNAME_LIST_ID_STORAGE_KEY]: 'watchlist',
+    [USERNAME_LISTS_STORAGE_KEY]: [
+      { id: 'blocklist', name: 'Blocklist', usernames: ['alice'] },
+      { id: 'watchlist', name: 'Watchlist', usernames: ['carol'] }
+    ]
+  });
+
+  await addUsernameToActiveList('Dana', extensionApi);
+
+  assert.deepEqual(storedPayloads[1], {
+    [ACTIVE_USERNAME_LIST_ID_STORAGE_KEY]: 'watchlist',
+    [USERNAME_LISTS_STORAGE_KEY]: [
+      { id: 'blocklist', name: 'Blocklist', usernames: ['alice'] },
+      { id: 'watchlist', name: 'Watchlist', usernames: ['carol', 'dana'] }
+    ]
+  });
+
+  await addUsernameToActiveList('@Dana', extensionApi);
+
+  assert.equal(storedPayloads.length, 2);
+
+  await toggleUsernameInActiveList('Carol', extensionApi);
+
+  assert.deepEqual(storedPayloads[2], {
+    [ACTIVE_USERNAME_LIST_ID_STORAGE_KEY]: 'watchlist',
+    [USERNAME_LISTS_STORAGE_KEY]: [
+      { id: 'blocklist', name: 'Blocklist', usernames: ['alice'] },
+      { id: 'watchlist', name: 'Watchlist', usernames: ['dana'] }
+    ]
+  });
+  assert.deepEqual(extensionApi.store[USERNAME_LISTS_STORAGE_KEY][0], {
+    id: 'blocklist',
+    name: 'Blocklist',
+    usernames: ['alice']
+  });
+  assert.equal(extensionApi.store[ACTIVE_USERNAME_LIST_ID_STORAGE_KEY], 'watchlist');
+});
+
 test('username list normalization keeps ids unique and cleans names', () => {
   assert.equal(normalizeUsernameListName('  Spam   Team  '), 'Spam Team');
   assert.deepEqual(normalizeUsernameLists([

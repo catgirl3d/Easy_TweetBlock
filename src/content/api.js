@@ -1138,11 +1138,11 @@
     return blockUserByScreenNameViaApi(screenName, options);
   }
 
-  async function blockUserByRestIdViaApi(restId, options = {}) {
+  async function postBlockMutationByRestId(restId, mutationConfig, options = {}) {
     const normalizedRestId = normalizeRestId(restId);
 
     if (!normalizedRestId) {
-      throw new Error('Unable to resolve a valid user ID for API block.');
+      throw new Error(mutationConfig.invalidRestIdErrorMessage);
     }
 
     const {
@@ -1154,8 +1154,7 @@
     } = options;
     signal?.throwIfAborted?.();
 
-    const blockPath = '/i/api/1.1/blocks/create.json';
-    const requestHeaders = await buildSignedXApiHeaders('POST', blockPath, {
+    const requestHeaders = await buildSignedXApiHeaders('POST', mutationConfig.path, {
       baseOrigin,
       documentRef,
       extraHeaders: {
@@ -1165,7 +1164,7 @@
       signal
     });
 
-    const blockResponse = await fetchImpl(new URL(blockPath, baseOrigin).toString(), {
+    const response = await fetchImpl(new URL(mutationConfig.path, baseOrigin).toString(), {
       method: 'POST',
       headers: requestHeaders,
       body: new URLSearchParams({
@@ -1176,22 +1175,22 @@
       signal
     });
 
-    if (!blockResponse.ok) {
+    if (!response.ok) {
       let responseBody = '';
 
       try {
-        responseBody = await blockResponse.text();
+        responseBody = await response.text();
       } catch {
         responseBody = '';
       }
 
-      throw new Error(`Block API failed with ${blockResponse.status}${responseBody ? `: ${responseBody.slice(0, 200)}` : ''}`);
+      throw new Error(`${mutationConfig.failureLabel} with ${response.status}${responseBody ? `: ${responseBody.slice(0, 200)}` : ''}`);
     }
 
     let payload = null;
 
     try {
-      payload = await blockResponse.json();
+      payload = await response.json();
     } catch {
       payload = null;
     }
@@ -1201,139 +1200,70 @@
       restId: normalizedRestId,
       screenName: namespace.normalizeUsernameForMatching(screenName)
     };
+  }
+
+  async function blockUserByRestIdViaApi(restId, options = {}) {
+    return postBlockMutationByRestId(restId, {
+      failureLabel: 'Block API failed',
+      invalidRestIdErrorMessage: 'Unable to resolve a valid user ID for API block.',
+      path: '/i/api/1.1/blocks/create.json'
+    }, options);
+  }
+
+  async function postBlockMutationByScreenName(screenName, mutationConfig, options = {}) {
+    const normalizedUsername = namespace.normalizeUsernameForMatching(screenName);
+
+    if (!normalizedUsername) {
+      throw new Error(mutationConfig.invalidUsernameErrorMessage);
+    }
+
+    const {
+      documentRef = document,
+      fetchImpl = globalThis.fetch,
+      baseOrigin = documentRef?.location?.origin || 'https://x.com',
+      queryIds = USER_BY_SCREEN_NAME_QUERY_IDS,
+      cache = namespace.getUserRestIdCache(),
+      signal = null
+    } = options;
+    signal?.throwIfAborted?.();
+
+    const restId = await lookupUserRestId(normalizedUsername, {
+      cache,
+      documentRef,
+      fetchImpl,
+      baseOrigin,
+      queryIds,
+      signal
+    });
+    return mutationConfig.mutateByRestId(restId, {
+      baseOrigin,
+      documentRef,
+      fetchImpl,
+      signal,
+      screenName: normalizedUsername
+    });
   }
 
   async function blockUserByScreenNameViaApi(screenName, options = {}) {
-    const normalizedUsername = namespace.normalizeUsernameForMatching(screenName);
-
-    if (!normalizedUsername) {
-      throw new Error('Unable to resolve a valid username for API block.');
-    }
-
-    const {
-      documentRef = document,
-      fetchImpl = globalThis.fetch,
-      baseOrigin = documentRef?.location?.origin || 'https://x.com',
-      queryIds = USER_BY_SCREEN_NAME_QUERY_IDS,
-      cache = namespace.getUserRestIdCache(),
-      signal = null
-    } = options;
-    signal?.throwIfAborted?.();
-
-    const restId = await lookupUserRestId(normalizedUsername, {
-      cache,
-      documentRef,
-      fetchImpl,
-      baseOrigin,
-      queryIds,
-      signal
-    });
-    return blockUserByRestIdViaApi(restId, {
-      baseOrigin,
-      documentRef,
-      fetchImpl,
-      signal,
-      screenName: normalizedUsername
-    });
+    return postBlockMutationByScreenName(screenName, {
+      invalidUsernameErrorMessage: 'Unable to resolve a valid username for API block.',
+      mutateByRestId: blockUserByRestIdViaApi
+    }, options);
   }
 
   async function unblockUserByRestIdViaApi(restId, options = {}) {
-    const normalizedRestId = normalizeRestId(restId);
-
-    if (!normalizedRestId) {
-      throw new Error('Unable to resolve a valid user ID for API unblock.');
-    }
-
-    const {
-      documentRef = document,
-      fetchImpl = globalThis.fetch,
-      baseOrigin = documentRef?.location?.origin || 'https://x.com',
-      signal = null,
-      screenName = null
-    } = options;
-    signal?.throwIfAborted?.();
-
-    const unblockPath = '/i/api/1.1/blocks/destroy.json';
-    const requestHeaders = await buildSignedXApiHeaders('POST', unblockPath, {
-      baseOrigin,
-      documentRef,
-      extraHeaders: {
-        'content-type': 'application/x-www-form-urlencoded'
-      },
-      fetchImpl,
-      signal
-    });
-
-    const unblockResponse = await fetchImpl(new URL(unblockPath, baseOrigin).toString(), {
-      method: 'POST',
-      headers: requestHeaders,
-      body: new URLSearchParams({
-        user_id: normalizedRestId
-      }).toString(),
-      credentials: 'include',
-      mode: 'cors',
-      signal
-    });
-
-    if (!unblockResponse.ok) {
-      let responseBody = '';
-
-      try {
-        responseBody = await unblockResponse.text();
-      } catch {
-        responseBody = '';
-      }
-
-      throw new Error(`Unblock API failed with ${unblockResponse.status}${responseBody ? `: ${responseBody.slice(0, 200)}` : ''}`);
-    }
-
-    let payload = null;
-
-    try {
-      payload = await unblockResponse.json();
-    } catch {
-      payload = null;
-    }
-
-    return {
-      payload,
-      restId: normalizedRestId,
-      screenName: namespace.normalizeUsernameForMatching(screenName)
-    };
+    return postBlockMutationByRestId(restId, {
+      failureLabel: 'Unblock API failed',
+      invalidRestIdErrorMessage: 'Unable to resolve a valid user ID for API unblock.',
+      path: '/i/api/1.1/blocks/destroy.json'
+    }, options);
   }
 
   async function unblockUserByScreenNameViaApi(screenName, options = {}) {
-    const normalizedUsername = namespace.normalizeUsernameForMatching(screenName);
-
-    if (!normalizedUsername) {
-      throw new Error('Unable to resolve a valid username for API unblock.');
-    }
-
-    const {
-      documentRef = document,
-      fetchImpl = globalThis.fetch,
-      baseOrigin = documentRef?.location?.origin || 'https://x.com',
-      queryIds = USER_BY_SCREEN_NAME_QUERY_IDS,
-      cache = namespace.getUserRestIdCache(),
-      signal = null
-    } = options;
-    signal?.throwIfAborted?.();
-
-    const restId = await lookupUserRestId(normalizedUsername, {
-      cache,
-      documentRef,
-      fetchImpl,
-      baseOrigin,
-      queryIds,
-      signal
-    });
-    return unblockUserByRestIdViaApi(restId, {
-      baseOrigin,
-      documentRef,
-      fetchImpl,
-      signal,
-      screenName: normalizedUsername
-    });
+    return postBlockMutationByScreenName(screenName, {
+      invalidUsernameErrorMessage: 'Unable to resolve a valid username for API unblock.',
+      mutateByRestId: unblockUserByRestIdViaApi
+    }, options);
   }
 
   async function blockFollowerCandidatesViaApi(candidates, options = {}) {

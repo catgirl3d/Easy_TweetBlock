@@ -625,10 +625,9 @@
     return style;
   }
 
-  function observeStoredUserCellAddButtonVisibility(globalRef = globalThis) {
+  function observeStoredLocalChange(globalRef, storageKey, applyValue) {
     const extensionApi = namespace.getExtensionApi(globalRef);
     const onChangedApi = extensionApi?.storage?.onChanged;
-    const storageKey = namespace.USER_CELL_ADD_BUTTON_VISIBILITY_STORAGE_KEY;
 
     if (!storageKey || !onChangedApi?.addListener) {
       return () => {};
@@ -639,8 +638,7 @@
         return;
       }
 
-      setCurrentUserCellAddButtonVisibility(changes[storageKey]?.newValue);
-      syncUserCellListButtonVisibility(globalRef.document);
+      applyValue(changes[storageKey]?.newValue);
     };
 
     onChangedApi.addListener(handleStorageChange);
@@ -652,31 +650,18 @@
     };
   }
 
-  function observeStoredUserCellAddButtonStyle(globalRef = globalThis) {
-    const extensionApi = namespace.getExtensionApi(globalRef);
-    const onChangedApi = extensionApi?.storage?.onChanged;
-    const storageKey = namespace.USER_CELL_ADD_BUTTON_STYLE_STORAGE_KEY;
-
-    if (!storageKey || !onChangedApi?.addListener) {
-      return () => {};
-    }
-
-    const handleStorageChange = (changes, areaName) => {
-      if (areaName !== 'local' || !Object.prototype.hasOwnProperty.call(changes, storageKey)) {
-        return;
-      }
-
-      setCurrentUserCellAddButtonStyle(changes[storageKey]?.newValue);
+  function observeStoredUserCellAddButtonVisibility(globalRef = globalThis) {
+    return observeStoredLocalChange(globalRef, namespace.USER_CELL_ADD_BUTTON_VISIBILITY_STORAGE_KEY, (newValue) => {
+      setCurrentUserCellAddButtonVisibility(newValue);
       syncUserCellListButtonVisibility(globalRef.document);
-    };
+    });
+  }
 
-    onChangedApi.addListener(handleStorageChange);
-
-    return () => {
-      if (typeof onChangedApi.removeListener === 'function') {
-        onChangedApi.removeListener(handleStorageChange);
-      }
-    };
+  function observeStoredUserCellAddButtonStyle(globalRef = globalThis) {
+    return observeStoredLocalChange(globalRef, namespace.USER_CELL_ADD_BUTTON_STYLE_STORAGE_KEY, (newValue) => {
+      setCurrentUserCellAddButtonStyle(newValue);
+      syncUserCellListButtonVisibility(globalRef.document);
+    });
   }
 
   async function syncUserCellListButtonState(button, activeList = null, options = {}) {
@@ -798,29 +783,10 @@
   }
 
   function observeStoredPageButtonStyle(globalRef = globalThis) {
-    const extensionApi = namespace.getExtensionApi(globalRef);
-    const onChangedApi = extensionApi?.storage?.onChanged;
-
-    if (!onChangedApi?.addListener) {
-      return () => {};
-    }
-
-    const handleStorageChange = (changes, areaName) => {
-      if (areaName !== 'local' || !Object.prototype.hasOwnProperty.call(changes, PAGE_BLOCK_BUTTON_STYLES_STORAGE_KEY)) {
-        return;
-      }
-
-      namespace.setCurrentNativeButtonStyles(changes[PAGE_BLOCK_BUTTON_STYLES_STORAGE_KEY]?.newValue);
+    return observeStoredLocalChange(globalRef, PAGE_BLOCK_BUTTON_STYLES_STORAGE_KEY, (newValue) => {
+      namespace.setCurrentNativeButtonStyles(newValue);
       applyCurrentNativeButtonStyleToDocument(globalRef.document);
-    };
-
-    onChangedApi.addListener(handleStorageChange);
-
-    return () => {
-      if (typeof onChangedApi.removeListener === 'function') {
-        onChangedApi.removeListener(handleStorageChange);
-      }
-    };
+    });
   }
 
   function observeActiveUsernameList(globalRef = globalThis) {

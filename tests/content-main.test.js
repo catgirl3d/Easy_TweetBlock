@@ -33,6 +33,7 @@ const {
   blockUserByRestIdViaApi,
   blockUserByScreenNameViaApi,
   unblockUserByRestIdViaApi,
+  unblockUserByScreenNameViaApi,
   blockUsernamesViaApi,
   buildFollowersLookupUrls,
   buildUserLookupUrls,
@@ -1982,6 +1983,57 @@ test('blockUserByScreenNameViaApi resolves rest_id and posts block request', asy
   assert.equal(requestedUrls[1].options.body, 'user_id=2057563419742486528');
 });
 
+test('unblockUserByScreenNameViaApi resolves rest_id and posts unblock request', async () => {
+  const requestedUrls = [];
+
+  async function fetchImpl(url, options = {}) {
+    requestedUrls.push({ options, url });
+
+    if (options.method === 'POST') {
+      return {
+        ok: true,
+        async json() {
+          return { ok: true };
+        }
+      };
+    }
+
+    return {
+      ok: true,
+      async json() {
+        return {
+          data: {
+            user: {
+              result: {
+                rest_id: '2057563419742486528'
+              }
+            }
+          }
+        };
+      }
+    };
+  }
+
+  const result = await unblockUserByScreenNameViaApi('Felixmfdo', {
+    cache: new Map(),
+    documentRef: {
+      cookie: 'ct0=token123',
+      documentElement: { lang: 'en-US' },
+      location: { origin: 'https://x.com' }
+    },
+    fetchImpl,
+    queryIds: ['workingQueryId']
+  });
+
+  assert.equal(result.restId, '2057563419742486528');
+  assert.equal(result.screenName, 'felixmfdo');
+  assert.equal(requestedUrls.length, 2);
+  assert.equal(requestedUrls[0].url.includes('/workingQueryId/UserByScreenName'), true);
+  assert.equal(requestedUrls[1].url.endsWith('/i/api/1.1/blocks/destroy.json'), true);
+  assert.equal(requestedUrls[1].options.method, 'POST');
+  assert.equal(requestedUrls[1].options.body, 'user_id=2057563419742486528');
+});
+
 test('blockUserByRestIdViaApi posts the block request directly without a lookup', async () => {
   const requestedUrls = [];
 
@@ -2077,6 +2129,43 @@ test('blockUserByRestIdViaApi includes generated x-client-transaction-id when av
   });
 
   assert.equal(requestedHeaders[0]['x-client-transaction-id'], 'generated-transaction-id');
+});
+
+test('unblockUserByRestIdViaApi includes generated x-client-transaction-id when available', async (t) => {
+  const requestedHeaders = [];
+  const originalGenerator = globalThis.EasyTweetBlockContent.tryGenerateXClientTransactionId;
+
+  t.after(() => {
+    globalThis.EasyTweetBlockContent.tryGenerateXClientTransactionId = originalGenerator;
+  });
+
+  globalThis.EasyTweetBlockContent.tryGenerateXClientTransactionId = async (method, path) => {
+    assert.equal(method, 'POST');
+    assert.equal(path, '/i/api/1.1/blocks/destroy.json');
+    return 'generated-unblock-transaction-id';
+  };
+
+  async function fetchImpl(_url, options = {}) {
+    requestedHeaders.push(options.headers || {});
+    return {
+      ok: true,
+      async json() {
+        return { ok: true };
+      }
+    };
+  }
+
+  await unblockUserByRestIdViaApi('2057563419742486528', {
+    documentRef: {
+      cookie: 'ct0=token123',
+      documentElement: { lang: 'en-US' },
+      location: { origin: 'https://x.com' }
+    },
+    fetchImpl,
+    screenName: 'Felixmfdo'
+  });
+
+  assert.equal(requestedHeaders[0]['x-client-transaction-id'], 'generated-unblock-transaction-id');
 });
 
 test('blockUserByScreenNameViaApi tolerates block responses without JSON bodies', async () => {
@@ -2568,6 +2657,67 @@ test('syncStoredUserCellAddButtonStyle and observeStoredUserCellAddButtonStyle u
 
   assert.equal(button.dataset.displayStyle, PAGE_BLOCK_BUTTON_STYLES.icon);
   assert.equal(button.innerHTML.includes('<svg'), true);
+});
+
+test('stored setting observers ignore unrelated changes and unsubscribe listeners', () => {
+  const listeners = new Set();
+  const removedListeners = [];
+  const queryCalls = [];
+  const globalRef = {
+    chrome: {
+      storage: {
+        onChanged: {
+          addListener(listener) {
+            listeners.add(listener);
+          },
+          removeListener(listener) {
+            removedListeners.push(listener);
+            listeners.delete(listener);
+          }
+        }
+      }
+    },
+    document: {
+      querySelectorAll(selector) {
+        queryCalls.push(selector);
+        return [];
+      }
+    }
+  };
+
+  const stopPageButtonStyle = observeStoredPageButtonStyle(globalRef);
+  const stopAddButtonStyle = observeStoredUserCellAddButtonStyle(globalRef);
+  const stopAddButtonVisibility = observeStoredUserCellAddButtonVisibility(globalRef);
+
+  assert.equal(listeners.size, 3);
+
+  for (const listener of listeners) {
+    listener({ unrelated: { newValue: true } }, 'local');
+    listener({
+      [PAGE_BLOCK_BUTTON_STYLES_STORAGE_KEY]: { newValue: DEFAULT_PAGE_BLOCK_BUTTON_STYLES },
+      [USER_CELL_ADD_BUTTON_STYLE_STORAGE_KEY]: { newValue: DEFAULT_USER_CELL_ADD_BUTTON_STYLE },
+      [sharedSettings.USER_CELL_ADD_BUTTON_VISIBILITY_STORAGE_KEY]: { newValue: true }
+    }, 'sync');
+  }
+
+  assert.deepEqual(queryCalls, []);
+
+  for (const listener of listeners) {
+    listener({
+      [PAGE_BLOCK_BUTTON_STYLES_STORAGE_KEY]: { newValue: DEFAULT_PAGE_BLOCK_BUTTON_STYLES },
+      [USER_CELL_ADD_BUTTON_STYLE_STORAGE_KEY]: { newValue: DEFAULT_USER_CELL_ADD_BUTTON_STYLE },
+      [sharedSettings.USER_CELL_ADD_BUTTON_VISIBILITY_STORAGE_KEY]: { newValue: true }
+    }, 'local');
+  }
+
+  assert.equal(queryCalls.length, 3);
+
+  stopPageButtonStyle();
+  stopAddButtonStyle();
+  stopAddButtonVisibility();
+
+  assert.equal(removedListeners.length, 3);
+  assert.equal(listeners.size, 0);
 });
 
 test('normalizeUsernameForMatching lowercases usernames for blocklist checks', () => {
