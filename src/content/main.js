@@ -683,7 +683,7 @@
   }
 
   async function syncUserCellListButtonState(button, activeList = null, options = {}) {
-    if (!button || button.dataset?.state === 'running') {
+    if (!button || button.dataset?.state === 'running' || button.dataset?.state === 'running-remove') {
       return;
     }
 
@@ -733,12 +733,12 @@
       () => {
         const blocklistApi = getBlocklistSharedApi();
 
-        if (!blocklistApi?.addUsernameToActiveList) {
+        if (!blocklistApi?.toggleUsernameInActiveList) {
           throw new Error('Missing shared username list API.');
         }
 
         const extensionApi = getExtensionApiForOptions(options);
-        return blocklistApi.addUsernameToActiveList(screenName, extensionApi).then((result) => {
+        return blocklistApi.toggleUsernameInActiveList(screenName, extensionApi).then((result) => {
           if (result?.list) {
             cacheActiveUsernameList(extensionApi, result.list);
           }
@@ -750,8 +750,11 @@
       'user-cell',
       BUTTON_ACTIONS.saveToList,
       {
+        getRunningState(currentButton) {
+          return currentButton?.dataset?.state === 'listed' ? 'running-remove' : 'running';
+        },
         getSuccessState(result) {
-          return result?.added === false ? 'listed' : 'success';
+          return result?.removed ? 'idle' : 'success';
         }
       }
     );

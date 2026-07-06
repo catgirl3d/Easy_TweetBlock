@@ -432,8 +432,12 @@
         return 'Adding...';
       }
 
+      if (state === 'running-remove') {
+        return 'Removing...';
+      }
+
       if (state === 'listed') {
-        return 'In list';
+        return 'Remove';
       }
 
       if (state === 'success') {
@@ -486,8 +490,12 @@
         return screenName ? `Adding @${screenName} to the active list` : 'Adding this account to the active list';
       }
 
+      if (state === 'running-remove') {
+        return screenName ? `Removing @${screenName} from the active list` : 'Removing this account from the active list';
+      }
+
       if (state === 'listed') {
-        return screenName ? `@${screenName} is already in the active list` : 'This account is already in the active list';
+        return screenName ? `Remove @${screenName} from the active list` : 'Remove this account from the active list';
       }
 
       if (state === 'success') {
@@ -574,12 +582,14 @@
     button.dataset.state = state;
     button.dataset.displayStyle = displayStyle;
     button.dataset.screenName = screenName || '';
-    button.disabled = state === 'running' || state === 'running-unblock' || state === 'success' || state === 'listed';
+    button.disabled = action === BUTTON_ACTIONS.saveToList
+      ? state === 'running' || state === 'running-remove' || state === 'success'
+      : state === 'running' || state === 'running-unblock' || state === 'success' || state === 'listed';
 
     if (displayStyle === PAGE_BUTTON_STYLES.icon) {
       button.textContent = '';
       if (action === BUTTON_ACTIONS.saveToList) {
-        button.innerHTML = (state === 'listed' || state === 'success') ? CHECK_ICON_SVG : ADD_ICON_SVG;
+        button.innerHTML = (state === 'listed' || state === 'running-remove' || state === 'success') ? CHECK_ICON_SVG : ADD_ICON_SVG;
       } else {
         button.innerHTML = BLOCK_ICON_SVG;
       }

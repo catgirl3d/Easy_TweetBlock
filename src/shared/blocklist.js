@@ -435,6 +435,37 @@
     };
   }
 
+  async function toggleUsernameInActiveList(username, extensionApi = getExtensionApi()) {
+    const normalizedUsername = normalizeUsername(username);
+
+    if (!normalizedUsername) {
+      throw new Error('Invalid username.');
+    }
+
+    const { activeList, activeListId, lists } = await readUsernameListState(extensionApi);
+    const wasListed = activeList.usernames.includes(normalizedUsername);
+    const nextUsernames = wasListed
+      ? activeList.usernames.filter((storedUsername) => storedUsername !== normalizedUsername)
+      : normalizeStoredUsernames([...activeList.usernames, normalizedUsername]);
+    const nextLists = lists.map((list) => list.id === activeListId
+      ? { ...list, usernames: nextUsernames }
+      : list);
+    const storageArea = extensionApi?.storage?.local;
+
+    await callStorageSet(storageArea, {
+      [ACTIVE_USERNAME_LIST_ID_STORAGE_KEY]: activeListId,
+      [USERNAME_LISTS_STORAGE_KEY]: nextLists
+    }, extensionApi);
+
+    return {
+      added: !wasListed,
+      removed: wasListed,
+      list: { ...activeList, usernames: nextUsernames },
+      username: normalizedUsername,
+      usernames: nextUsernames
+    };
+  }
+
   async function isUsernameInActiveList(username, extensionApi = getExtensionApi()) {
     const normalizedUsername = normalizeUsername(username);
 
@@ -754,7 +785,8 @@
     setStoredUserCellAddButtonStyle,
     setStoredUserCellAddButtonVisibility,
     setStoredUsernameLists,
-    setStoredUsernames
+    setStoredUsernames,
+    toggleUsernameInActiveList
   };
 
   if (typeof module !== 'undefined') {
