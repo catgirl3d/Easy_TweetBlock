@@ -1507,6 +1507,14 @@
       currentActiveUsernameList = currentUsernameLists.find((list) => list.id === currentActiveUsernameListId) || currentActiveUsernameList;
     }
 
+    function applySavedUsernamesToDraft(savedUsernames) {
+      updateCurrentActiveListUsernames(savedUsernames);
+      textareaElement.value = blocklist.serializeUsernameText(savedUsernames);
+      isUsernameDraftDirty = false;
+      clearUsernameDraft(currentActiveUsernameListId);
+      renderCount(savedUsernames);
+    }
+
     function getSetActiveUsernames() {
       return extensionApi?.storage?.local && typeof blocklist.setActiveStoredUsernames === 'function'
         ? blocklist.setActiveStoredUsernames
@@ -2047,11 +2055,7 @@
           mergeEditedUsernamesWithLatest(baseUsernames, usernames, latestUsernames)
         ));
 
-        updateCurrentActiveListUsernames(savedUsernames);
-        textareaElement.value = blocklist.serializeUsernameText(savedUsernames);
-        isUsernameDraftDirty = false;
-        clearUsernameDraft(currentActiveUsernameListId);
-        renderCount(savedUsernames);
+        applySavedUsernamesToDraft(savedUsernames);
         persistCurrentPopupState();
 
         if (invalidEntries.length) {
@@ -2135,11 +2139,7 @@
         ));
         const targetTab = await findUsableXTab(extensionApi);
 
-        updateCurrentActiveListUsernames(savedUsernames);
-        textareaElement.value = blocklist.serializeUsernameText(savedUsernames);
-        isUsernameDraftDirty = false;
-        clearUsernameDraft(currentActiveUsernameListId);
-        renderCount(savedUsernames);
+        applySavedUsernamesToDraft(savedUsernames);
         persistCurrentPopupState();
 
         if (!targetTab?.id) {
@@ -2605,11 +2605,7 @@
         ...parsedImport.usernames
       ]));
 
-      updateCurrentActiveListUsernames(savedUsernames);
-      textareaElement.value = blocklist.serializeUsernameText(savedUsernames);
-      isUsernameDraftDirty = false;
-      clearUsernameDraft(currentActiveUsernameListId);
-      renderCount(savedUsernames);
+      applySavedUsernamesToDraft(savedUsernames);
       setStatus(`Imported ${parsedImport.usernames.length} username${parsedImport.usernames.length === 1 ? '' : 's'} into ${currentActiveUsernameList?.name || 'the active list'}.${invalidSuffix}`);
       setBusyState();
       persistCurrentPopupState();
@@ -2651,11 +2647,7 @@
           ...scannedUsernames
         ]));
 
-        updateCurrentActiveListUsernames(savedUsernames);
-        textareaElement.value = blocklist.serializeUsernameText(savedUsernames);
-        isUsernameDraftDirty = false;
-        clearUsernameDraft(currentActiveUsernameListId);
-        renderCount(savedUsernames);
+        applySavedUsernamesToDraft(savedUsernames);
         persistCurrentPopupState();
 
         setStatus(`Added ${scannedUsernames.length} usernames to list "${currentActiveUsernameList?.name || 'Blocklist'}".`);

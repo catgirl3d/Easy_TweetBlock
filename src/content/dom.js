@@ -6,7 +6,6 @@
   const namespace = globalThis.EasyTweetBlockContent || (globalThis.EasyTweetBlockContent = {});
   const {
     BLOCK_BUTTON_ATTRIBUTE,
-    BUTTON_ACTION_ATTRIBUTE,
     BUTTON_ACTIONS,
     SELECTORS
   } = namespace;
@@ -60,7 +59,7 @@
     return typeof node.querySelector === 'function' && Boolean(node.querySelector(selector));
   }
 
-  function findManagedButton(rootNode) {
+  function findFirstManagedButton(rootNode, predicate) {
     if (!rootNode) {
       return null;
     }
@@ -68,12 +67,13 @@
     if (
       typeof rootNode.getAttribute === 'function'
       && rootNode.getAttribute(BLOCK_BUTTON_ATTRIBUTE) !== null
+      && (!predicate || predicate(rootNode))
     ) {
       return rootNode;
     }
 
     for (const child of getElementChildren(rootNode)) {
-      const match = findManagedButton(child);
+      const match = findFirstManagedButton(child, predicate);
 
       if (match) {
         return match;
@@ -81,42 +81,26 @@
     }
 
     return null;
+  }
+
+  function findManagedButton(rootNode) {
+    return findFirstManagedButton(rootNode, null);
   }
 
   function readManagedButtonAction(button) {
-    const action = button?.getAttribute?.(BUTTON_ACTION_ATTRIBUTE)
-      || button?.dataset?.easyTweetblockAction
-      || button?.dataset?.action;
-
-    if (action === BUTTON_ACTIONS?.saveToList) {
+    if (namespace.getButtonAction(button) === BUTTON_ACTIONS.saveToList) {
       return BUTTON_ACTIONS.saveToList;
     }
 
-    return button?.getAttribute?.(BLOCK_BUTTON_ATTRIBUTE) !== null ? BUTTON_ACTIONS?.block : null;
+    return button?.getAttribute?.(BLOCK_BUTTON_ATTRIBUTE) !== null ? BUTTON_ACTIONS.block : null;
   }
 
   function findManagedButtonByAction(rootNode, action) {
-    if (!rootNode || !action) {
+    if (!action) {
       return null;
     }
 
-    if (
-      typeof rootNode.getAttribute === 'function'
-      && rootNode.getAttribute(BLOCK_BUTTON_ATTRIBUTE) !== null
-      && readManagedButtonAction(rootNode) === action
-    ) {
-      return rootNode;
-    }
-
-    for (const child of getElementChildren(rootNode)) {
-      const match = findManagedButtonByAction(child, action);
-
-      if (match) {
-        return match;
-      }
-    }
-
-    return null;
+    return findFirstManagedButton(rootNode, (node) => readManagedButtonAction(node) === action);
   }
 
   function findActionRowContainer(caretButton, tweet) {
@@ -423,11 +407,6 @@
 
     if (listButton) {
       actionWrapper.insertBefore(listButton, nativeButton || actionButton);
-    }
-
-    if (nativeButton) {
-      syncUserCellBlockButtonVisibility(nativeButton, actionButton);
-      namespace.syncUserCellNativeActionButtonVisibility?.(nativeButton, actionButton);
     }
   }
 
