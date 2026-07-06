@@ -149,10 +149,6 @@
     return normalizedStyle;
   }
 
-  const PAGE_BUTTON_STYLES = PAGE_BLOCK_BUTTON_STYLES;
-  const normalizePageButtonStyle = normalizePageBlockButtonStyle;
-  const normalizePageButtonStyles = normalizePageBlockButtonStyles;
-
   const settingsApi = {
     BATCH_BLOCK_DELAY_MS_STORAGE_KEY,
     DEFAULT_BATCH_BLOCK_DELAY_MS,
@@ -164,7 +160,6 @@
     MIN_BATCH_BLOCK_DELAY_MS,
     PAGE_BLOCK_BUTTON_STYLES,
     PAGE_BLOCK_BUTTON_STYLES_STORAGE_KEY,
-    PAGE_BUTTON_STYLES,
     PAGE_BUTTON_STYLE_SURFACES,
     USER_CELL_ADD_BUTTON_STYLE_STORAGE_KEY,
     USER_CELL_ADD_BUTTON_VISIBILITY_STORAGE_KEY,
@@ -175,9 +170,7 @@
     normalizeBatchBlockDelayMs,
     normalizePageBlockButtonStyle,
     normalizePageBlockButtonStyles,
-    normalizePageButtonStyle,
     normalizePageButtonStyleSurface,
-    normalizePageButtonStyles,
     normalizeUserCellAddButtonVisibility,
     setStoredBatchBlockDelayMs,
     setStoredPageBlockButtonStyles,

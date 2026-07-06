@@ -20,7 +20,7 @@ const {
   MESSAGE_TYPES,
   MIN_BATCH_BLOCK_DELAY_MS,
   PAGE_BLOCK_BUTTON_STYLES_STORAGE_KEY,
-  PAGE_BUTTON_STYLES,
+  PAGE_BLOCK_BUTTON_STYLES,
   PAGE_BUTTON_STYLE_SURFACES,
   USER_CELL_ADD_BUTTON_STYLE_STORAGE_KEY,
   SELECTORS,
@@ -64,8 +64,8 @@ const {
   lookupUserRestId,
   normalizeBatchBlockDelayMs,
   normalizeFollowerBlockCandidate,
-  normalizePageButtonStyle,
-  normalizePageButtonStyles,
+  normalizePageBlockButtonStyle,
+  normalizePageBlockButtonStyles,
   normalizeUsernameForMatching,
   observeStoredPageButtonStyle,
   observeStoredUserCellAddButtonStyle,
@@ -765,7 +765,7 @@ test('setButtonState updates the visible label and accessibility metadata', () =
   const attributes = {};
   const button = {
     dataset: {
-      displayStyle: PAGE_BUTTON_STYLES.text,
+      displayStyle: PAGE_BLOCK_BUTTON_STYLES.text,
       kind: BUTTON_KINDS.native
     },
     disabled: false,
@@ -817,7 +817,7 @@ test('setButtonState uses list-specific titles for user cell buttons', () => {
   const attributes = {};
   const button = {
     dataset: {
-      displayStyle: PAGE_BUTTON_STYLES.text,
+      displayStyle: PAGE_BLOCK_BUTTON_STYLES.text,
       kind: BUTTON_KINDS.native,
       surface: 'user-cell',
       userCellBlockMode: 'block'
@@ -854,7 +854,7 @@ test('setButtonState uses list-specific titles for user cell buttons', () => {
 });
 
 test('setButtonState renders save-to-list labels and keeps listed buttons clickable for removal', () => {
-  setCurrentUserCellAddButtonStyle(PAGE_BUTTON_STYLES.text);
+  setCurrentUserCellAddButtonStyle(PAGE_BLOCK_BUTTON_STYLES.text);
   const attributes = {
     'data-easy-tweetblock-action': BUTTON_ACTIONS.saveToList
   };
@@ -905,7 +905,7 @@ test('setButtonState renders save-to-list icons (plus and checkmark) in icon mod
   const button = {
     dataset: {
       easyTweetblockAction: BUTTON_ACTIONS.saveToList,
-      displayStyle: PAGE_BUTTON_STYLES.icon,
+      displayStyle: PAGE_BLOCK_BUTTON_STYLES.icon,
       surface: 'user-cell'
     },
     disabled: false,
@@ -941,7 +941,7 @@ test('setButtonState renders save-to-list icons (plus and checkmark) in icon mod
 test('setButtonState keeps the block icon for user-cell success states in icon mode', () => {
   const button = {
     dataset: {
-      displayStyle: PAGE_BUTTON_STYLES.icon,
+      displayStyle: PAGE_BLOCK_BUTTON_STYLES.icon,
       kind: BUTTON_KINDS.native,
       surface: 'user-cell'
     },
@@ -965,7 +965,7 @@ test('setButtonState keeps the block icon for user-cell success states in icon m
 test('setButtonState keeps the block icon for non-list native buttons after success', () => {
   const button = {
     dataset: {
-      displayStyle: PAGE_BUTTON_STYLES.icon,
+      displayStyle: PAGE_BLOCK_BUTTON_STYLES.icon,
       kind: BUTTON_KINDS.native,
       surface: 'tweet'
     },
@@ -2372,10 +2372,10 @@ test('content sleep delegates to the shared followers sleep helper', async (t) =
   assert.deepEqual(calls, [{ delayMs: 25, setTimeoutImpl }]);
 });
 
-test('normalizePageButtonStyle defaults to icon and accepts the text variant', () => {
-  assert.equal(normalizePageButtonStyle(undefined), DEFAULT_PAGE_BLOCK_BUTTON_STYLE);
-  assert.equal(normalizePageButtonStyle('text'), PAGE_BUTTON_STYLES.text);
-  assert.equal(normalizePageButtonStyle('something-else'), PAGE_BUTTON_STYLES.icon);
+test('normalizePageBlockButtonStyle defaults to icon and accepts the text variant', () => {
+  assert.equal(normalizePageBlockButtonStyle(undefined), DEFAULT_PAGE_BLOCK_BUTTON_STYLE);
+  assert.equal(normalizePageBlockButtonStyle('text'), PAGE_BLOCK_BUTTON_STYLES.text);
+  assert.equal(normalizePageBlockButtonStyle('something-else'), PAGE_BLOCK_BUTTON_STYLES.icon);
 });
 
 test('syncStoredPageButtonStyle and observeStoredPageButtonStyle apply saved native button styles per surface', async () => {
@@ -2414,9 +2414,9 @@ test('syncStoredPageButtonStyle and observeStoredPageButtonStyle apply saved nat
           get(_keys, callback) {
             callback({
               [PAGE_BLOCK_BUTTON_STYLES_STORAGE_KEY]: {
-                [PAGE_BUTTON_STYLE_SURFACES.tweet]: PAGE_BUTTON_STYLES.text,
-                [PAGE_BUTTON_STYLE_SURFACES.profile]: PAGE_BUTTON_STYLES.icon,
-                [PAGE_BUTTON_STYLE_SURFACES.userCell]: PAGE_BUTTON_STYLES.text
+                [PAGE_BUTTON_STYLE_SURFACES.tweet]: PAGE_BLOCK_BUTTON_STYLES.text,
+                [PAGE_BUTTON_STYLE_SURFACES.profile]: PAGE_BLOCK_BUTTON_STYLES.icon,
+                [PAGE_BUTTON_STYLE_SURFACES.userCell]: PAGE_BLOCK_BUTTON_STYLES.text
               }
             });
           }
@@ -2439,29 +2439,29 @@ test('syncStoredPageButtonStyle and observeStoredPageButtonStyle apply saved nat
   };
 
   await syncStoredPageButtonStyle(globalRef);
-  assert.equal(tweetButton.dataset.displayStyle, PAGE_BUTTON_STYLES.text);
+  assert.equal(tweetButton.dataset.displayStyle, PAGE_BLOCK_BUTTON_STYLES.text);
   assert.equal(tweetButton.textContent, 'Block');
-  assert.equal(profileButton.dataset.displayStyle, PAGE_BUTTON_STYLES.icon);
+  assert.equal(profileButton.dataset.displayStyle, PAGE_BLOCK_BUTTON_STYLES.icon);
   assert.equal(profileButton.innerHTML.includes('<svg'), true);
-  assert.equal(userCellButton.dataset.displayStyle, PAGE_BUTTON_STYLES.text);
+  assert.equal(userCellButton.dataset.displayStyle, PAGE_BLOCK_BUTTON_STYLES.text);
   assert.equal(userCellButton.textContent, 'Block');
 
   observeStoredPageButtonStyle(globalRef);
   listeners[0]({
     [PAGE_BLOCK_BUTTON_STYLES_STORAGE_KEY]: {
       newValue: {
-        [PAGE_BUTTON_STYLE_SURFACES.tweet]: PAGE_BUTTON_STYLES.icon,
-        [PAGE_BUTTON_STYLE_SURFACES.profile]: PAGE_BUTTON_STYLES.text,
-        [PAGE_BUTTON_STYLE_SURFACES.userCell]: PAGE_BUTTON_STYLES.icon
+        [PAGE_BUTTON_STYLE_SURFACES.tweet]: PAGE_BLOCK_BUTTON_STYLES.icon,
+        [PAGE_BUTTON_STYLE_SURFACES.profile]: PAGE_BLOCK_BUTTON_STYLES.text,
+        [PAGE_BUTTON_STYLE_SURFACES.userCell]: PAGE_BLOCK_BUTTON_STYLES.icon
       }
     }
   }, 'local');
 
-  assert.equal(tweetButton.dataset.displayStyle, PAGE_BUTTON_STYLES.icon);
+  assert.equal(tweetButton.dataset.displayStyle, PAGE_BLOCK_BUTTON_STYLES.icon);
   assert.equal(tweetButton.innerHTML.includes('<svg'), true);
-  assert.equal(profileButton.dataset.displayStyle, PAGE_BUTTON_STYLES.text);
+  assert.equal(profileButton.dataset.displayStyle, PAGE_BLOCK_BUTTON_STYLES.text);
   assert.equal(profileButton.textContent, 'Block');
-  assert.equal(userCellButton.dataset.displayStyle, PAGE_BUTTON_STYLES.icon);
+  assert.equal(userCellButton.dataset.displayStyle, PAGE_BLOCK_BUTTON_STYLES.icon);
   assert.equal(userCellButton.innerHTML.includes('<svg'), true);
 });
 
@@ -2536,7 +2536,7 @@ test('syncStoredUserCellAddButtonStyle and observeStoredUserCellAddButtonStyle u
         local: {
           get(_keys, callback) {
             callback({
-              [USER_CELL_ADD_BUTTON_STYLE_STORAGE_KEY]: PAGE_BUTTON_STYLES.text
+              [USER_CELL_ADD_BUTTON_STYLE_STORAGE_KEY]: PAGE_BLOCK_BUTTON_STYLES.text
             });
           }
         },
@@ -2556,17 +2556,17 @@ test('syncStoredUserCellAddButtonStyle and observeStoredUserCellAddButtonStyle u
   };
 
   await syncStoredUserCellAddButtonStyle(globalRef);
-  assert.equal(button.dataset.displayStyle, PAGE_BUTTON_STYLES.text);
+  assert.equal(button.dataset.displayStyle, PAGE_BLOCK_BUTTON_STYLES.text);
   assert.equal(button.textContent, 'Add');
 
   observeStoredUserCellAddButtonStyle(globalRef);
   listeners[0]({
     [USER_CELL_ADD_BUTTON_STYLE_STORAGE_KEY]: {
-      newValue: PAGE_BUTTON_STYLES.icon
+      newValue: PAGE_BLOCK_BUTTON_STYLES.icon
     }
   }, 'local');
 
-  assert.equal(button.dataset.displayStyle, PAGE_BUTTON_STYLES.icon);
+  assert.equal(button.dataset.displayStyle, PAGE_BLOCK_BUTTON_STYLES.icon);
   assert.equal(button.innerHTML.includes('<svg'), true);
 });
 
@@ -2591,14 +2591,14 @@ test('attachButtonToTweet inserts the native button into the first action wrappe
   const { caretButton, leadingAction, leadingActionButton, localButtonGroup, parentElement, tweetNode } = createTweetNode();
 
   useGlobalOverrides(t, { document: documentRef });
-  setCurrentNativeButtonStyle(PAGE_BUTTON_STYLES.icon);
+  setCurrentNativeButtonStyle(PAGE_BLOCK_BUTTON_STYLES.icon);
 
   attachButtonToTweet(tweetNode);
 
   assert.equal(createdElements.length, 1);
   assert.equal(parentElement.children[0], leadingAction);
   assert.equal(leadingAction.children[0].dataset.kind, BUTTON_KINDS.native);
-  assert.equal(leadingAction.children[0].dataset.displayStyle, PAGE_BUTTON_STYLES.icon);
+  assert.equal(leadingAction.children[0].dataset.displayStyle, PAGE_BLOCK_BUTTON_STYLES.icon);
   assert.equal(leadingAction.children[0].innerHTML.includes('<svg'), true);
   assert.equal(leadingAction.children[1], leadingActionButton);
   assert.equal(parentElement.children[1].querySelector('button'), caretButton);
@@ -2643,7 +2643,7 @@ test('attachButtonToProfilePage inserts the native button before the profile act
   const { actionBar, createdElements, documentRef, moreButton, messageButton } = createProfilePageDocument('281v6s1b5z51');
 
   useGlobalOverrides(t, { document: documentRef });
-  setCurrentNativeButtonStyle(PAGE_BUTTON_STYLES.icon);
+  setCurrentNativeButtonStyle(PAGE_BLOCK_BUTTON_STYLES.icon);
 
   attachButtonToProfilePage(documentRef);
 
@@ -2663,7 +2663,7 @@ test('attachButtonToUserCell inserts list and block buttons into the follow acti
   const { actionRow, followButton, followButtonWrapper, userCell } = createUserCellNode('Milana62234788');
 
   useGlobalOverrides(t, { document: documentRef });
-  setCurrentNativeButtonStyle(PAGE_BUTTON_STYLES.icon);
+  setCurrentNativeButtonStyle(PAGE_BLOCK_BUTTON_STYLES.icon);
 
   attachButtonToUserCell(userCell, documentRef);
 
@@ -2715,9 +2715,9 @@ test('new native block buttons use the configured style for each surface on crea
 
   useGlobalOverrides(t, { document: documentRef });
   setCurrentNativeButtonStyles({
-    [PAGE_BUTTON_STYLE_SURFACES.tweet]: PAGE_BUTTON_STYLES.text,
-    [PAGE_BUTTON_STYLE_SURFACES.profile]: PAGE_BUTTON_STYLES.icon,
-    [PAGE_BUTTON_STYLE_SURFACES.userCell]: PAGE_BUTTON_STYLES.text
+    [PAGE_BUTTON_STYLE_SURFACES.tweet]: PAGE_BLOCK_BUTTON_STYLES.text,
+    [PAGE_BUTTON_STYLE_SURFACES.profile]: PAGE_BLOCK_BUTTON_STYLES.icon,
+    [PAGE_BUTTON_STYLE_SURFACES.userCell]: PAGE_BLOCK_BUTTON_STYLES.text
   });
   t.after(() => {
     setCurrentNativeButtonStyles(DEFAULT_PAGE_BLOCK_BUTTON_STYLES);
@@ -2729,11 +2729,11 @@ test('new native block buttons use the configured style for each surface on crea
     actionButton: followButton
   });
 
-  assert.equal(tweetButton.dataset.displayStyle, PAGE_BUTTON_STYLES.text);
+  assert.equal(tweetButton.dataset.displayStyle, PAGE_BLOCK_BUTTON_STYLES.text);
   assert.equal(tweetButton.textContent, 'Block');
-  assert.equal(profileButton.dataset.displayStyle, PAGE_BUTTON_STYLES.icon);
+  assert.equal(profileButton.dataset.displayStyle, PAGE_BLOCK_BUTTON_STYLES.icon);
   assert.equal(profileButton.innerHTML.includes('<svg'), true);
-  assert.equal(userCellButton.dataset.displayStyle, PAGE_BUTTON_STYLES.text);
+  assert.equal(userCellButton.dataset.displayStyle, PAGE_BLOCK_BUTTON_STYLES.text);
   assert.equal(userCellButton.textContent, 'Block');
 });
 
@@ -2750,7 +2750,7 @@ test('createUserCellListButton toggles the username in the active list on repeat
   });
 
   useGlobalOverrides(t, { document: documentRef });
-  setCurrentUserCellAddButtonStyle(PAGE_BUTTON_STYLES.text);
+  setCurrentUserCellAddButtonStyle(PAGE_BLOCK_BUTTON_STYLES.text);
   t.after(() => {
     setCurrentUserCellAddButtonStyle(DEFAULT_USER_CELL_ADD_BUTTON_STYLE);
   });
@@ -2793,7 +2793,7 @@ test('createUserCellListButton uses the configured Add button icon on creation a
   });
 
   useGlobalOverrides(t, { document: documentRef });
-  setCurrentUserCellAddButtonStyle(PAGE_BUTTON_STYLES.icon);
+  setCurrentUserCellAddButtonStyle(PAGE_BLOCK_BUTTON_STYLES.icon);
   t.after(() => {
     setCurrentUserCellAddButtonStyle(DEFAULT_USER_CELL_ADD_BUTTON_STYLE);
   });
@@ -2803,7 +2803,7 @@ test('createUserCellListButton uses the configured Add button icon on creation a
     extensionApi
   });
 
-  assert.equal(button.dataset.displayStyle, PAGE_BUTTON_STYLES.icon);
+  assert.equal(button.dataset.displayStyle, PAGE_BLOCK_BUTTON_STYLES.icon);
   assert.equal(button.textContent, '');
   assert.equal(button.innerHTML.includes('M11.25 4.75'), true);
 
@@ -2829,7 +2829,7 @@ test('createUserCellListButton keeps remove retry semantics when removal fails',
   });
 
   useGlobalOverrides(t, { document: documentRef });
-  setCurrentUserCellAddButtonStyle(PAGE_BUTTON_STYLES.text);
+  setCurrentUserCellAddButtonStyle(PAGE_BLOCK_BUTTON_STYLES.text);
   t.after(() => {
     setCurrentUserCellAddButtonStyle(DEFAULT_USER_CELL_ADD_BUTTON_STYLE);
   });
@@ -2875,7 +2875,7 @@ test('createUserCellListButton shares the initial active-list storage read', asy
   };
 
   useGlobalOverrides(t, { document: documentRef });
-  setCurrentUserCellAddButtonStyle(PAGE_BUTTON_STYLES.text);
+  setCurrentUserCellAddButtonStyle(PAGE_BLOCK_BUTTON_STYLES.text);
   t.after(() => {
     setCurrentUserCellAddButtonStyle(DEFAULT_USER_CELL_ADD_BUTTON_STYLE);
   });
@@ -2951,7 +2951,7 @@ test('processNode promotes nested follow-button mutations back to the parent use
   const { actionRow, followButton, followButtonWrapper, userCell } = createUserCellNode('Milana62234788');
 
   useGlobalOverrides(t, { document: documentRef });
-  setCurrentNativeButtonStyle(PAGE_BUTTON_STYLES.icon);
+  setCurrentNativeButtonStyle(PAGE_BLOCK_BUTTON_STYLES.icon);
 
   processNode(followButton, documentRef);
 
@@ -3046,9 +3046,9 @@ test('createUserCellBlockButton supports unblock and restores the native follow 
   const requestedUrls = [];
 
   useGlobalOverrides(t, { document: documentRef });
-  setCurrentNativeButtonStyle(PAGE_BUTTON_STYLES.text);
+  setCurrentNativeButtonStyle(PAGE_BLOCK_BUTTON_STYLES.text);
   t.after(() => {
-    setCurrentNativeButtonStyle(PAGE_BUTTON_STYLES.icon);
+    setCurrentNativeButtonStyle(PAGE_BLOCK_BUTTON_STYLES.icon);
   });
 
   const button = createUserCellBlockButton(userCell, {
@@ -3122,9 +3122,9 @@ test('createUserCellBlockButton refuses to unblock when the user cell now shows 
   const requestedUrls = [];
 
   useGlobalOverrides(t, { document: documentRef });
-  setCurrentNativeButtonStyle(PAGE_BUTTON_STYLES.text);
+  setCurrentNativeButtonStyle(PAGE_BLOCK_BUTTON_STYLES.text);
   t.after(() => {
-    setCurrentNativeButtonStyle(PAGE_BUTTON_STYLES.icon);
+    setCurrentNativeButtonStyle(PAGE_BLOCK_BUTTON_STYLES.icon);
   });
 
   const button = createUserCellBlockButton(userCell, {
@@ -3202,10 +3202,10 @@ test('createUserCellBlockButton retries a failed unblock without restoring follo
   let unblockAttempts = 0;
 
   useGlobalOverrides(t, { document: documentRef });
-  setCurrentNativeButtonStyle(PAGE_BUTTON_STYLES.text);
+  setCurrentNativeButtonStyle(PAGE_BLOCK_BUTTON_STYLES.text);
   console.error = () => {};
   t.after(() => {
-    setCurrentNativeButtonStyle(PAGE_BUTTON_STYLES.icon);
+    setCurrentNativeButtonStyle(PAGE_BLOCK_BUTTON_STYLES.icon);
     console.error = originalError;
   });
 
@@ -3689,9 +3689,9 @@ test('init installs styles, registers runtime messaging, and observes added twee
           get(_keys, callback) {
             callback({
               [PAGE_BLOCK_BUTTON_STYLES_STORAGE_KEY]: {
-                [PAGE_BUTTON_STYLE_SURFACES.tweet]: PAGE_BUTTON_STYLES.text,
-                [PAGE_BUTTON_STYLE_SURFACES.profile]: PAGE_BUTTON_STYLES.text,
-                [PAGE_BUTTON_STYLE_SURFACES.userCell]: PAGE_BUTTON_STYLES.text
+                [PAGE_BUTTON_STYLE_SURFACES.tweet]: PAGE_BLOCK_BUTTON_STYLES.text,
+                [PAGE_BUTTON_STYLE_SURFACES.profile]: PAGE_BLOCK_BUTTON_STYLES.text,
+                [PAGE_BUTTON_STYLE_SURFACES.userCell]: PAGE_BLOCK_BUTTON_STYLES.text
               }
             });
           }
@@ -3725,7 +3725,7 @@ test('init installs styles, registers runtime messaging, and observes added twee
 
     assert.equal(parentElement.children[0], leadingAction);
     assert.equal(leadingAction.children[0].dataset.kind, BUTTON_KINDS.native);
-    assert.equal(leadingAction.children[0].dataset.displayStyle, PAGE_BUTTON_STYLES.text);
+    assert.equal(leadingAction.children[0].dataset.displayStyle, PAGE_BLOCK_BUTTON_STYLES.text);
     assert.equal(leadingAction.children[0].textContent, 'Block');
     assert.equal(parentElement.children[1].querySelector('button'), caretButton);
     assert.equal(localButtonGroup.children[0], caretButton);

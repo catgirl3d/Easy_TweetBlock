@@ -29,9 +29,6 @@
     normalizePageButtonStyleSurface,
     normalizeUserCellAddButtonVisibility
   } = settingsApi;
-  const PAGE_BUTTON_STYLES = settingsApi.PAGE_BUTTON_STYLES || PAGE_BLOCK_BUTTON_STYLES;
-  const normalizePageButtonStyle = settingsApi.normalizePageButtonStyle || normalizePageBlockButtonStyle;
-  const normalizePageButtonStyles = settingsApi.normalizePageButtonStyles || normalizePageBlockButtonStyles;
 
   const SELECTORS = Object.freeze({
     tweet: 'article[data-testid="tweet"]',
@@ -88,10 +85,10 @@
     userRestIdCache: new Map()
   };
 
-  contentState.currentNativeButtonStyles = normalizePageButtonStyles(
+  contentState.currentNativeButtonStyles = normalizePageBlockButtonStyles(
     contentState.currentNativeButtonStyles || DEFAULT_PAGE_BLOCK_BUTTON_STYLES
   );
-  contentState.currentUserCellAddButtonStyle = normalizePageButtonStyle(
+  contentState.currentUserCellAddButtonStyle = normalizePageBlockButtonStyle(
     contentState.currentUserCellAddButtonStyle || DEFAULT_USER_CELL_ADD_BUTTON_STYLE
   );
 
@@ -233,34 +230,34 @@
 
   function getCurrentNativeButtonStyle(surface = PAGE_BUTTON_STYLE_SURFACES.tweet) {
     const normalizedSurface = normalizePageButtonStyleSurface(surface);
-    return normalizePageButtonStyle(contentState.currentNativeButtonStyles?.[normalizedSurface]);
+    return normalizePageBlockButtonStyle(contentState.currentNativeButtonStyles?.[normalizedSurface]);
   }
 
   function setCurrentNativeButtonStyles(styles) {
-    contentState.currentNativeButtonStyles = normalizePageButtonStyles(styles);
+    contentState.currentNativeButtonStyles = normalizePageBlockButtonStyles(styles);
     return getCurrentNativeButtonStyles();
   }
 
   function setCurrentNativeButtonStyle(style, surface = null) {
     if (surface) {
       const normalizedSurface = normalizePageButtonStyleSurface(surface);
-      contentState.currentNativeButtonStyles = normalizePageButtonStyles({
+      contentState.currentNativeButtonStyles = normalizePageBlockButtonStyles({
         ...contentState.currentNativeButtonStyles,
         [normalizedSurface]: style
       });
       return getCurrentNativeButtonStyle(normalizedSurface);
     }
 
-    contentState.currentNativeButtonStyles = normalizePageButtonStyles(style);
+    contentState.currentNativeButtonStyles = normalizePageBlockButtonStyles(style);
     return getCurrentNativeButtonStyles();
   }
 
   function getCurrentUserCellAddButtonStyle() {
-    return normalizePageButtonStyle(contentState.currentUserCellAddButtonStyle);
+    return normalizePageBlockButtonStyle(contentState.currentUserCellAddButtonStyle);
   }
 
   function setCurrentUserCellAddButtonStyle(style) {
-    contentState.currentUserCellAddButtonStyle = normalizePageButtonStyle(style);
+    contentState.currentUserCellAddButtonStyle = normalizePageBlockButtonStyle(style);
     return contentState.currentUserCellAddButtonStyle;
   }
 
@@ -518,10 +515,10 @@
     const label = getButtonLabel(kind, state, action, surface, mode);
     const title = getButtonTitle(kind, screenName, state, surface, action, mode);
     const displayStyle = action === BUTTON_ACTIONS.saveToList
-      ? normalizePageButtonStyle(button?.dataset?.displayStyle || getCurrentUserCellAddButtonStyle())
+      ? normalizePageBlockButtonStyle(button?.dataset?.displayStyle || getCurrentUserCellAddButtonStyle())
       : kind === BUTTON_KINDS.native
-      ? normalizePageButtonStyle(button?.dataset?.displayStyle || getCurrentNativeButtonStyle(surface))
-      : PAGE_BUTTON_STYLES.text;
+      ? normalizePageBlockButtonStyle(button?.dataset?.displayStyle || getCurrentNativeButtonStyle(surface))
+      : PAGE_BLOCK_BUTTON_STYLES.text;
     button.dataset.state = state;
     button.dataset.displayStyle = displayStyle;
     button.dataset.screenName = screenName || '';
@@ -529,7 +526,7 @@
       ? state === 'running' || state === 'running-remove' || state === 'success'
       : state === 'running' || state === 'running-unblock' || state === 'success' || state === 'listed';
 
-    if (displayStyle === PAGE_BUTTON_STYLES.icon) {
+    if (displayStyle === PAGE_BLOCK_BUTTON_STYLES.icon) {
       button.textContent = '';
       if (action === BUTTON_ACTIONS.saveToList) {
         button.innerHTML = (state === 'listed' || state === 'running-remove' || state === 'error-remove' || state === 'success') ? CHECK_ICON_SVG : ADD_ICON_SVG;
@@ -560,7 +557,6 @@
     MIN_BATCH_BLOCK_DELAY_MS,
     PAGE_BLOCK_BUTTON_STYLES,
     PAGE_BLOCK_BUTTON_STYLES_STORAGE_KEY,
-    PAGE_BUTTON_STYLES,
     PAGE_BUTTON_STYLE_SURFACES,
     USER_CELL_ADD_BUTTON_STYLE_STORAGE_KEY,
     USER_CELL_ADD_BUTTON_VISIBILITY_STORAGE_KEY,
@@ -589,8 +585,6 @@
     normalizeBatchBlockDelayMs,
     normalizePageBlockButtonStyle,
     normalizePageBlockButtonStyles,
-    normalizePageButtonStyle,
-    normalizePageButtonStyles,
     normalizePageButtonStyleSurface,
     normalizeUserCellAddButtonVisibility,
     normalizeUsernameForMatching,

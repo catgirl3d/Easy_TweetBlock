@@ -41,8 +41,8 @@
     MAX_BATCH_BLOCK_DELAY_MS,
     MESSAGE_TYPES,
     MIN_BATCH_BLOCK_DELAY_MS,
+    PAGE_BLOCK_BUTTON_STYLES,
     PAGE_BLOCK_BUTTON_STYLES_STORAGE_KEY,
-    PAGE_BUTTON_STYLES,
     PAGE_BUTTON_STYLE_SURFACES,
     RESERVED_PATH_SEGMENTS,
     SELECTORS,
@@ -62,7 +62,7 @@
     WAIT_TIMEOUT_MS
   } = namespace;
   const FOLLOWER_RUN_PORT_PREFIX = 'easy-tweetblock:follower-run:';
-  const DEFAULT_USER_CELL_ADD_BUTTON_STYLE = namespace.DEFAULT_USER_CELL_ADD_BUTTON_STYLE || PAGE_BUTTON_STYLES.icon;
+  const DEFAULT_USER_CELL_ADD_BUTTON_STYLE = namespace.DEFAULT_USER_CELL_ADD_BUTTON_STYLE || PAGE_BLOCK_BUTTON_STYLES.icon;
   const DEFAULT_USER_CELL_ADD_BUTTON_VISIBILITY = namespace.DEFAULT_USER_CELL_ADD_BUTTON_VISIBILITY ?? true;
   const activeUsernameListPromiseByExtensionApi = new WeakMap();
 
@@ -236,7 +236,7 @@
 
     button.dataset.displayStyle = buttonAction === BUTTON_ACTIONS.saveToList
       ? namespace.getCurrentUserCellAddButtonStyle()
-      : kind === BUTTON_KINDS.native ? namespace.getCurrentNativeButtonStyle(surface) : PAGE_BUTTON_STYLES.text;
+      : kind === BUTTON_KINDS.native ? namespace.getCurrentNativeButtonStyle(surface) : PAGE_BLOCK_BUTTON_STYLES.text;
 
     if (surface) {
       button.dataset.surface = surface;
@@ -1140,8 +1140,8 @@
       MAX_BATCH_BLOCK_DELAY_MS,
       MESSAGE_TYPES,
       MIN_BATCH_BLOCK_DELAY_MS,
+      PAGE_BLOCK_BUTTON_STYLES,
       PAGE_BLOCK_BUTTON_STYLES_STORAGE_KEY,
-      PAGE_BUTTON_STYLES,
       PAGE_BUTTON_STYLE_SURFACES,
       USER_CELL_ADD_BUTTON_STYLE_STORAGE_KEY: namespace.USER_CELL_ADD_BUTTON_STYLE_STORAGE_KEY,
       RESERVED_PATH_SEGMENTS,
@@ -1202,8 +1202,8 @@
       lookupUserRestId: namespace.lookupUserRestId,
       normalizeBatchBlockDelayMs: namespace.normalizeBatchBlockDelayMs,
       normalizeFollowerBlockCandidate: namespace.normalizeFollowerBlockCandidate,
-      normalizePageButtonStyle: namespace.normalizePageButtonStyle,
-      normalizePageButtonStyles: namespace.normalizePageButtonStyles,
+      normalizePageBlockButtonStyle: namespace.normalizePageBlockButtonStyle,
+      normalizePageBlockButtonStyles: namespace.normalizePageBlockButtonStyles,
       normalizeUserCellAddButtonVisibility: namespace.normalizeUserCellAddButtonVisibility,
       normalizeUsernameForMatching: namespace.normalizeUsernameForMatching,
       observeStoredPageButtonStyle,

@@ -11,7 +11,6 @@ const {
   MIN_BATCH_BLOCK_DELAY_MS,
   PAGE_BLOCK_BUTTON_STYLES,
   PAGE_BLOCK_BUTTON_STYLES_STORAGE_KEY,
-  PAGE_BUTTON_STYLES,
   PAGE_BUTTON_STYLE_SURFACES,
   getStoredBatchBlockDelayMs,
   getStoredPageBlockButtonStyles,
@@ -20,9 +19,7 @@ const {
   normalizeBatchBlockDelayMs,
   normalizePageBlockButtonStyle,
   normalizePageBlockButtonStyles,
-  normalizePageButtonStyle,
   normalizePageButtonStyleSurface,
-  normalizePageButtonStyles,
   normalizeUserCellAddButtonVisibility,
   setStoredBatchBlockDelayMs,
   setStoredPageBlockButtonStyles,
@@ -107,12 +104,6 @@ test('normalizePageBlockButtonStyles defaults every surface to icon and accepts 
     [PAGE_BUTTON_STYLE_SURFACES.profile]: PAGE_BLOCK_BUTTON_STYLES.icon,
     [PAGE_BUTTON_STYLE_SURFACES.userCell]: PAGE_BLOCK_BUTTON_STYLES.icon
   });
-});
-
-test('deprecated page button aliases still point to canonical settings helpers', () => {
-  assert.equal(PAGE_BUTTON_STYLES, PAGE_BLOCK_BUTTON_STYLES);
-  assert.equal(normalizePageButtonStyle(PAGE_BLOCK_BUTTON_STYLES.text), normalizePageBlockButtonStyle(PAGE_BLOCK_BUTTON_STYLES.text));
-  assert.deepEqual(normalizePageButtonStyles(PAGE_BLOCK_BUTTON_STYLES.text), normalizePageBlockButtonStyles(PAGE_BLOCK_BUTTON_STYLES.text));
 });
 
 test('normalizePageButtonStyleSurface defaults to tweet and accepts known surfaces', () => {
