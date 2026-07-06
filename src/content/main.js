@@ -35,11 +35,13 @@
     BUTTON_KINDS,
     DEFAULT_BATCH_BLOCK_DELAY_MS,
     DEFAULT_PAGE_BLOCK_BUTTON_STYLE,
+    DEFAULT_PAGE_BLOCK_BUTTON_STYLES,
     MAX_BATCH_BLOCK_DELAY_MS,
     MESSAGE_TYPES,
     MIN_BATCH_BLOCK_DELAY_MS,
-    PAGE_BLOCK_BUTTON_STYLE_STORAGE_KEY,
+    PAGE_BLOCK_BUTTON_STYLES_STORAGE_KEY,
     PAGE_BUTTON_STYLES,
+    PAGE_BUTTON_STYLE_SURFACES,
     RESERVED_PATH_SEGMENTS,
     SELECTORS,
     USER_BY_SCREEN_NAME_FIELD_TOGGLES,
@@ -58,6 +60,7 @@
     WAIT_TIMEOUT_MS
   } = namespace;
   const FOLLOWER_RUN_PORT_PREFIX = 'easy-tweetblock:follower-run:';
+  const DEFAULT_USER_CELL_ADD_BUTTON_STYLE = namespace.DEFAULT_USER_CELL_ADD_BUTTON_STYLE || PAGE_BUTTON_STYLES.icon;
   const DEFAULT_USER_CELL_ADD_BUTTON_VISIBILITY = true;
   const activeUsernameListPromiseByExtensionApi = new WeakMap();
 
@@ -230,8 +233,8 @@
     }
 
     button.dataset.displayStyle = buttonAction === BUTTON_ACTIONS.saveToList
-      ? PAGE_BUTTON_STYLES.text
-      : kind === BUTTON_KINDS.native ? namespace.getCurrentNativeButtonStyle() : PAGE_BUTTON_STYLES.text;
+      ? namespace.getCurrentUserCellAddButtonStyle()
+      : kind === BUTTON_KINDS.native ? namespace.getCurrentNativeButtonStyle(surface) : PAGE_BUTTON_STYLES.text;
 
     if (surface) {
       button.dataset.surface = surface;
@@ -355,6 +358,19 @@
     let button = null;
     const action = async () => {
       if (getUserCellBlockMode(button) === 'unblock') {
+        // The cached restId/screenName belong to the user we blocked. If X has
+        // since recycled this cell for a different account (virtualized lists
+        // reuse DOM nodes), acting on them would unblock the wrong user. Re-read
+        // the live screen name and, on a mismatch, refuse to unblock and reset.
+        const liveScreenName = namespace.readScreenNameFromTweet(userCell);
+
+        if (liveScreenName && liveScreenName !== screenName) {
+          setUserCellBlockMode(button, 'block');
+          setUserCellBlockRestId(button, null);
+          setUserCellNativeActionButtonVisibility(options.actionButton, false);
+          return { mode: 'unblock' };
+        }
+
         const restId = button?.dataset?.userRestId || null;
         const result = restId
           ? await namespace.unblockUserByRestIdViaApi(restId, {
@@ -484,6 +500,25 @@
     return namespace.contentState.showUserCellAddButton;
   }
 
+  function getCurrentUserCellAddButtonStyle() {
+    return namespace.getCurrentUserCellAddButtonStyle?.() || DEFAULT_USER_CELL_ADD_BUTTON_STYLE;
+  }
+
+  function setCurrentUserCellAddButtonStyle(style) {
+    return typeof namespace.setCurrentUserCellAddButtonStyle === 'function'
+      ? namespace.setCurrentUserCellAddButtonStyle(style)
+      : DEFAULT_USER_CELL_ADD_BUTTON_STYLE;
+  }
+
+  function applyUserCellListButtonStyle(button) {
+    if (!button || namespace.getButtonAction(button) !== BUTTON_ACTIONS.saveToList || button.dataset?.surface !== 'user-cell') {
+      return;
+    }
+
+    button.dataset.displayStyle = getCurrentUserCellAddButtonStyle();
+    namespace.setButtonState(button, button.dataset.state || 'idle', button.dataset.screenName || '', BUTTON_KINDS.native);
+  }
+
   function applyUserCellListButtonVisibility(button) {
     if (!button || namespace.getButtonAction(button) !== BUTTON_ACTIONS.saveToList || button.dataset?.surface !== 'user-cell') {
       return;
@@ -507,6 +542,7 @@
     ));
 
     for (const button of listButtons) {
+      applyUserCellListButtonStyle(button);
       applyUserCellListButtonVisibility(button);
     }
   }
@@ -578,6 +614,18 @@
     return isVisible;
   }
 
+  async function syncStoredUserCellAddButtonStyle(globalRef = globalThis) {
+    const blocklistApi = getBlocklistSharedApi();
+    const extensionApi = namespace.getExtensionApi(globalRef);
+    const style = typeof blocklistApi?.getStoredUserCellAddButtonStyle === 'function'
+      ? await blocklistApi.getStoredUserCellAddButtonStyle(extensionApi)
+      : DEFAULT_USER_CELL_ADD_BUTTON_STYLE;
+
+    setCurrentUserCellAddButtonStyle(style);
+    syncUserCellListButtonVisibility(globalRef.document);
+    return style;
+  }
+
   function observeStoredUserCellAddButtonVisibility(globalRef = globalThis) {
     const blocklistApi = getBlocklistSharedApi();
     const extensionApi = namespace.getExtensionApi(globalRef);
@@ -594,6 +642,34 @@
       }
 
       setCurrentUserCellAddButtonVisibility(changes[storageKey]?.newValue);
+      syncUserCellListButtonVisibility(globalRef.document);
+    };
+
+    onChangedApi.addListener(handleStorageChange);
+
+    return () => {
+      if (typeof onChangedApi.removeListener === 'function') {
+        onChangedApi.removeListener(handleStorageChange);
+      }
+    };
+  }
+
+  function observeStoredUserCellAddButtonStyle(globalRef = globalThis) {
+    const blocklistApi = getBlocklistSharedApi();
+    const extensionApi = namespace.getExtensionApi(globalRef);
+    const onChangedApi = extensionApi?.storage?.onChanged;
+    const storageKey = blocklistApi?.USER_CELL_ADD_BUTTON_STYLE_STORAGE_KEY;
+
+    if (!storageKey || !onChangedApi?.addListener) {
+      return () => {};
+    }
+
+    const handleStorageChange = (changes, areaName) => {
+      if (areaName !== 'local' || !Object.prototype.hasOwnProperty.call(changes, storageKey)) {
+        return;
+      }
+
+      setCurrentUserCellAddButtonStyle(changes[storageKey]?.newValue);
       syncUserCellListButtonVisibility(globalRef.document);
     };
 
@@ -680,6 +756,7 @@
       }
     );
 
+    applyUserCellListButtonStyle(button);
     applyUserCellListButtonVisibility(button);
 
     void getCachedActiveUsernameList(options)
@@ -703,16 +780,16 @@
     const nativeButtons = Array.from(documentRef.querySelectorAll(`[${BLOCK_BUTTON_ATTRIBUTE}][data-kind="native"]`));
 
     for (const button of nativeButtons) {
-      button.dataset.displayStyle = namespace.getCurrentNativeButtonStyle();
+      button.dataset.displayStyle = namespace.getCurrentNativeButtonStyle(button.dataset.surface || PAGE_BUTTON_STYLE_SURFACES.tweet);
       namespace.setButtonState(button, button.dataset.state || 'idle', button.dataset.screenName || '', BUTTON_KINDS.native);
     }
   }
 
   async function syncStoredPageButtonStyle(globalRef = globalThis) {
-    const style = await namespace.getStoredPageButtonStyle(globalRef);
-    namespace.setCurrentNativeButtonStyle(style);
+    const styles = await namespace.getStoredPageButtonStyles(globalRef);
+    namespace.setCurrentNativeButtonStyles(styles);
     applyCurrentNativeButtonStyleToDocument(globalRef.document);
-    return style;
+    return styles;
   }
 
   function observeStoredPageButtonStyle(globalRef = globalThis) {
@@ -724,11 +801,11 @@
     }
 
     const handleStorageChange = (changes, areaName) => {
-      if (areaName !== 'local' || !Object.prototype.hasOwnProperty.call(changes, PAGE_BLOCK_BUTTON_STYLE_STORAGE_KEY)) {
+      if (areaName !== 'local' || !Object.prototype.hasOwnProperty.call(changes, PAGE_BLOCK_BUTTON_STYLES_STORAGE_KEY)) {
         return;
       }
 
-      namespace.setCurrentNativeButtonStyle(changes[PAGE_BLOCK_BUTTON_STYLE_STORAGE_KEY]?.newValue);
+      namespace.setCurrentNativeButtonStyles(changes[PAGE_BLOCK_BUTTON_STYLES_STORAGE_KEY]?.newValue);
       applyCurrentNativeButtonStyleToDocument(globalRef.document);
     };
 
@@ -958,18 +1035,24 @@
     registerRuntimeConnectionListener(globalRef);
     registerRuntimeMessageListener(globalRef);
     setCurrentUserCellAddButtonVisibility(DEFAULT_USER_CELL_ADD_BUTTON_VISIBILITY);
+    setCurrentUserCellAddButtonStyle(DEFAULT_USER_CELL_ADD_BUTTON_STYLE);
 
     void Promise.allSettled([
       syncStoredPageButtonStyle(globalRef),
-      syncStoredUserCellAddButtonVisibility(globalRef)
+      syncStoredUserCellAddButtonVisibility(globalRef),
+      syncStoredUserCellAddButtonStyle(globalRef)
     ])
       .then((results) => {
         if (results[0]?.status === 'rejected') {
-          namespace.setCurrentNativeButtonStyle(DEFAULT_PAGE_BLOCK_BUTTON_STYLE);
+          namespace.setCurrentNativeButtonStyles(DEFAULT_PAGE_BLOCK_BUTTON_STYLES || DEFAULT_PAGE_BLOCK_BUTTON_STYLE);
         }
 
         if (results[1]?.status === 'rejected') {
           setCurrentUserCellAddButtonVisibility(DEFAULT_USER_CELL_ADD_BUTTON_VISIBILITY);
+        }
+
+        if (results[2]?.status === 'rejected') {
+          setCurrentUserCellAddButtonStyle(DEFAULT_USER_CELL_ADD_BUTTON_STYLE);
         }
       })
       .finally(() => {
@@ -980,11 +1063,13 @@
     const stopStyleObservation = observeStoredPageButtonStyle(globalRef);
     const stopActiveListObservation = observeActiveUsernameList(globalRef);
     const stopUserCellAddButtonObservation = observeStoredUserCellAddButtonVisibility(globalRef);
+    const stopUserCellAddButtonStyleObservation = observeStoredUserCellAddButtonStyle(globalRef);
 
     if (typeof globalRef.addEventListener === 'function') {
       globalRef.addEventListener('unload', stopStyleObservation, { once: true });
       globalRef.addEventListener('unload', stopActiveListObservation, { once: true });
       globalRef.addEventListener('unload', stopUserCellAddButtonObservation, { once: true });
+      globalRef.addEventListener('unload', stopUserCellAddButtonStyleObservation, { once: true });
     }
 
     if (!globalRef.document.body || typeof globalRef.MutationObserver !== 'function') {
@@ -1021,6 +1106,7 @@
     init,
     observeActiveUsernameList,
     observeStoredPageButtonStyle,
+    observeStoredUserCellAddButtonStyle,
     observeStoredUserCellAddButtonVisibility,
     registerRuntimeConnectionListener,
     registerRuntimeMessageListener,
@@ -1030,6 +1116,7 @@
     syncUserCellNativeActionButtonVisibility,
     startFollowerRun,
     syncStoredPageButtonStyle,
+    syncStoredUserCellAddButtonStyle,
     syncStoredUserCellAddButtonVisibility,
     waitForElement
   });
@@ -1042,11 +1129,15 @@
       BUTTON_KINDS,
       DEFAULT_BATCH_BLOCK_DELAY_MS,
       DEFAULT_PAGE_BLOCK_BUTTON_STYLE,
+      DEFAULT_PAGE_BLOCK_BUTTON_STYLES,
+      DEFAULT_USER_CELL_ADD_BUTTON_STYLE,
       MAX_BATCH_BLOCK_DELAY_MS,
       MESSAGE_TYPES,
       MIN_BATCH_BLOCK_DELAY_MS,
-      PAGE_BLOCK_BUTTON_STYLE_STORAGE_KEY,
+      PAGE_BLOCK_BUTTON_STYLES_STORAGE_KEY,
       PAGE_BUTTON_STYLES,
+      PAGE_BUTTON_STYLE_SURFACES,
+      USER_CELL_ADD_BUTTON_STYLE_STORAGE_KEY: namespace.USER_CELL_ADD_BUTTON_STYLE_STORAGE_KEY,
       RESERVED_PATH_SEGMENTS,
       SELECTORS,
       USER_BY_SCREEN_NAME_FIELD_TOGGLES,
@@ -1095,7 +1186,8 @@
       getButtonTitle: namespace.getButtonTitle,
       getBlocklistSharedApi,
       getCsrfToken: namespace.getCsrfToken,
-      getStoredPageButtonStyle: namespace.getStoredPageButtonStyle,
+      getStoredPageButtonStyles: namespace.getStoredPageButtonStyles,
+      getStoredUserCellAddButtonStyle: namespace.getStoredUserCellAddButtonStyle,
       fetchFollowersPage: namespace.fetchFollowersPage,
       finishFollowerRun,
       FOLLOWER_RUN_PORT_PREFIX,
@@ -1104,8 +1196,10 @@
       normalizeBatchBlockDelayMs: namespace.normalizeBatchBlockDelayMs,
       normalizeFollowerBlockCandidate: namespace.normalizeFollowerBlockCandidate,
       normalizePageButtonStyle: namespace.normalizePageButtonStyle,
+      normalizePageButtonStyles: namespace.normalizePageButtonStyles,
       normalizeUsernameForMatching: namespace.normalizeUsernameForMatching,
       observeStoredPageButtonStyle,
+      observeStoredUserCellAddButtonStyle,
       observeStoredUserCellAddButtonVisibility,
       observeActiveUsernameList,
       parseFollowersPage: namespace.parseFollowersPage,
@@ -1126,6 +1220,8 @@
       scanFollowersForBlocking: namespace.scanFollowersForBlocking,
       applyCurrentNativeButtonStyleToDocument,
       setCurrentNativeButtonStyle: namespace.setCurrentNativeButtonStyle,
+      setCurrentNativeButtonStyles: namespace.setCurrentNativeButtonStyles,
+      setCurrentUserCellAddButtonStyle,
       setButtonState: namespace.setButtonState,
       setUserCellNativeActionButtonVisibility,
       sleep: namespace.sleep,
@@ -1136,6 +1232,7 @@
       syncUserCellNativeActionButtonVisibility,
       subtreeContainsButton,
       syncStoredPageButtonStyle,
+      syncStoredUserCellAddButtonStyle,
       syncStoredUserCellAddButtonVisibility,
       tryGenerateXClientTransactionId: namespace.tryGenerateXClientTransactionId,
       waitForElement

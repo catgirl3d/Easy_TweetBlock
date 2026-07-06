@@ -953,8 +953,14 @@
     const importUsernamesButton = documentRef.getElementById('import-usernames');
     const importUsernamesFileInput = documentRef.getElementById('import-usernames-file');
     const delayInputElement = documentRef.getElementById('batch-block-delay-ms');
-    const pageButtonStyleIconElement = documentRef.getElementById('page-button-style-icon');
-    const pageButtonStyleTextElement = documentRef.getElementById('page-button-style-text');
+    const pageButtonStyleTweetIconElement = documentRef.getElementById('page-button-style-tweet-icon');
+    const pageButtonStyleTweetTextElement = documentRef.getElementById('page-button-style-tweet-text');
+    const pageButtonStyleProfileIconElement = documentRef.getElementById('page-button-style-profile-icon');
+    const pageButtonStyleProfileTextElement = documentRef.getElementById('page-button-style-profile-text');
+    const pageButtonStyleUserCellIconElement = documentRef.getElementById('page-button-style-user-cell-icon');
+    const pageButtonStyleUserCellTextElement = documentRef.getElementById('page-button-style-user-cell-text');
+    const userCellAddButtonStyleIconElement = documentRef.getElementById('user-cell-add-button-style-icon');
+    const userCellAddButtonStyleTextElement = documentRef.getElementById('user-cell-add-button-style-text');
     const showUserCellAddButtonElement = documentRef.getElementById('show-user-cell-add-button');
     const openSettingsButton = documentRef.getElementById('open-settings');
     const openFollowersButton = documentRef.getElementById('open-followers');
@@ -963,7 +969,9 @@
     const saveButton = documentRef.getElementById('save-blocklist');
     const saveSettingsButton = documentRef.getElementById('save-settings');
     const blockNowButton = documentRef.getElementById('block-now');
+    const clearListButton = documentRef.getElementById('clear-list');
     const cancelFollowersRunButton = documentRef.getElementById('cancel-followers-run');
+    const addFollowersToListButton = documentRef.getElementById('add-followers-to-list');
     const countElement = documentRef.getElementById('username-count');
     const followersBlockLimitElement = documentRef.getElementById('followers-block-limit');
     const followersScanLimitElement = documentRef.getElementById('followers-scan-limit');
@@ -981,13 +989,51 @@
     const popupDebugLogElement = documentRef.getElementById('popup-debug-log');
     const clearPopupDebugLogButton = documentRef.getElementById('clear-popup-debug-log');
 
+    const pageButtonStyleSurfaces = blocklist?.PAGE_BUTTON_STYLE_SURFACES || {
+      profile: 'profile',
+      tweet: 'tweet',
+      userCell: 'user-cell'
+    };
+    const normalizePageButtonStylesValue = (value) => {
+      if (typeof blocklist?.normalizePageBlockButtonStyles === 'function') {
+        return blocklist.normalizePageBlockButtonStyles(value);
+      }
+
+      const fallbackStyle = value === 'text' ? 'text' : 'icon';
+      return {
+        [pageButtonStyleSurfaces.tweet]: fallbackStyle,
+        [pageButtonStyleSurfaces.profile]: fallbackStyle,
+        [pageButtonStyleSurfaces.userCell]: fallbackStyle
+      };
+    };
+    const pageButtonStyleControls = {
+      [pageButtonStyleSurfaces.tweet]: {
+        icon: pageButtonStyleTweetIconElement,
+        text: pageButtonStyleTweetTextElement
+      },
+      [pageButtonStyleSurfaces.profile]: {
+        icon: pageButtonStyleProfileIconElement,
+        text: pageButtonStyleProfileTextElement
+      },
+      [pageButtonStyleSurfaces.userCell]: {
+        icon: pageButtonStyleUserCellIconElement,
+        text: pageButtonStyleUserCellTextElement
+      }
+    };
+    const userCellAddButtonStyleControls = {
+      icon: userCellAddButtonStyleIconElement,
+      text: userCellAddButtonStyleTextElement
+    };
     let isSaving = false;
     let isBlocking = false;
     let isFollowersScanning = false;
     let isFollowersBlocking = false;
     let currentFollowerRunTabId = null;
     let currentDelayMs = blocklist?.DEFAULT_BATCH_BLOCK_DELAY_MS;
-    let currentPageButtonStyle = blocklist?.DEFAULT_PAGE_BLOCK_BUTTON_STYLE;
+    let currentPageButtonStyles = normalizePageButtonStylesValue(
+      blocklist?.DEFAULT_PAGE_BLOCK_BUTTON_STYLES || blocklist?.DEFAULT_PAGE_BLOCK_BUTTON_STYLE
+    );
+    let currentUserCellAddButtonStyle = blocklist?.DEFAULT_USER_CELL_ADD_BUTTON_STYLE || blocklist?.DEFAULT_PAGE_BLOCK_BUTTON_STYLE || blocklist?.PAGE_BLOCK_BUTTON_STYLES?.icon || 'icon';
     let currentShowUserCellAddButton = blocklist?.DEFAULT_USER_CELL_ADD_BUTTON_VISIBILITY;
     let currentFollowersBlockLimit = followers?.DEFAULT_FOLLOWERS_BLOCK_LIMIT;
     let currentFollowersBlockRunId = null;
@@ -995,7 +1041,8 @@
     let currentFollowersScanLimit = followers?.DEFAULT_FOLLOWERS_SCAN_LIMIT;
     let currentFollowersScanRunId = null;
     let currentFollowersSource = followers?.DEFAULT_FOLLOWERS_SOURCE;
-    let draftPageButtonStyle = currentPageButtonStyle;
+    let draftPageButtonStyles = { ...currentPageButtonStyles };
+    let draftUserCellAddButtonStyle = currentUserCellAddButtonStyle;
     const storedPopupState = loadStoredPopupState();
     let currentUsernameLists = [];
     let currentActiveUsernameList = null;
@@ -1009,8 +1056,32 @@
       : {};
     let isHydratingPopupState = true;
 
-    if (!blocklist || !followers || !extensionApi || !shellElement || !statusElement || !textareaElement || !usernameListSelectLabelElement || !usernameListSelectElement || !usernameListOptionsElement || !newUsernameListButton || !renameUsernameListButton || !deleteUsernameListButton || !importUsernamesButton || !importUsernamesFileInput || !delayInputElement || !pageButtonStyleIconElement || !pageButtonStyleTextElement || !showUserCellAddButtonElement || !openSettingsButton || !openFollowersButton || !backToMainButton || !backFromFollowersButton || !saveButton || !saveSettingsButton || !blockNowButton || !cancelFollowersRunButton || !countElement || !followersBlockLimitElement || !followersScanLimitElement || !followersSummaryElement || !followersPreviewElement || !followersBlockProgressElement || !followersProgressCountElement || !followersProgressDetailElement || !followersProgressFillElement || !followersProgressLabelElement || !followersSourceFollowersElement || !followersSourceFollowingElement || !scanFollowersButton || !blockFollowerCandidatesButton || !popupDebugLogElement || !clearPopupDebugLogButton) {
+    if (!blocklist || !followers || !extensionApi || !shellElement || !statusElement || !textareaElement || !usernameListSelectLabelElement || !usernameListSelectElement || !usernameListOptionsElement || !newUsernameListButton || !renameUsernameListButton || !deleteUsernameListButton || !importUsernamesButton || !importUsernamesFileInput || !delayInputElement || !pageButtonStyleTweetIconElement || !pageButtonStyleTweetTextElement || !pageButtonStyleProfileIconElement || !pageButtonStyleProfileTextElement || !pageButtonStyleUserCellIconElement || !pageButtonStyleUserCellTextElement || !userCellAddButtonStyleIconElement || !userCellAddButtonStyleTextElement || !showUserCellAddButtonElement || !openSettingsButton || !openFollowersButton || !backToMainButton || !backFromFollowersButton || !saveButton || !saveSettingsButton || !blockNowButton || !cancelFollowersRunButton || !countElement || !followersBlockLimitElement || !followersScanLimitElement || !followersSummaryElement || !followersPreviewElement || !followersBlockProgressElement || !followersProgressCountElement || !followersProgressDetailElement || !followersProgressFillElement || !followersProgressLabelElement || !followersSourceFollowersElement || !followersSourceFollowingElement || !scanFollowersButton || !blockFollowerCandidatesButton || !popupDebugLogElement || !clearPopupDebugLogButton || !addFollowersToListButton || !clearListButton) {
       return;
+    }
+
+    async function readStoredPageButtonStyles() {
+      return blocklist.getStoredPageBlockButtonStyles(extensionApi);
+    }
+
+    async function writeStoredPageButtonStyles(styles) {
+      return blocklist.setStoredPageBlockButtonStyles(styles, extensionApi);
+    }
+
+    async function readStoredUserCellAddButtonStyle() {
+      if (typeof blocklist.getStoredUserCellAddButtonStyle === 'function') {
+        return blocklist.getStoredUserCellAddButtonStyle(extensionApi);
+      }
+
+      return blocklist.normalizePageBlockButtonStyle(blocklist.DEFAULT_USER_CELL_ADD_BUTTON_STYLE || blocklist.DEFAULT_PAGE_BLOCK_BUTTON_STYLE);
+    }
+
+    async function writeStoredUserCellAddButtonStyle(style) {
+      if (typeof blocklist.setStoredUserCellAddButtonStyle === 'function') {
+        return blocklist.setStoredUserCellAddButtonStyle(style, extensionApi);
+      }
+
+      return blocklist.normalizePageBlockButtonStyle(style);
     }
 
     void emitPopupOpenDebug(extensionApi);
@@ -1508,17 +1579,41 @@
       delayInputElement.value = String(blocklist.normalizeBatchBlockDelayMs(delayMs));
     }
 
-    function readPageButtonStyle() {
-      return blocklist.normalizePageBlockButtonStyle(draftPageButtonStyle);
+    function readPageButtonStyles() {
+      return blocklist.normalizePageBlockButtonStyles(draftPageButtonStyles);
     }
 
-    function renderPageButtonStyle(style) {
-      draftPageButtonStyle = blocklist.normalizePageBlockButtonStyle(style);
+    function renderPageButtonStyles(styles) {
+      draftPageButtonStyles = blocklist.normalizePageBlockButtonStyles(styles);
 
-      pageButtonStyleIconElement.dataset.active = String(draftPageButtonStyle === blocklist.PAGE_BLOCK_BUTTON_STYLES.icon);
-      pageButtonStyleTextElement.dataset.active = String(draftPageButtonStyle === blocklist.PAGE_BLOCK_BUTTON_STYLES.text);
-      pageButtonStyleIconElement.setAttribute('aria-pressed', String(draftPageButtonStyle === blocklist.PAGE_BLOCK_BUTTON_STYLES.icon));
-      pageButtonStyleTextElement.setAttribute('aria-pressed', String(draftPageButtonStyle === blocklist.PAGE_BLOCK_BUTTON_STYLES.text));
+      for (const surface of Object.values(pageButtonStyleSurfaces)) {
+        const controls = pageButtonStyleControls[surface];
+        const style = draftPageButtonStyles[surface];
+
+        controls.icon.dataset.active = String(style === blocklist.PAGE_BLOCK_BUTTON_STYLES.icon);
+        controls.text.dataset.active = String(style === blocklist.PAGE_BLOCK_BUTTON_STYLES.text);
+        controls.icon.setAttribute('aria-pressed', String(style === blocklist.PAGE_BLOCK_BUTTON_STYLES.icon));
+        controls.text.setAttribute('aria-pressed', String(style === blocklist.PAGE_BLOCK_BUTTON_STYLES.text));
+      }
+    }
+
+    function setDraftPageButtonStyle(surface, style) {
+      renderPageButtonStyles({
+        ...draftPageButtonStyles,
+        [surface]: style
+      });
+    }
+
+    function readUserCellAddButtonStyle() {
+      return blocklist.normalizePageBlockButtonStyle(draftUserCellAddButtonStyle);
+    }
+
+    function renderUserCellAddButtonStyle(style) {
+      draftUserCellAddButtonStyle = blocklist.normalizePageBlockButtonStyle(style);
+      userCellAddButtonStyleControls.icon.dataset.active = String(draftUserCellAddButtonStyle === blocklist.PAGE_BLOCK_BUTTON_STYLES.icon);
+      userCellAddButtonStyleControls.text.dataset.active = String(draftUserCellAddButtonStyle === blocklist.PAGE_BLOCK_BUTTON_STYLES.text);
+      userCellAddButtonStyleControls.icon.setAttribute('aria-pressed', String(draftUserCellAddButtonStyle === blocklist.PAGE_BLOCK_BUTTON_STYLES.icon));
+      userCellAddButtonStyleControls.text.setAttribute('aria-pressed', String(draftUserCellAddButtonStyle === blocklist.PAGE_BLOCK_BUTTON_STYLES.text));
     }
 
     function readShowUserCellAddButton() {
@@ -1677,7 +1772,7 @@
         const sourceCopy = getFollowersSourceCopy(progress.source);
         state = 'ready';
         label = `Ready to block ${total} ${total === 1 ? sourceCopy.accountLabel : sourceCopy.readyLabel}`;
-        detail = `Click Block ready to start. Delay from Settings: ${delayMs} ms between requests.`;
+        detail = `Click Block to start. Delay from Settings: ${delayMs} ms between requests.`;
       } else if (phase === 'started') {
         const sourceCopy = getFollowersSourceCopy(progress.source);
         label = `Starting block run for ${total} ${total === 1 ? sourceCopy.accountLabel : sourceCopy.readyLabel}`;
@@ -1796,6 +1891,7 @@
 
       saveButton.disabled = isAnyBusy;
       blockNowButton.disabled = isAnyBusy;
+      clearListButton.disabled = isAnyBusy;
       saveSettingsButton.disabled = isAnyBusy;
       usernameListSelectElement.disabled = isAnyBusy;
       newUsernameListButton.disabled = isAnyBusy;
@@ -1811,6 +1907,7 @@
       scanFollowersButton.disabled = isAnyBusy;
       blockFollowerCandidatesButton.disabled = isAnyBusy || !currentFollowersPreview?.candidates?.length;
       cancelFollowersRunButton.disabled = !(isFollowersScanning || isFollowersBlocking);
+      addFollowersToListButton.disabled = isAnyBusy || !currentFollowersPreview?.candidates?.length;
     }
 
     function showMainView() {
@@ -1880,10 +1977,11 @@
     }
 
     async function loadBlocklist() {
-      const [usernameListState, delayMs, pageButtonStyle, showUserCellAddButton] = await Promise.all([
+      const [usernameListState, delayMs, pageButtonStyles, userCellAddButtonStyle, showUserCellAddButton] = await Promise.all([
         readUsernameListState(),
         blocklist.getStoredBatchBlockDelayMs(extensionApi),
-        blocklist.getStoredPageBlockButtonStyle(extensionApi),
+        readStoredPageButtonStyles(),
+        readStoredUserCellAddButtonStyle(),
         blocklist.getStoredUserCellAddButtonVisibility(extensionApi)
       ]);
 
@@ -1891,7 +1989,8 @@
       const usernameDraftStatus = renderActiveUsernameList();
       renderDelay(delayMs);
       currentDelayMs = delayMs;
-      currentPageButtonStyle = pageButtonStyle;
+      currentPageButtonStyles = pageButtonStyles;
+      currentUserCellAddButtonStyle = userCellAddButtonStyle;
       currentShowUserCellAddButton = showUserCellAddButton;
       currentFollowersBlockLimit = followers.normalizeFollowersBlockLimit(
         storedPopupState.followersBlockLimit ?? followers.DEFAULT_FOLLOWERS_BLOCK_LIMIT
@@ -1905,7 +2004,8 @@
       renderFollowersBlockLimit(currentFollowersBlockLimit);
       renderFollowersScanLimit(currentFollowersScanLimit);
       renderFollowersSource(currentFollowersSource);
-      renderPageButtonStyle(pageButtonStyle);
+      renderPageButtonStyles(pageButtonStyles);
+      renderUserCellAddButtonStyle(userCellAddButtonStyle);
       renderShowUserCellAddButton(showUserCellAddButton);
       const storedFollowersPreview = normalizeStoredFollowersPreview(storedPopupState.followersPreview);
 
@@ -1966,7 +2066,8 @@
       }
 
       const delayMs = readDelayMs();
-      const pageButtonStyle = readPageButtonStyle();
+      const pageButtonStyles = readPageButtonStyles();
+      const userCellAddButtonStyle = readUserCellAddButtonStyle();
       const showUserCellAddButton = readShowUserCellAddButton();
 
       isSaving = true;
@@ -1974,19 +2075,22 @@
       setStatus('Saving settings...');
 
       try {
-        const [savedDelayMs, savedPageButtonStyle, savedShowUserCellAddButton] = await Promise.all([
+        const [savedDelayMs, savedPageButtonStyles, savedUserCellAddButtonStyle, savedShowUserCellAddButton] = await Promise.all([
           blocklist.setStoredBatchBlockDelayMs(delayMs, extensionApi),
-          blocklist.setStoredPageBlockButtonStyle(pageButtonStyle, extensionApi),
+          writeStoredPageButtonStyles(pageButtonStyles),
+          writeStoredUserCellAddButtonStyle(userCellAddButtonStyle),
           blocklist.setStoredUserCellAddButtonVisibility(showUserCellAddButton, extensionApi)
         ]);
 
         currentDelayMs = savedDelayMs;
         renderDelay(savedDelayMs);
-        currentPageButtonStyle = savedPageButtonStyle;
-        renderPageButtonStyle(savedPageButtonStyle);
+        currentPageButtonStyles = savedPageButtonStyles;
+        renderPageButtonStyles(savedPageButtonStyles);
+        currentUserCellAddButtonStyle = savedUserCellAddButtonStyle;
+        renderUserCellAddButtonStyle(savedUserCellAddButtonStyle);
         currentShowUserCellAddButton = savedShowUserCellAddButton;
         renderShowUserCellAddButton(savedShowUserCellAddButton);
-        setStatus(`Saved settings. Delay: ${savedDelayMs} ms. Style: ${savedPageButtonStyle}.`);
+        setStatus(`Saved settings. Delay: ${savedDelayMs} ms.`);
         showMainView();
       } catch (error) {
         setStatus(error instanceof Error ? error.message : String(error));
@@ -2508,6 +2612,53 @@
       await importUsernameText(text, file?.name || '');
     }
 
+    async function addFollowersToActiveList() {
+      if (isSaving || isBlocking || isFollowersScanning || isFollowersBlocking) {
+        return;
+      }
+
+      if (!currentFollowersPreview?.candidates?.length) {
+        setStatus('No scanned candidates to add.');
+        return;
+      }
+
+      const scannedUsernames = currentFollowersPreview.candidates
+        .map((candidate) => candidate.username)
+        .filter((username) => typeof username === 'string' && username.trim() !== '');
+
+      if (!scannedUsernames.length) {
+        setStatus('No valid usernames found in the scan.');
+        return;
+      }
+
+      isSaving = true;
+      setBusyState();
+      setStatus('Adding scanned users to active list...');
+
+      try {
+        const visibleUsernames = blocklist.parseUsernameText(textareaElement.value).usernames;
+        const savedUsernames = await mutateCurrentActiveUsernameListUsernames((latestUsernames) => ([
+          ...latestUsernames,
+          ...visibleUsernames,
+          ...scannedUsernames
+        ]));
+
+        updateCurrentActiveListUsernames(savedUsernames);
+        textareaElement.value = blocklist.serializeUsernameText(savedUsernames);
+        isUsernameDraftDirty = false;
+        clearUsernameDraft(currentActiveUsernameListId);
+        renderCount(savedUsernames);
+        persistCurrentPopupState();
+
+        setStatus(`Added ${scannedUsernames.length} usernames to list "${currentActiveUsernameList?.name || 'Blocklist'}".`);
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : String(error));
+      } finally {
+        isSaving = false;
+        setBusyState();
+      }
+    }
+
     function observePopupUsernameLists() {
       if (typeof blocklist.observeActiveUsernameList !== 'function') {
         return () => {};
@@ -2546,6 +2697,12 @@
 
     blockNowButton.addEventListener('click', () => {
       handleAsyncPopupAction('blockListedNow', blockListedNow);
+    });
+
+    clearListButton.addEventListener('click', () => {
+      textareaElement.value = '';
+      persistUsernameDraft();
+      setStatus('List cleared. Click Save list to save this change.');
     });
 
     usernameListSelectLabelElement.addEventListener('click', () => {
@@ -2609,9 +2766,14 @@
       handleAsyncPopupAction('cancelActiveFollowerRun', cancelActiveFollowerRun);
     });
 
+    addFollowersToListButton.addEventListener('click', () => {
+      handleAsyncPopupAction('addFollowersToActiveList', addFollowersToActiveList);
+    });
+
     openSettingsButton.addEventListener('click', () => {
       renderDelay(currentDelayMs);
-      renderPageButtonStyle(currentPageButtonStyle);
+      renderPageButtonStyles(currentPageButtonStyles);
+      renderUserCellAddButtonStyle(currentUserCellAddButtonStyle);
       renderShowUserCellAddButton(currentShowUserCellAddButton);
       showSettingsView();
     });
@@ -2625,7 +2787,8 @@
 
     backToMainButton.addEventListener('click', () => {
       renderDelay(currentDelayMs);
-      renderPageButtonStyle(currentPageButtonStyle);
+      renderPageButtonStyles(currentPageButtonStyles);
+      renderUserCellAddButtonStyle(currentUserCellAddButtonStyle);
       renderShowUserCellAddButton(currentShowUserCellAddButton);
       showMainView();
     });
@@ -2637,12 +2800,36 @@
       showMainView();
     });
 
-    pageButtonStyleIconElement.addEventListener('click', () => {
-      renderPageButtonStyle(blocklist.PAGE_BLOCK_BUTTON_STYLES.icon);
+    pageButtonStyleTweetIconElement.addEventListener('click', () => {
+      setDraftPageButtonStyle(pageButtonStyleSurfaces.tweet, blocklist.PAGE_BLOCK_BUTTON_STYLES.icon);
     });
 
-    pageButtonStyleTextElement.addEventListener('click', () => {
-      renderPageButtonStyle(blocklist.PAGE_BLOCK_BUTTON_STYLES.text);
+    pageButtonStyleTweetTextElement.addEventListener('click', () => {
+      setDraftPageButtonStyle(pageButtonStyleSurfaces.tweet, blocklist.PAGE_BLOCK_BUTTON_STYLES.text);
+    });
+
+    pageButtonStyleProfileIconElement.addEventListener('click', () => {
+      setDraftPageButtonStyle(pageButtonStyleSurfaces.profile, blocklist.PAGE_BLOCK_BUTTON_STYLES.icon);
+    });
+
+    pageButtonStyleProfileTextElement.addEventListener('click', () => {
+      setDraftPageButtonStyle(pageButtonStyleSurfaces.profile, blocklist.PAGE_BLOCK_BUTTON_STYLES.text);
+    });
+
+    pageButtonStyleUserCellIconElement.addEventListener('click', () => {
+      setDraftPageButtonStyle(pageButtonStyleSurfaces.userCell, blocklist.PAGE_BLOCK_BUTTON_STYLES.icon);
+    });
+
+    pageButtonStyleUserCellTextElement.addEventListener('click', () => {
+      setDraftPageButtonStyle(pageButtonStyleSurfaces.userCell, blocklist.PAGE_BLOCK_BUTTON_STYLES.text);
+    });
+
+    userCellAddButtonStyleIconElement.addEventListener('click', () => {
+      renderUserCellAddButtonStyle(blocklist.PAGE_BLOCK_BUTTON_STYLES.icon);
+    });
+
+    userCellAddButtonStyleTextElement.addEventListener('click', () => {
+      renderUserCellAddButtonStyle(blocklist.PAGE_BLOCK_BUTTON_STYLES.text);
     });
 
     followersSourceFollowersElement.addEventListener('click', () => {
@@ -2717,7 +2904,8 @@
       }, { once: true });
     }
 
-    renderPageButtonStyle(currentPageButtonStyle);
+    renderPageButtonStyles(currentPageButtonStyles);
+    renderUserCellAddButtonStyle(currentUserCellAddButtonStyle);
     renderFollowersBlockLimit(currentFollowersBlockLimit);
     renderFollowersScanLimit(currentFollowersScanLimit);
     renderFollowersSource(currentFollowersSource);

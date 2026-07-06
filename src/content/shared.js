@@ -36,10 +36,22 @@
   const MIN_BATCH_BLOCK_DELAY_MS = 500;
   const MAX_BATCH_BLOCK_DELAY_MS = 2000;
   const DEFAULT_PAGE_BLOCK_BUTTON_STYLE = 'icon';
-  const PAGE_BLOCK_BUTTON_STYLE_STORAGE_KEY = 'pageBlockButtonStyle';
+  const DEFAULT_PAGE_BLOCK_BUTTON_STYLES = Object.freeze({
+    profile: DEFAULT_PAGE_BLOCK_BUTTON_STYLE,
+    tweet: DEFAULT_PAGE_BLOCK_BUTTON_STYLE,
+    'user-cell': DEFAULT_PAGE_BLOCK_BUTTON_STYLE
+  });
+  const PAGE_BLOCK_BUTTON_STYLES_STORAGE_KEY = 'pageBlockButtonStyles';
+  const USER_CELL_ADD_BUTTON_STYLE_STORAGE_KEY = 'userCellAddButtonStyle';
+  const DEFAULT_USER_CELL_ADD_BUTTON_STYLE = DEFAULT_PAGE_BLOCK_BUTTON_STYLE;
   const PAGE_BUTTON_STYLES = Object.freeze({
     icon: 'icon',
     text: 'text'
+  });
+  const PAGE_BUTTON_STYLE_SURFACES = Object.freeze({
+    profile: 'profile',
+    tweet: 'tweet',
+    userCell: 'user-cell'
   });
   const USERNAME_PATTERN = /^[A-Za-z0-9_]{1,15}$/;
   const RESERVED_PATH_SEGMENTS = new Set([
@@ -56,11 +68,21 @@
     'share'
   ]);
   const BLOCK_ICON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><g><path d="M12 3.75c-4.55 0-8.25 3.69-8.25 8.25 0 1.92.66 3.68 1.75 5.08L17.09 5.5C15.68 4.4 13.92 3.75 12 3.75zm6.5 3.17L6.92 18.5c1.4 1.1 3.16 1.75 5.08 1.75 4.56 0 8.25-3.69 8.25-8.25 0-1.92-.65-3.68-1.75-5.08zM1.75 12C1.75 6.34 6.34 1.75 12 1.75S22.25 6.34 22.25 12 17.66 22.25 12 22.25 1.75 17.66 1.75 12z"></path></g></svg>';
+  const ADD_ICON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><g><path d="M11.25 4.75h1.5v6.5h6.5v1.5h-6.5v6.5h-1.5v-6.5h-6.5v-1.5h6.5z"></path></g></svg>';
+  const CHECK_ICON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><g><path d="M9.55 16.94L5.3 12.7l1.41-1.41 2.84 2.83 7.84-7.84 1.41 1.41-9.25 9.25z"></path></g></svg>';
 
   const contentState = namespace.contentState || {
-    currentNativeButtonStyle: DEFAULT_PAGE_BLOCK_BUTTON_STYLE,
+    currentNativeButtonStyles: { ...DEFAULT_PAGE_BLOCK_BUTTON_STYLES },
+    currentUserCellAddButtonStyle: DEFAULT_USER_CELL_ADD_BUTTON_STYLE,
     userRestIdCache: new Map()
   };
+
+  contentState.currentNativeButtonStyles = normalizePageButtonStyles(
+    contentState.currentNativeButtonStyles || DEFAULT_PAGE_BLOCK_BUTTON_STYLES
+  );
+  contentState.currentUserCellAddButtonStyle = normalizePageButtonStyle(
+    contentState.currentUserCellAddButtonStyle || DEFAULT_USER_CELL_ADD_BUTTON_STYLE
+  );
 
   namespace.contentState = contentState;
 
@@ -203,6 +225,33 @@
       : DEFAULT_PAGE_BLOCK_BUTTON_STYLE;
   }
 
+  function normalizePageButtonStyleSurface(value) {
+    return value === PAGE_BUTTON_STYLE_SURFACES.profile || value === PAGE_BUTTON_STYLE_SURFACES.userCell
+      ? value
+      : PAGE_BUTTON_STYLE_SURFACES.tweet;
+  }
+
+  function normalizePageButtonStyles(value) {
+    if (typeof value === 'string') {
+      const normalizedStyle = normalizePageButtonStyle(value);
+      return {
+        [PAGE_BUTTON_STYLE_SURFACES.tweet]: normalizedStyle,
+        [PAGE_BUTTON_STYLE_SURFACES.profile]: normalizedStyle,
+        [PAGE_BUTTON_STYLE_SURFACES.userCell]: normalizedStyle
+      };
+    }
+
+    const styles = value && typeof value === 'object' && !Array.isArray(value)
+      ? value
+      : DEFAULT_PAGE_BLOCK_BUTTON_STYLES;
+
+    return {
+      [PAGE_BUTTON_STYLE_SURFACES.tweet]: normalizePageButtonStyle(styles[PAGE_BUTTON_STYLE_SURFACES.tweet]),
+      [PAGE_BUTTON_STYLE_SURFACES.profile]: normalizePageButtonStyle(styles[PAGE_BUTTON_STYLE_SURFACES.profile]),
+      [PAGE_BUTTON_STYLE_SURFACES.userCell]: normalizePageButtonStyle(styles[PAGE_BUTTON_STYLE_SURFACES.userCell])
+    };
+  }
+
   function getExtensionApi(globalRef = globalThis) {
     if (typeof browser !== 'undefined') {
       return browser;
@@ -244,24 +293,59 @@
     });
   }
 
-  function getCurrentNativeButtonStyle() {
-    return contentState.currentNativeButtonStyle;
+  function getCurrentNativeButtonStyles() {
+    return { ...contentState.currentNativeButtonStyles };
   }
 
-  function setCurrentNativeButtonStyle(style) {
-    contentState.currentNativeButtonStyle = normalizePageButtonStyle(style);
-    return contentState.currentNativeButtonStyle;
+  function getCurrentNativeButtonStyle(surface = PAGE_BUTTON_STYLE_SURFACES.tweet) {
+    const normalizedSurface = normalizePageButtonStyleSurface(surface);
+    return normalizePageButtonStyle(contentState.currentNativeButtonStyles?.[normalizedSurface]);
+  }
+
+  function setCurrentNativeButtonStyles(styles) {
+    contentState.currentNativeButtonStyles = normalizePageButtonStyles(styles);
+    return getCurrentNativeButtonStyles();
+  }
+
+  function setCurrentNativeButtonStyle(style, surface = null) {
+    if (surface) {
+      const normalizedSurface = normalizePageButtonStyleSurface(surface);
+      contentState.currentNativeButtonStyles = normalizePageButtonStyles({
+        ...contentState.currentNativeButtonStyles,
+        [normalizedSurface]: style
+      });
+      return getCurrentNativeButtonStyle(normalizedSurface);
+    }
+
+    contentState.currentNativeButtonStyles = normalizePageButtonStyles(style);
+    return getCurrentNativeButtonStyles();
+  }
+
+  function getCurrentUserCellAddButtonStyle() {
+    return normalizePageButtonStyle(contentState.currentUserCellAddButtonStyle);
+  }
+
+  function setCurrentUserCellAddButtonStyle(style) {
+    contentState.currentUserCellAddButtonStyle = normalizePageButtonStyle(style);
+    return contentState.currentUserCellAddButtonStyle;
   }
 
   function getUserRestIdCache() {
     return contentState.userRestIdCache;
   }
 
-  async function getStoredPageButtonStyle(globalRef = globalThis) {
+  async function getStoredPageButtonStyles(globalRef = globalThis) {
     const extensionApi = getExtensionApi(globalRef);
     const storageArea = extensionApi?.storage?.local;
-    const storedValues = await callStorageGet(storageArea, [PAGE_BLOCK_BUTTON_STYLE_STORAGE_KEY], extensionApi);
-    return normalizePageButtonStyle(storedValues?.[PAGE_BLOCK_BUTTON_STYLE_STORAGE_KEY]);
+    const storedValues = await callStorageGet(storageArea, [PAGE_BLOCK_BUTTON_STYLES_STORAGE_KEY], extensionApi);
+    return normalizePageButtonStyles(storedValues?.[PAGE_BLOCK_BUTTON_STYLES_STORAGE_KEY]);
+  }
+
+  async function getStoredUserCellAddButtonStyle(globalRef = globalThis) {
+    const extensionApi = getExtensionApi(globalRef);
+    const storageArea = extensionApi?.storage?.local;
+    const storedValues = await callStorageGet(storageArea, [USER_CELL_ADD_BUTTON_STYLE_STORAGE_KEY], extensionApi);
+    return normalizePageButtonStyle(storedValues?.[USER_CELL_ADD_BUTTON_STYLE_STORAGE_KEY]);
   }
 
   function getFollowersSharedApi() {
@@ -483,9 +567,9 @@
     const label = getButtonLabel(kind, state, action, surface, mode);
     const title = getButtonTitle(kind, screenName, state, surface, action, mode);
     const displayStyle = action === BUTTON_ACTIONS.saveToList
-      ? PAGE_BUTTON_STYLES.text
+      ? normalizePageButtonStyle(button?.dataset?.displayStyle || getCurrentUserCellAddButtonStyle())
       : kind === BUTTON_KINDS.native
-      ? normalizePageButtonStyle(button?.dataset?.displayStyle || contentState.currentNativeButtonStyle)
+      ? normalizePageButtonStyle(button?.dataset?.displayStyle || getCurrentNativeButtonStyle(surface))
       : PAGE_BUTTON_STYLES.text;
     button.dataset.state = state;
     button.dataset.displayStyle = displayStyle;
@@ -494,7 +578,11 @@
 
     if (displayStyle === PAGE_BUTTON_STYLES.icon) {
       button.textContent = '';
-      button.innerHTML = BLOCK_ICON_SVG;
+      if (action === BUTTON_ACTIONS.saveToList) {
+        button.innerHTML = (state === 'listed' || state === 'success') ? CHECK_ICON_SVG : ADD_ICON_SVG;
+      } else {
+        button.innerHTML = BLOCK_ICON_SVG;
+      }
     } else {
       button.innerHTML = '';
       button.textContent = label;
@@ -511,11 +599,15 @@
     BUTTON_KINDS,
     DEFAULT_BATCH_BLOCK_DELAY_MS,
     DEFAULT_PAGE_BLOCK_BUTTON_STYLE,
+    DEFAULT_PAGE_BLOCK_BUTTON_STYLES,
+    DEFAULT_USER_CELL_ADD_BUTTON_STYLE,
     MAX_BATCH_BLOCK_DELAY_MS,
     MESSAGE_TYPES,
     MIN_BATCH_BLOCK_DELAY_MS,
-    PAGE_BLOCK_BUTTON_STYLE_STORAGE_KEY,
+    PAGE_BLOCK_BUTTON_STYLES_STORAGE_KEY,
     PAGE_BUTTON_STYLES,
+    PAGE_BUTTON_STYLE_SURFACES,
+    USER_CELL_ADD_BUTTON_STYLE_STORAGE_KEY,
     RESERVED_PATH_SEGMENTS,
     SELECTORS,
     WAIT_INTERVAL_MS,
@@ -529,19 +621,26 @@
     getClientLanguage,
     getCsrfToken,
     getCurrentNativeButtonStyle,
+    getCurrentNativeButtonStyles,
+    getCurrentUserCellAddButtonStyle,
     getExtensionApi,
     makePrefixedLogger,
-    getStoredPageButtonStyle,
+    getStoredPageButtonStyles,
+    getStoredUserCellAddButtonStyle,
     getUserRestIdCache,
     isAbortError,
     normalizeBatchBlockDelayMs,
     normalizePageButtonStyle,
+    normalizePageButtonStyles,
+    normalizePageButtonStyleSurface,
     normalizeUsernameForMatching,
     readCookieValue,
     readScreenNameFromProfilePage,
     readScreenNameFromTweet,
     setButtonState,
     setCurrentNativeButtonStyle,
+    setCurrentNativeButtonStyles,
+    setCurrentUserCellAddButtonStyle,
     sleep
   };
 
