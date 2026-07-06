@@ -3,20 +3,25 @@ const test = require('node:test');
 
 const {
   ACTIVE_USERNAME_LIST_ID_STORAGE_KEY,
+  DEFAULT_USER_CELL_ADD_BUTTON_STYLE,
   DEFAULT_USER_CELL_ADD_BUTTON_VISIBILITY,
   DEFAULT_BATCH_BLOCK_DELAY_MS,
   DEFAULT_PAGE_BLOCK_BUTTON_STYLE,
+  DEFAULT_PAGE_BLOCK_BUTTON_STYLES,
   DEFAULT_USERNAME_LIST_ID,
   DEFAULT_USERNAME_LIST_NAME,
   MAX_BATCH_BLOCK_DELAY_MS,
   MIN_BATCH_BLOCK_DELAY_MS,
   PAGE_BLOCK_BUTTON_STYLES,
+  PAGE_BLOCK_BUTTON_STYLES_STORAGE_KEY,
+  PAGE_BUTTON_STYLE_SURFACES,
   USERNAME_LISTS_STORAGE_KEY,
   addUsernameToActiveList,
   createUsernameList,
-  getStoredPageBlockButtonStyle,
   getStoredBatchBlockDelayMs,
   getStoredUsernameListState,
+  getStoredPageBlockButtonStyles,
+  getStoredUserCellAddButtonStyle,
   getStoredUserCellAddButtonVisibility,
   getActiveUsernameList,
   getStoredUsernameLists,
@@ -25,6 +30,7 @@ const {
   mergeUsernameLists,
   normalizeBatchBlockDelayMs,
   normalizePageBlockButtonStyle,
+  normalizePageBlockButtonStyles,
   normalizeStoredUsernames,
   normalizeUsername,
   normalizeUserCellAddButtonVisibility,
@@ -32,13 +38,15 @@ const {
   normalizeUsernameLists,
   observeActiveUsernameList,
   observeStoredUsernames,
+  toggleUsernameInActiveList,
   parseUsernameImport,
   parseUsernameText,
   serializeUsernameText,
   setActiveStoredUsernames,
   setActiveUsernameListId,
   setStoredBatchBlockDelayMs,
-  setStoredPageBlockButtonStyle,
+  setStoredPageBlockButtonStyles,
+  setStoredUserCellAddButtonStyle,
   setStoredUserCellAddButtonVisibility,
   setStoredUsernameLists,
   setStoredUsernames
@@ -176,11 +184,40 @@ test('normalizePageBlockButtonStyle defaults to icon and accepts text', () => {
   assert.equal(normalizePageBlockButtonStyle('random'), DEFAULT_PAGE_BLOCK_BUTTON_STYLE);
 });
 
+test('normalizePageBlockButtonStyles defaults every surface to icon and accepts per-surface overrides', () => {
+  assert.deepEqual(normalizePageBlockButtonStyles(undefined), DEFAULT_PAGE_BLOCK_BUTTON_STYLES);
+  assert.deepEqual(normalizePageBlockButtonStyles(PAGE_BLOCK_BUTTON_STYLES.text), {
+    [PAGE_BUTTON_STYLE_SURFACES.tweet]: PAGE_BLOCK_BUTTON_STYLES.text,
+    [PAGE_BUTTON_STYLE_SURFACES.profile]: PAGE_BLOCK_BUTTON_STYLES.text,
+    [PAGE_BUTTON_STYLE_SURFACES.userCell]: PAGE_BLOCK_BUTTON_STYLES.text
+  });
+  assert.deepEqual(normalizePageBlockButtonStyles({
+    [PAGE_BUTTON_STYLE_SURFACES.tweet]: PAGE_BLOCK_BUTTON_STYLES.text,
+    [PAGE_BUTTON_STYLE_SURFACES.profile]: 'bad-value'
+  }), {
+    [PAGE_BUTTON_STYLE_SURFACES.tweet]: PAGE_BLOCK_BUTTON_STYLES.text,
+    [PAGE_BUTTON_STYLE_SURFACES.profile]: PAGE_BLOCK_BUTTON_STYLES.icon,
+    [PAGE_BUTTON_STYLE_SURFACES.userCell]: PAGE_BLOCK_BUTTON_STYLES.icon
+  });
+});
+
 test('normalizeUserCellAddButtonVisibility defaults to true and only treats false as disabled', () => {
   assert.equal(normalizeUserCellAddButtonVisibility(undefined), DEFAULT_USER_CELL_ADD_BUTTON_VISIBILITY);
   assert.equal(normalizeUserCellAddButtonVisibility(true), true);
   assert.equal(normalizeUserCellAddButtonVisibility(false), false);
   assert.equal(normalizeUserCellAddButtonVisibility('nope'), true);
+});
+
+test('getStoredUserCellAddButtonStyle defaults to icon and round-trips through storage', async () => {
+  const extensionApi = createExtensionApi();
+
+  assert.equal(await getStoredUserCellAddButtonStyle(extensionApi), DEFAULT_USER_CELL_ADD_BUTTON_STYLE);
+
+  const savedStyle = await setStoredUserCellAddButtonStyle(PAGE_BLOCK_BUTTON_STYLES.text, extensionApi);
+  const loadedStyle = await getStoredUserCellAddButtonStyle(extensionApi);
+
+  assert.equal(savedStyle, PAGE_BLOCK_BUTTON_STYLES.text);
+  assert.equal(loadedStyle, PAGE_BLOCK_BUTTON_STYLES.text);
 });
 
 test('normalizeBatchBlockDelayMs clamps values into the supported range', () => {
@@ -242,7 +279,7 @@ test('getStoredUsernameListState returns lists and active list with one storage 
   ]);
 });
 
-test('active list wrappers read, write, switch, and add usernames without duplicates', async () => {
+test('active list wrappers read, write, switch, add usernames without duplicates, and toggle membership', async () => {
   const extensionApi = createPromiseExtensionApi();
   const lists = [
     { id: 'blocklist', name: 'Blocklist', usernames: ['alice'] },
@@ -264,6 +301,21 @@ test('active list wrappers read, write, switch, and add usernames without duplic
   });
   assert.deepEqual(await addUsernameToActiveList('@Dana', extensionApi), {
     added: false,
+    list: { id: 'watchlist', name: 'Watchlist', usernames: ['charlie', 'bob', 'dana'] },
+    username: 'dana',
+    usernames: ['charlie', 'bob', 'dana']
+  });
+
+  assert.deepEqual(await toggleUsernameInActiveList('Dana', extensionApi), {
+    added: false,
+    removed: true,
+    list: { id: 'watchlist', name: 'Watchlist', usernames: ['charlie', 'bob'] },
+    username: 'dana',
+    usernames: ['charlie', 'bob']
+  });
+  assert.deepEqual(await toggleUsernameInActiveList('Dana', extensionApi), {
+    added: true,
+    removed: false,
     list: { id: 'watchlist', name: 'Watchlist', usernames: ['charlie', 'bob', 'dana'] },
     username: 'dana',
     usernames: ['charlie', 'bob', 'dana']
@@ -328,14 +380,23 @@ test('setStoredBatchBlockDelayMs and getStoredBatchBlockDelayMs round-trip throu
   assert.equal(loadedDelayMs, MAX_BATCH_BLOCK_DELAY_MS);
 });
 
-test('setStoredPageBlockButtonStyle and getStoredPageBlockButtonStyle round-trip through extension storage', async () => {
+test('setStoredPageBlockButtonStyles and getStoredPageBlockButtonStyles round-trip through extension storage', async () => {
   const extensionApi = createExtensionApi();
 
-  const savedStyle = await setStoredPageBlockButtonStyle(PAGE_BLOCK_BUTTON_STYLES.text, extensionApi);
-  const loadedStyle = await getStoredPageBlockButtonStyle(extensionApi);
+  const savedStyles = await setStoredPageBlockButtonStyles({
+    [PAGE_BUTTON_STYLE_SURFACES.tweet]: PAGE_BLOCK_BUTTON_STYLES.text,
+    [PAGE_BUTTON_STYLE_SURFACES.profile]: PAGE_BLOCK_BUTTON_STYLES.icon,
+    [PAGE_BUTTON_STYLE_SURFACES.userCell]: PAGE_BLOCK_BUTTON_STYLES.text
+  }, extensionApi);
+  const loadedStyles = await getStoredPageBlockButtonStyles(extensionApi);
 
-  assert.equal(savedStyle, PAGE_BLOCK_BUTTON_STYLES.text);
-  assert.equal(loadedStyle, PAGE_BLOCK_BUTTON_STYLES.text);
+  assert.deepEqual(savedStyles, {
+    [PAGE_BUTTON_STYLE_SURFACES.tweet]: PAGE_BLOCK_BUTTON_STYLES.text,
+    [PAGE_BUTTON_STYLE_SURFACES.profile]: PAGE_BLOCK_BUTTON_STYLES.icon,
+    [PAGE_BUTTON_STYLE_SURFACES.userCell]: PAGE_BLOCK_BUTTON_STYLES.text
+  });
+  assert.deepEqual(loadedStyles, savedStyles);
+  assert.deepEqual(extensionApi.store[PAGE_BLOCK_BUTTON_STYLES_STORAGE_KEY], savedStyles);
 });
 
 test('setStoredUserCellAddButtonVisibility and getStoredUserCellAddButtonVisibility round-trip through extension storage', async () => {
@@ -355,19 +416,26 @@ test('stored blocklist helpers also work with promise-based storage APIs', async
   const loadedUsernames = await getStoredUsernames(extensionApi);
   const savedDelayMs = await setStoredBatchBlockDelayMs(1201, extensionApi);
   const loadedDelayMs = await getStoredBatchBlockDelayMs(extensionApi);
-  const savedStyle = await setStoredPageBlockButtonStyle(PAGE_BLOCK_BUTTON_STYLES.text, extensionApi);
-  const loadedStyle = await getStoredPageBlockButtonStyle(extensionApi);
+  const savedStyles = await setStoredPageBlockButtonStyles({
+    [PAGE_BUTTON_STYLE_SURFACES.tweet]: PAGE_BLOCK_BUTTON_STYLES.text,
+    [PAGE_BUTTON_STYLE_SURFACES.profile]: PAGE_BLOCK_BUTTON_STYLES.icon,
+    [PAGE_BUTTON_STYLE_SURFACES.userCell]: PAGE_BLOCK_BUTTON_STYLES.text
+  }, extensionApi);
+  const loadedStyles = await getStoredPageBlockButtonStyles(extensionApi);
   const savedVisibility = await setStoredUserCellAddButtonVisibility(false, extensionApi);
   const loadedVisibility = await getStoredUserCellAddButtonVisibility(extensionApi);
+  const savedAddStyle = await setStoredUserCellAddButtonStyle(PAGE_BLOCK_BUTTON_STYLES.text, extensionApi);
+  const loadedAddStyle = await getStoredUserCellAddButtonStyle(extensionApi);
 
   assert.deepEqual(savedUsernames, ['felixmfdo', 'spam_account']);
   assert.deepEqual(loadedUsernames, ['felixmfdo', 'spam_account']);
   assert.equal(savedDelayMs, 1201);
   assert.equal(loadedDelayMs, 1201);
-  assert.equal(savedStyle, PAGE_BLOCK_BUTTON_STYLES.text);
-  assert.equal(loadedStyle, PAGE_BLOCK_BUTTON_STYLES.text);
+  assert.deepEqual(savedStyles, loadedStyles);
   assert.equal(savedVisibility, false);
   assert.equal(loadedVisibility, false);
+  assert.equal(savedAddStyle, PAGE_BLOCK_BUTTON_STYLES.text);
+  assert.equal(loadedAddStyle, PAGE_BLOCK_BUTTON_STYLES.text);
 });
 
 test('getStoredUsernames rejects callback-style storage errors', async () => {

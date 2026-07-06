@@ -197,12 +197,14 @@ function createPopupElement(overrides = {}) {
 
 function createPopupDocument() {
   const elements = {
+    'add-followers-to-list': createPopupElement(),
     'back-to-main': createPopupElement(),
     'back-from-followers': createPopupElement(),
     'batch-block-delay-ms': createPopupElement(),
     'block-follower-candidates': createPopupElement(),
     'block-now': createPopupElement(),
     'cancel-followers-run': createPopupElement(),
+    'clear-list': createPopupElement(),
     'clear-popup-debug-log': createPopupElement(),
     'followers-block-limit': createPopupElement(),
     'followers-block-progress': createPopupElement(),
@@ -222,13 +224,19 @@ function createPopupDocument() {
     'open-settings': createPopupElement(),
     'open-followers': createPopupElement(),
     'popup-debug-log': createPopupElement({ scrollTop: 0, scrollHeight: 0 }),
-    'page-button-style-icon': createPopupElement({ setAttribute() {} }),
-    'page-button-style-text': createPopupElement({ setAttribute() {} }),
+    'page-button-style-profile-icon': createPopupElement({ setAttribute() {} }),
+    'page-button-style-profile-text': createPopupElement({ setAttribute() {} }),
+    'page-button-style-tweet-icon': createPopupElement({ setAttribute() {} }),
+    'page-button-style-tweet-text': createPopupElement({ setAttribute() {} }),
+    'page-button-style-user-cell-icon': createPopupElement({ setAttribute() {} }),
+    'page-button-style-user-cell-text': createPopupElement({ setAttribute() {} }),
     'popup-shell': createPopupElement({ dataset: {} }),
     'rename-username-list': createPopupElement(),
     'scan-followers-preview': createPopupElement(),
     'save-blocklist': createPopupElement(),
     'save-settings': createPopupElement(),
+    'user-cell-add-button-style-icon': createPopupElement({ setAttribute() {} }),
+    'user-cell-add-button-style-text': createPopupElement({ setAttribute() {} }),
     'show-user-cell-add-button': createPopupElement({ checked: false }),
     status: createPopupElement(),
     'username-blocklist': createPopupElement(),
@@ -995,8 +1003,15 @@ test('init loads stored popup state and supports settings navigation', async () 
     async getStoredBatchBlockDelayMs() {
       return 1400;
     },
-    async getStoredPageBlockButtonStyle() {
-      return sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.text;
+    async getStoredPageBlockButtonStyles() {
+      return {
+        [sharedBlocklist.PAGE_BUTTON_STYLE_SURFACES.tweet]: sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.text,
+        [sharedBlocklist.PAGE_BUTTON_STYLE_SURFACES.profile]: sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.icon,
+        [sharedBlocklist.PAGE_BUTTON_STYLE_SURFACES.userCell]: sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.text
+      };
+    },
+    async getStoredUserCellAddButtonStyle() {
+      return sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.icon;
     },
     async getStoredUserCellAddButtonVisibility() {
       return false;
@@ -1016,8 +1031,14 @@ test('init loads stored popup state and supports settings navigation', async () 
   assert.equal(elements['batch-block-delay-ms'].value, '1400');
   assert.equal(elements['followers-block-limit'].value, String(sharedFollowers.DEFAULT_FOLLOWERS_BLOCK_LIMIT));
   assert.equal(elements['followers-scan-limit'].value, String(sharedFollowers.DEFAULT_FOLLOWERS_SCAN_LIMIT));
-  assert.equal(elements['page-button-style-text'].dataset.active, 'true');
-  assert.equal(elements['page-button-style-icon'].dataset.active, 'false');
+  assert.equal(elements['page-button-style-tweet-text'].dataset.active, 'true');
+  assert.equal(elements['page-button-style-tweet-icon'].dataset.active, 'false');
+  assert.equal(elements['page-button-style-profile-icon'].dataset.active, 'true');
+  assert.equal(elements['page-button-style-profile-text'].dataset.active, 'false');
+  assert.equal(elements['page-button-style-user-cell-text'].dataset.active, 'true');
+  assert.equal(elements['page-button-style-user-cell-icon'].dataset.active, 'false');
+  assert.equal(elements['user-cell-add-button-style-icon'].dataset.active, 'true');
+  assert.equal(elements['user-cell-add-button-style-text'].dataset.active, 'false');
   assert.equal(elements['show-user-cell-add-button'].checked, false);
   assert.equal(elements.status.textContent, 'Save usernames for later, or block the whole list immediately through any open X tab.');
 
@@ -1027,14 +1048,17 @@ test('init loads stored popup state and supports settings navigation', async () 
   elements['batch-block-delay-ms'].value = '2600';
   elements['batch-block-delay-ms'].change();
   assert.equal(elements['batch-block-delay-ms'].value, '2000');
-  elements['page-button-style-icon'].click();
-  assert.equal(elements['page-button-style-icon'].dataset.active, 'true');
-  assert.equal(elements['page-button-style-text'].dataset.active, 'false');
+  elements['page-button-style-tweet-icon'].click();
+  assert.equal(elements['page-button-style-tweet-icon'].dataset.active, 'true');
+  assert.equal(elements['page-button-style-tweet-text'].dataset.active, 'false');
 
   elements['back-to-main'].click();
   assert.equal(elements['popup-shell'].dataset.view, POPUP_VIEWS.main);
   assert.equal(elements['batch-block-delay-ms'].value, '1400');
-  assert.equal(elements['page-button-style-text'].dataset.active, 'true');
+  assert.equal(elements['page-button-style-tweet-text'].dataset.active, 'true');
+  assert.equal(elements['page-button-style-profile-icon'].dataset.active, 'true');
+  assert.equal(elements['page-button-style-user-cell-text'].dataset.active, 'true');
+  assert.equal(elements['user-cell-add-button-style-icon'].dataset.active, 'true');
   assert.equal(elements['show-user-cell-add-button'].checked, false);
 
   elements['open-followers'].click();
@@ -1088,8 +1112,8 @@ test('init restores persisted followers preview and username draft state', async
     async getStoredBatchBlockDelayMs() {
       return 1000;
     },
-    async getStoredPageBlockButtonStyle() {
-      return sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.icon;
+    async getStoredPageBlockButtonStyles() {
+      return sharedBlocklist.DEFAULT_PAGE_BLOCK_BUTTON_STYLES;
     },
     async getStoredUsernames() {
       return ['saveduser'];
@@ -1110,6 +1134,46 @@ test('init restores persisted followers preview and username draft state', async
   elements['username-blocklist'].value = '@changeduser';
   elements['username-blocklist'].dispatch('input');
   assert.equal(loadStoredPopupState(storage).usernameDrafts.blocklist.text, '@changeduser');
+});
+
+test('init clear list only updates the local draft until the user saves', async (t) => {
+  const originalLocalStorage = globalThis.localStorage;
+  const storage = createLocalStorageStub();
+
+  globalThis.localStorage = storage;
+  t.after(() => {
+    if (originalLocalStorage === undefined) {
+      delete globalThis.localStorage;
+      return;
+    }
+
+    globalThis.localStorage = originalLocalStorage;
+  });
+
+  const extensionApi = createStorageExtensionApi({
+    [sharedBlocklist.ACTIVE_USERNAME_LIST_ID_STORAGE_KEY]: 'blocklist',
+    [sharedBlocklist.USERNAME_LISTS_STORAGE_KEY]: [
+      { id: 'blocklist', name: 'Blocklist', usernames: ['alice', 'bob'] }
+    ]
+  });
+  const { documentRef, elements } = createPopupDocument();
+
+  init(documentRef, extensionApi, sharedBlocklist, sharedFollowers);
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  assert.equal(elements['username-blocklist'].value, '@alice\n@bob');
+
+  elements['clear-list'].click();
+
+  assert.equal(elements['username-blocklist'].value, '');
+  assert.equal(elements['username-count'].textContent, '0 usernames');
+  assert.deepEqual(extensionApi.store[sharedBlocklist.USERNAME_LISTS_STORAGE_KEY][0].usernames, ['alice', 'bob']);
+  assert.deepEqual(loadStoredPopupState(storage).usernameDrafts.blocklist, {
+    baseText: '@alice\n@bob',
+    text: ''
+  });
+  assert.equal(elements.status.textContent, 'List cleared. Click Save list to save this change.');
 });
 
 test('init loads, switches, saves, creates, renames, and deletes username lists', async (t) => {
@@ -1409,8 +1473,8 @@ test('init ignores a persisted completed follower-run status and restores the de
     async getStoredBatchBlockDelayMs() {
       return 1000;
     },
-    async getStoredPageBlockButtonStyle() {
-      return sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.icon;
+    async getStoredPageBlockButtonStyles() {
+      return sharedBlocklist.DEFAULT_PAGE_BLOCK_BUTTON_STYLES;
     },
     async getStoredUsernames() {
       return [];
@@ -1446,8 +1510,8 @@ test('init ignores a persisted list CRUD status and restores the default header 
     async getStoredBatchBlockDelayMs() {
       return 1000;
     },
-    async getStoredPageBlockButtonStyle() {
-      return sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.icon;
+    async getStoredPageBlockButtonStyles() {
+      return sharedBlocklist.DEFAULT_PAGE_BLOCK_BUTTON_STYLES;
     },
     async getStoredUsernames() {
       return [];
@@ -1503,17 +1567,26 @@ test('init saves the blocklist, disables actions while saving, and reports inval
 test('init saves settings, updates the active delay, and returns to the main view', async () => {
   const { documentRef, elements } = createPopupDocument();
   const deferredDelaySave = createDeferred();
-  const deferredStyleSave = createDeferred();
+  const deferredStylesSave = createDeferred();
+  const deferredAddStyleSave = createDeferred();
   const deferredVisibilitySave = createDeferred();
   const savedDelayInputs = [];
   const savedStyles = [];
+  const savedAddStyles = [];
   const savedVisibilityInputs = [];
   const blocklist = {
     ...sharedBlocklist,
     async getStoredBatchBlockDelayMs() {
       return 1400;
     },
-    async getStoredPageBlockButtonStyle() {
+    async getStoredPageBlockButtonStyles() {
+      return {
+        [sharedBlocklist.PAGE_BUTTON_STYLE_SURFACES.tweet]: sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.icon,
+        [sharedBlocklist.PAGE_BUTTON_STYLE_SURFACES.profile]: sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.icon,
+        [sharedBlocklist.PAGE_BUTTON_STYLE_SURFACES.userCell]: sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.text
+      };
+    },
+    async getStoredUserCellAddButtonStyle() {
       return sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.icon;
     },
     async getStoredUserCellAddButtonVisibility() {
@@ -1526,9 +1599,13 @@ test('init saves settings, updates the active delay, and returns to the main vie
       savedDelayInputs.push(delayMs);
       return deferredDelaySave.promise;
     },
-    setStoredPageBlockButtonStyle(style) {
-      savedStyles.push(style);
-      return deferredStyleSave.promise;
+    setStoredPageBlockButtonStyles(styles) {
+      savedStyles.push(styles);
+      return deferredStylesSave.promise;
+    },
+    setStoredUserCellAddButtonStyle(style) {
+      savedAddStyles.push(style);
+      return deferredAddStyleSave.promise;
     },
     setStoredUserCellAddButtonVisibility(isVisible) {
       savedVisibilityInputs.push(isVisible);
@@ -1541,13 +1618,21 @@ test('init saves settings, updates the active delay, and returns to the main vie
 
   elements['open-settings'].click();
   elements['batch-block-delay-ms'].value = '2301';
-  elements['page-button-style-text'].click();
+  elements['page-button-style-tweet-text'].click();
+  elements['page-button-style-profile-text'].click();
+  elements['page-button-style-user-cell-icon'].click();
+  elements['user-cell-add-button-style-text'].click();
   elements['show-user-cell-add-button'].checked = false;
   elements['save-settings'].click();
   await flushAsyncWork();
 
   assert.equal(JSON.stringify(savedDelayInputs), JSON.stringify([2000]));
-  assert.equal(JSON.stringify(savedStyles), JSON.stringify([sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.text]));
+  assert.equal(JSON.stringify(savedStyles), JSON.stringify([{
+    [sharedBlocklist.PAGE_BUTTON_STYLE_SURFACES.tweet]: sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.text,
+    [sharedBlocklist.PAGE_BUTTON_STYLE_SURFACES.profile]: sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.text,
+    [sharedBlocklist.PAGE_BUTTON_STYLE_SURFACES.userCell]: sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.icon
+  }]));
+  assert.equal(JSON.stringify(savedAddStyles), JSON.stringify([sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.text]));
   assert.equal(JSON.stringify(savedVisibilityInputs), JSON.stringify([false]));
   assert.equal(elements.status.textContent, 'Saving settings...');
   assert.equal(elements['save-blocklist'].disabled, true);
@@ -1555,22 +1640,33 @@ test('init saves settings, updates the active delay, and returns to the main vie
   assert.equal(elements['save-settings'].disabled, true);
 
   deferredDelaySave.resolve(1900);
-  deferredStyleSave.resolve(sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.text);
+  deferredStylesSave.resolve({
+    [sharedBlocklist.PAGE_BUTTON_STYLE_SURFACES.tweet]: sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.text,
+    [sharedBlocklist.PAGE_BUTTON_STYLE_SURFACES.profile]: sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.text,
+    [sharedBlocklist.PAGE_BUTTON_STYLE_SURFACES.userCell]: sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.icon
+  });
+  deferredAddStyleSave.resolve(sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.text);
   deferredVisibilitySave.resolve(false);
   await flushAsyncWork();
 
   assert.equal(elements['popup-shell'].dataset.view, POPUP_VIEWS.main);
   assert.equal(elements['batch-block-delay-ms'].value, '1900');
-  assert.equal(elements['page-button-style-text'].dataset.active, 'true');
+  assert.equal(elements['page-button-style-tweet-text'].dataset.active, 'true');
+  assert.equal(elements['page-button-style-profile-text'].dataset.active, 'true');
+  assert.equal(elements['page-button-style-user-cell-icon'].dataset.active, 'true');
+  assert.equal(elements['user-cell-add-button-style-text'].dataset.active, 'true');
   assert.equal(elements['show-user-cell-add-button'].checked, false);
-  assert.equal(elements.status.textContent, 'Saved settings. Delay: 1900 ms. Style: text.');
+  assert.equal(elements.status.textContent, 'Saved settings. Delay: 1900 ms.');
   assert.equal(elements['save-blocklist'].disabled, false);
   assert.equal(elements['block-now'].disabled, false);
   assert.equal(elements['save-settings'].disabled, false);
 
   elements['open-settings'].click();
   assert.equal(elements['batch-block-delay-ms'].value, '1900');
-  assert.equal(elements['page-button-style-text'].dataset.active, 'true');
+  assert.equal(elements['page-button-style-tweet-text'].dataset.active, 'true');
+  assert.equal(elements['page-button-style-profile-text'].dataset.active, 'true');
+  assert.equal(elements['page-button-style-user-cell-icon'].dataset.active, 'true');
+  assert.equal(elements['user-cell-add-button-style-text'].dataset.active, 'true');
   assert.equal(elements['show-user-cell-add-button'].checked, false);
 });
 
@@ -1961,8 +2057,8 @@ test('init renders fatal popup text when the initial popup load rejects', async 
     async getStoredBatchBlockDelayMs() {
       return 1000;
     },
-    async getStoredPageBlockButtonStyle() {
-      return sharedBlocklist.PAGE_BLOCK_BUTTON_STYLES.icon;
+    async getStoredPageBlockButtonStyles() {
+      return sharedBlocklist.DEFAULT_PAGE_BLOCK_BUTTON_STYLES;
     },
     async getStoredUsernames() {
       throw new Error('storage exploded');

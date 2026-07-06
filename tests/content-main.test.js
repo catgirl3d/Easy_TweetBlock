@@ -10,14 +10,18 @@ const {
   BUTTON_KINDS,
   DEFAULT_BATCH_BLOCK_DELAY_MS,
   DEFAULT_PAGE_BLOCK_BUTTON_STYLE,
+  DEFAULT_PAGE_BLOCK_BUTTON_STYLES,
+  DEFAULT_USER_CELL_ADD_BUTTON_STYLE,
   FOLLOWERS_PAGE_SIZE,
   FOLLOWERS_QUERY_IDS,
   FOLLOWING_QUERY_IDS,
   MAX_BATCH_BLOCK_DELAY_MS,
   MESSAGE_TYPES,
   MIN_BATCH_BLOCK_DELAY_MS,
-  PAGE_BLOCK_BUTTON_STYLE_STORAGE_KEY,
+  PAGE_BLOCK_BUTTON_STYLES_STORAGE_KEY,
   PAGE_BUTTON_STYLES,
+  PAGE_BUTTON_STYLE_SURFACES,
+  USER_CELL_ADD_BUTTON_STYLE_STORAGE_KEY,
   SELECTORS,
   USER_BY_SCREEN_NAME_QUERY_IDS,
   applyCurrentNativeButtonStyleToDocument,
@@ -47,7 +51,8 @@ const {
   extractXClientTransactionKeyFromDocument,
   createUsernameSet,
   extractScreenNameFromHref,
-  getStoredPageButtonStyle,
+  getStoredPageButtonStyles,
+  getStoredUserCellAddButtonStyle,
   getClientLanguage,
   getButtonTitle,
   getCsrfToken,
@@ -59,8 +64,10 @@ const {
   normalizeBatchBlockDelayMs,
   normalizeFollowerBlockCandidate,
   normalizePageButtonStyle,
+  normalizePageButtonStyles,
   normalizeUsernameForMatching,
   observeStoredPageButtonStyle,
+  observeStoredUserCellAddButtonStyle,
   observeStoredUserCellAddButtonVisibility,
   parseFollowersPage,
   parseUserLookupRestId,
@@ -75,11 +82,14 @@ const {
   runNativeBlockFlow,
   scanFollowersForBlocking,
   setCurrentNativeButtonStyle,
+  setCurrentNativeButtonStyles,
+  setCurrentUserCellAddButtonStyle,
   setButtonState,
   sleep,
   startFollowerRun,
   syncUserCellListButtons,
   syncStoredPageButtonStyle,
+  syncStoredUserCellAddButtonStyle,
   syncStoredUserCellAddButtonVisibility,
   tryGenerateXClientTransactionId,
   waitForElement
@@ -842,7 +852,8 @@ test('setButtonState uses list-specific titles for user cell buttons', () => {
   assert.equal(attributes['aria-label'], 'Retry unblock for @Felixmfdo from this list');
 });
 
-test('setButtonState renders save-to-list labels and disables listed buttons', () => {
+test('setButtonState renders save-to-list labels and keeps listed buttons clickable for removal', () => {
+  setCurrentUserCellAddButtonStyle(PAGE_BUTTON_STYLES.text);
   const attributes = {
     'data-easy-tweetblock-action': BUTTON_ACTIONS.saveToList
   };
@@ -869,9 +880,53 @@ test('setButtonState renders save-to-list labels and disables listed buttons', (
   assert.equal(button.disabled, false);
 
   setButtonState(button, 'listed', 'Felixmfdo');
-  assert.equal(button.textContent, 'In list');
-  assert.equal(button.title, '@Felixmfdo is already in the active list');
+  assert.equal(button.textContent, 'Remove');
+  assert.equal(button.title, 'Remove @Felixmfdo from the active list');
+  assert.equal(button.disabled, false);
+
+  setButtonState(button, 'running-remove', 'Felixmfdo');
+  assert.equal(button.textContent, 'Removing...');
+  assert.equal(button.title, 'Removing @Felixmfdo from the active list');
   assert.equal(button.disabled, true);
+
+  setCurrentUserCellAddButtonStyle(DEFAULT_USER_CELL_ADD_BUTTON_STYLE);
+});
+
+test('setButtonState renders save-to-list icons (plus and checkmark) in icon mode', () => {
+  const attributes = {
+    'data-easy-tweetblock-action': BUTTON_ACTIONS.saveToList
+  };
+  const button = {
+    dataset: {
+      easyTweetblockAction: BUTTON_ACTIONS.saveToList,
+      displayStyle: PAGE_BUTTON_STYLES.icon,
+      surface: 'user-cell'
+    },
+    disabled: false,
+    getAttribute(name) {
+      return attributes[name] || null;
+    },
+    innerHTML: '',
+    textContent: '',
+    title: '',
+    setAttribute(name, value) {
+      attributes[name] = value;
+    }
+  };
+
+  setButtonState(button, 'idle', 'Felixmfdo');
+  assert.equal(button.innerHTML.includes('M11.25 4.75'), true); // ADD_ICON_SVG path
+  assert.equal(button.innerHTML.includes('M9.55 16.94'), false); // CHECK_ICON_SVG path not present yet
+
+  setButtonState(button, 'listed', 'Felixmfdo');
+  assert.equal(button.innerHTML.includes('M11.25 4.75'), false); // ADD_ICON_SVG path should not be present
+  assert.equal(button.innerHTML.includes('M9.55 16.94'), true); // CHECK_ICON_SVG path present
+
+  setButtonState(button, 'running-remove', 'Felixmfdo');
+  assert.equal(button.innerHTML.includes('M9.55 16.94'), true); // CHECK_ICON_SVG path remains present while removing
+
+  setButtonState(button, 'success', 'Felixmfdo');
+  assert.equal(button.innerHTML.includes('M9.55 16.94'), true); // CHECK_ICON_SVG path present
 });
 
 test('setButtonState keeps the block icon for user-cell success states in icon mode', () => {
@@ -2314,11 +2369,28 @@ test('normalizePageButtonStyle defaults to icon and accepts the text variant', (
   assert.equal(normalizePageButtonStyle('something-else'), PAGE_BUTTON_STYLES.icon);
 });
 
-test('syncStoredPageButtonStyle and observeStoredPageButtonStyle apply the saved native button style', async () => {
+test('syncStoredPageButtonStyle and observeStoredPageButtonStyle apply saved native button styles per surface', async () => {
   const listeners = [];
-  const button = createDomElement({
+  const tweetButton = createDomElement({
     dataset: {
       kind: BUTTON_KINDS.native,
+      surface: PAGE_BUTTON_STYLE_SURFACES.tweet,
+      screenName: 'Felixmfdo',
+      state: 'idle'
+    }
+  });
+  const profileButton = createDomElement({
+    dataset: {
+      kind: BUTTON_KINDS.native,
+      surface: PAGE_BUTTON_STYLE_SURFACES.profile,
+      screenName: 'Felixmfdo',
+      state: 'idle'
+    }
+  });
+  const userCellButton = createDomElement({
+    dataset: {
+      kind: BUTTON_KINDS.native,
+      surface: PAGE_BUTTON_STYLE_SURFACES.userCell,
       screenName: 'Felixmfdo',
       state: 'idle'
     }
@@ -2332,7 +2404,11 @@ test('syncStoredPageButtonStyle and observeStoredPageButtonStyle apply the saved
         local: {
           get(_keys, callback) {
             callback({
-              [PAGE_BLOCK_BUTTON_STYLE_STORAGE_KEY]: PAGE_BUTTON_STYLES.text
+              [PAGE_BLOCK_BUTTON_STYLES_STORAGE_KEY]: {
+                [PAGE_BUTTON_STYLE_SURFACES.tweet]: PAGE_BUTTON_STYLES.text,
+                [PAGE_BUTTON_STYLE_SURFACES.profile]: PAGE_BUTTON_STYLES.icon,
+                [PAGE_BUTTON_STYLE_SURFACES.userCell]: PAGE_BUTTON_STYLES.text
+              }
             });
           }
         },
@@ -2346,24 +2422,38 @@ test('syncStoredPageButtonStyle and observeStoredPageButtonStyle apply the saved
     },
     document: {
       querySelectorAll(selector) {
-        return selector === `[${BLOCK_BUTTON_ATTRIBUTE}][data-kind="native"]` ? [button] : [];
+        return selector === `[${BLOCK_BUTTON_ATTRIBUTE}][data-kind="native"]`
+          ? [tweetButton, profileButton, userCellButton]
+          : [];
       }
     }
   };
 
   await syncStoredPageButtonStyle(globalRef);
-  assert.equal(button.dataset.displayStyle, PAGE_BUTTON_STYLES.text);
-  assert.equal(button.textContent, 'Block');
+  assert.equal(tweetButton.dataset.displayStyle, PAGE_BUTTON_STYLES.text);
+  assert.equal(tweetButton.textContent, 'Block');
+  assert.equal(profileButton.dataset.displayStyle, PAGE_BUTTON_STYLES.icon);
+  assert.equal(profileButton.innerHTML.includes('<svg'), true);
+  assert.equal(userCellButton.dataset.displayStyle, PAGE_BUTTON_STYLES.text);
+  assert.equal(userCellButton.textContent, 'Block');
 
   observeStoredPageButtonStyle(globalRef);
   listeners[0]({
-    [PAGE_BLOCK_BUTTON_STYLE_STORAGE_KEY]: {
-      newValue: PAGE_BUTTON_STYLES.icon
+    [PAGE_BLOCK_BUTTON_STYLES_STORAGE_KEY]: {
+      newValue: {
+        [PAGE_BUTTON_STYLE_SURFACES.tweet]: PAGE_BUTTON_STYLES.icon,
+        [PAGE_BUTTON_STYLE_SURFACES.profile]: PAGE_BUTTON_STYLES.text,
+        [PAGE_BUTTON_STYLE_SURFACES.userCell]: PAGE_BUTTON_STYLES.icon
+      }
     }
   }, 'local');
 
-  assert.equal(button.dataset.displayStyle, PAGE_BUTTON_STYLES.icon);
-  assert.equal(button.innerHTML.includes('<svg'), true);
+  assert.equal(tweetButton.dataset.displayStyle, PAGE_BUTTON_STYLES.icon);
+  assert.equal(tweetButton.innerHTML.includes('<svg'), true);
+  assert.equal(profileButton.dataset.displayStyle, PAGE_BUTTON_STYLES.text);
+  assert.equal(profileButton.textContent, 'Block');
+  assert.equal(userCellButton.dataset.displayStyle, PAGE_BUTTON_STYLES.icon);
+  assert.equal(userCellButton.innerHTML.includes('<svg'), true);
 });
 
 test('syncStoredUserCellAddButtonVisibility and observeStoredUserCellAddButtonVisibility hide and show Add buttons', async () => {
@@ -2415,6 +2505,60 @@ test('syncStoredUserCellAddButtonVisibility and observeStoredUserCellAddButtonVi
   }, 'local');
 
   assert.equal(button.hidden, false);
+});
+
+test('syncStoredUserCellAddButtonStyle and observeStoredUserCellAddButtonStyle update Add buttons', async () => {
+  const listeners = [];
+  const button = createDomElement({
+    dataset: {
+      action: BUTTON_ACTIONS.saveToList,
+      easyTweetblockAction: BUTTON_ACTIONS.saveToList,
+      screenName: 'Felixmfdo',
+      surface: 'user-cell'
+    }
+  });
+  button.setAttribute(BUTTON_ACTION_ATTRIBUTE, BUTTON_ACTIONS.saveToList);
+  const globalRef = {
+    chrome: {
+      runtime: {
+        lastError: null
+      },
+      storage: {
+        local: {
+          get(_keys, callback) {
+            callback({
+              [USER_CELL_ADD_BUTTON_STYLE_STORAGE_KEY]: PAGE_BUTTON_STYLES.text
+            });
+          }
+        },
+        onChanged: {
+          addListener(listener) {
+            listeners.push(listener);
+          },
+          removeListener() {}
+        }
+      }
+    },
+    document: {
+      querySelectorAll(selector) {
+        return selector === `[${BLOCK_BUTTON_ATTRIBUTE}][${BUTTON_ACTION_ATTRIBUTE}="${BUTTON_ACTIONS.saveToList}"]` ? [button] : [];
+      }
+    }
+  };
+
+  await syncStoredUserCellAddButtonStyle(globalRef);
+  assert.equal(button.dataset.displayStyle, PAGE_BUTTON_STYLES.text);
+  assert.equal(button.textContent, 'Add');
+
+  observeStoredUserCellAddButtonStyle(globalRef);
+  listeners[0]({
+    [USER_CELL_ADD_BUTTON_STYLE_STORAGE_KEY]: {
+      newValue: PAGE_BUTTON_STYLES.icon
+    }
+  }, 'local');
+
+  assert.equal(button.dataset.displayStyle, PAGE_BUTTON_STYLES.icon);
+  assert.equal(button.innerHTML.includes('<svg'), true);
 });
 
 test('normalizeUsernameForMatching lowercases usernames for blocklist checks', () => {
@@ -2554,7 +2698,37 @@ test('attachButtonToUserCell hides the custom block button when the native actio
   assert.equal(blockButton.hidden, true);
 });
 
-test('createUserCellListButton adds the username to the active list and reflects listed state', async (t) => {
+test('new native block buttons use the configured style for each surface on creation', (t) => {
+  const { documentRef } = createDocumentStub();
+  const { tweetNode } = createTweetNode('TweetUser');
+  const profilePage = createProfilePageDocument('ProfileUser');
+  const { followButton, userCell } = createUserCellNode('CellUser');
+
+  useGlobalOverrides(t, { document: documentRef });
+  setCurrentNativeButtonStyles({
+    [PAGE_BUTTON_STYLE_SURFACES.tweet]: PAGE_BUTTON_STYLES.text,
+    [PAGE_BUTTON_STYLE_SURFACES.profile]: PAGE_BUTTON_STYLES.icon,
+    [PAGE_BUTTON_STYLE_SURFACES.userCell]: PAGE_BUTTON_STYLES.text
+  });
+  t.after(() => {
+    setCurrentNativeButtonStyles(DEFAULT_PAGE_BLOCK_BUTTON_STYLES);
+  });
+
+  const tweetButton = createNativeBlockButton(tweetNode, documentRef);
+  const profileButton = createProfileBlockButton(profilePage.documentRef);
+  const userCellButton = createUserCellBlockButton(userCell, {
+    actionButton: followButton
+  });
+
+  assert.equal(tweetButton.dataset.displayStyle, PAGE_BUTTON_STYLES.text);
+  assert.equal(tweetButton.textContent, 'Block');
+  assert.equal(profileButton.dataset.displayStyle, PAGE_BUTTON_STYLES.icon);
+  assert.equal(profileButton.innerHTML.includes('<svg'), true);
+  assert.equal(userCellButton.dataset.displayStyle, PAGE_BUTTON_STYLES.text);
+  assert.equal(userCellButton.textContent, 'Block');
+});
+
+test('createUserCellListButton toggles the username in the active list on repeated clicks', async (t) => {
   const { documentRef } = createDocumentStub();
   const { userCell } = createUserCellNode('Milana62234788');
   const extensionApi = createStorageExtensionApi({
@@ -2567,6 +2741,10 @@ test('createUserCellListButton adds the username to the active list and reflects
   });
 
   useGlobalOverrides(t, { document: documentRef });
+  setCurrentUserCellAddButtonStyle(PAGE_BUTTON_STYLES.text);
+  t.after(() => {
+    setCurrentUserCellAddButtonStyle(DEFAULT_USER_CELL_ADD_BUTTON_STYLE);
+  });
 
   const button = createUserCellListButton(userCell, {
     documentRef,
@@ -2591,7 +2769,51 @@ test('createUserCellListButton adds the username to the active list and reflects
   await flushAsyncWork();
 
   assert.equal(button.dataset.state, 'listed');
-  assert.equal(button.textContent, 'In list');
+  assert.equal(button.textContent, 'Remove');
+
+  button.click();
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  assert.deepEqual(extensionApi.store[sharedBlocklist.USERNAME_LISTS_STORAGE_KEY][0].usernames, []);
+  assert.equal(button.dataset.state, 'idle');
+  assert.equal(button.textContent, 'Add');
+});
+
+test('createUserCellListButton uses the configured Add button icon on creation and after saving', async (t) => {
+  const { documentRef } = createDocumentStub();
+  const { userCell } = createUserCellNode('Milana62234788');
+  const extensionApi = createStorageExtensionApi({
+    [sharedBlocklist.ACTIVE_USERNAME_LIST_ID_STORAGE_KEY]: 'blocklist',
+    [sharedBlocklist.USERNAME_LISTS_STORAGE_KEY]: [{
+      id: 'blocklist',
+      name: 'Blocklist',
+      usernames: []
+    }]
+  });
+
+  useGlobalOverrides(t, { document: documentRef });
+  setCurrentUserCellAddButtonStyle(PAGE_BUTTON_STYLES.icon);
+  t.after(() => {
+    setCurrentUserCellAddButtonStyle(DEFAULT_USER_CELL_ADD_BUTTON_STYLE);
+  });
+
+  const button = createUserCellListButton(userCell, {
+    documentRef,
+    extensionApi
+  });
+
+  assert.equal(button.dataset.displayStyle, PAGE_BUTTON_STYLES.icon);
+  assert.equal(button.textContent, '');
+  assert.equal(button.innerHTML.includes('M11.25 4.75'), true);
+
+  button.click();
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  assert.deepEqual(extensionApi.store[sharedBlocklist.USERNAME_LISTS_STORAGE_KEY][0].usernames, ['milana62234788']);
+  assert.equal(button.dataset.state, 'success');
+  assert.equal(button.innerHTML.includes('M9.55 16.94'), true);
 });
 
 test('createUserCellListButton shares the initial active-list storage read', async (t) => {
@@ -2614,6 +2836,10 @@ test('createUserCellListButton shares the initial active-list storage read', asy
   };
 
   useGlobalOverrides(t, { document: documentRef });
+  setCurrentUserCellAddButtonStyle(PAGE_BUTTON_STYLES.text);
+  t.after(() => {
+    setCurrentUserCellAddButtonStyle(DEFAULT_USER_CELL_ADD_BUTTON_STYLE);
+  });
 
   const firstButton = createUserCellListButton(firstUserCell, {
     documentRef,
@@ -2849,6 +3075,84 @@ test('createUserCellBlockButton supports unblock and restores the native follow 
   assert.equal(requestedUrls.length, 3);
   assert.equal(requestedUrls[1].url.endsWith('/i/api/1.1/blocks/create.json'), true);
   assert.equal(requestedUrls[2].url.endsWith('/i/api/1.1/blocks/destroy.json'), true);
+});
+
+test('createUserCellBlockButton refuses to unblock when the user cell now shows a different user', async (t) => {
+  const { documentRef } = createDocumentStub();
+  const { followButton, userCell } = createUserCellNode('alice');
+  const requestedUrls = [];
+
+  useGlobalOverrides(t, { document: documentRef });
+  setCurrentNativeButtonStyle(PAGE_BUTTON_STYLES.text);
+  t.after(() => {
+    setCurrentNativeButtonStyle(PAGE_BUTTON_STYLES.icon);
+  });
+
+  const button = createUserCellBlockButton(userCell, {
+    actionButton: followButton,
+    documentRef: {
+      cookie: 'ct0=token123',
+      documentElement: { lang: 'en-US' },
+      location: { origin: 'https://x.com' }
+    },
+    async fetchImpl(url, options = {}) {
+      requestedUrls.push({ options, url });
+
+      if (options.method === 'POST') {
+        return {
+          ok: true,
+          async json() {
+            return { ok: true };
+          }
+        };
+      }
+
+      return {
+        ok: true,
+        async json() {
+          return {
+            data: {
+              user: {
+                result: {
+                  rest_id: '111'
+                }
+              }
+            }
+          };
+        }
+      };
+    },
+    cache: new Map(),
+    queryIds: ['workingQueryId']
+  });
+
+  button.click();
+  await flushAsyncWork();
+  assert.equal(button.dataset.state, 'blocked');
+  assert.equal(button.dataset.userRestId, '111');
+
+  // Simulate X recycling the cell for a different account while our button
+  // (and its cached restId) survives on the reused DOM node.
+  userCell.querySelector = (selector) => {
+    if (selector === SELECTORS.profileLink) {
+      return {
+        getAttribute(name) {
+          return name === 'href' ? '/bob' : null;
+        }
+      };
+    }
+    return null;
+  };
+
+  button.click();
+  await flushAsyncWork();
+
+  const destroyRequests = requestedUrls.filter((entry) => entry.url.endsWith('/i/api/1.1/blocks/destroy.json'));
+  assert.equal(destroyRequests.length, 0, 'no destroy request should fire for the stale restId');
+  assert.equal(button.dataset.state, 'idle');
+  assert.equal(button.dataset.userCellBlockMode, 'block');
+  assert.equal(button.dataset.userRestId, undefined);
+  assert.equal(followButton.hidden, false);
 });
 
 test('createUserCellBlockButton retries a failed unblock without restoring follow state early', async (t) => {
@@ -3345,7 +3649,11 @@ test('init installs styles, registers runtime messaging, and observes added twee
         local: {
           get(_keys, callback) {
             callback({
-              [PAGE_BLOCK_BUTTON_STYLE_STORAGE_KEY]: PAGE_BUTTON_STYLES.text
+              [PAGE_BLOCK_BUTTON_STYLES_STORAGE_KEY]: {
+                [PAGE_BUTTON_STYLE_SURFACES.tweet]: PAGE_BUTTON_STYLES.text,
+                [PAGE_BUTTON_STYLE_SURFACES.profile]: PAGE_BUTTON_STYLES.text,
+                [PAGE_BUTTON_STYLE_SURFACES.userCell]: PAGE_BUTTON_STYLES.text
+              }
             });
           }
         },
@@ -3372,7 +3680,7 @@ test('init installs styles, registers runtime messaging, and observes added twee
       target: documentRef.body
     });
     assert.equal(runtimeListeners.length, 1);
-    assert.equal(storageListeners.length, 3);
+    assert.equal(storageListeners.length, 4);
 
     observerCallback([{ addedNodes: [tweetNode] }]);
 
