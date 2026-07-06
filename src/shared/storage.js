@@ -3,7 +3,7 @@
     return extensionApi || null;
   }
 
-  function callStorageGet(storageArea, query, extensionApi = getExtensionApi()) {
+  function callStorageGet(storageArea, query, extensionApi) {
     if (!storageArea) {
       return Promise.resolve({});
     }
@@ -32,7 +32,7 @@
     });
   }
 
-  function callStorageSet(storageArea, payload, extensionApi = getExtensionApi()) {
+  function callStorageSet(storageArea, payload, extensionApi) {
     if (!storageArea) {
       return Promise.resolve();
     }
