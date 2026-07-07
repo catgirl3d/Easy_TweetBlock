@@ -1079,6 +1079,7 @@ test('init loads stored popup state and supports settings navigation', async () 
 test('init restores persisted followers preview and username draft state', async (t) => {
   const originalLocalStorage = globalThis.localStorage;
   const storage = createLocalStorageStub();
+  const savedAt = Date.now();
 
   globalThis.localStorage = storage;
   t.after(() => {
@@ -1098,6 +1099,7 @@ test('init restores persisted followers preview and username draft state', async
       candidates: [{ restId: '101', username: 'alice' }],
       hasMorePages: true,
       readyCount: 1,
+      savedAt,
       scanLimit: 80,
       scannedCount: 5,
       targetRestId: '999',
@@ -1137,6 +1139,80 @@ test('init restores persisted followers preview and username draft state', async
   elements['username-blocklist'].value = '@changeduser';
   elements['username-blocklist'].dispatch('input');
   assert.equal(loadStoredPopupState(storage).usernameDrafts.blocklist.text, '@changeduser');
+  assert.equal(loadStoredPopupState(storage).followersPreviews.followers.savedAt, savedAt);
+});
+
+test('init drops expired and legacy persisted followers previews during hydration', async (t) => {
+  const originalLocalStorage = globalThis.localStorage;
+  const originalDateNow = Date.now;
+  const storage = createLocalStorageStub();
+  const now = 1_783_496_400_000;
+
+  globalThis.localStorage = storage;
+  Date.now = () => now;
+  t.after(() => {
+    Date.now = originalDateNow;
+
+    if (originalLocalStorage === undefined) {
+      delete globalThis.localStorage;
+      return;
+    }
+
+    globalThis.localStorage = originalLocalStorage;
+  });
+
+  saveStoredPopupState({
+    followersPreview: {
+      alreadyBlockedCount: 1,
+      blockLimit: 25,
+      candidates: [{ restId: '101', username: 'alice' }],
+      hasMorePages: false,
+      readyCount: 1,
+      scanLimit: 80,
+      scannedCount: 5,
+      source: 'followers',
+      targetRestId: '999',
+      targetScreenName: 'targetuser'
+    },
+    followersPreviews: {
+      followers: {
+        alreadyBlockedCount: 1,
+        blockLimit: 25,
+        candidates: [{ restId: '101', username: 'alice' }],
+        hasMorePages: false,
+        readyCount: 1,
+        savedAt: now - (10 * 60 * 1000) - 1,
+        scanLimit: 80,
+        scannedCount: 5,
+        source: 'followers',
+        targetRestId: '999',
+        targetScreenName: 'targetuser'
+      },
+      following: null
+    },
+    followersSource: 'followers',
+    view: POPUP_VIEWS.followers
+  }, storage);
+
+  const { documentRef, elements } = createPopupDocument();
+
+  init(documentRef, { runtime: {}, tabs: {} }, {
+    ...sharedBlocklist,
+    async getStoredUsernames() {
+      return [];
+    }
+  });
+  await flushAsyncWork();
+
+  assert.equal(elements['popup-shell'].dataset.view, POPUP_VIEWS.followers);
+  assert.equal(elements['followers-preview'].textContent, '');
+  assert.equal(elements['followers-summary'].textContent, 'Open a profile, followers, or following page in the active X tab, then run a preview scan.');
+  assert.equal(elements['block-follower-candidates'].disabled, true);
+  assert.deepEqual(loadStoredPopupState(storage).followersPreviews, {
+    followers: null,
+    following: null
+  });
+  assert.equal(loadStoredPopupState(storage).followersPreview, undefined);
 });
 
 test('init clear list only updates the local draft until the user saves', async (t) => {

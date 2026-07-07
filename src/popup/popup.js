@@ -950,6 +950,7 @@
 
   function init(documentRef = document, extensionApi = getExtensionApi(), blocklist = globalThis.EasyTweetBlockBlocklist, followers = followersApi, settings = globalThis.EasyTweetBlockSettings || settingsApi) {
     const DEFAULT_FOLLOWERS_SUMMARY = 'Open a profile, followers, or following page in the active X tab, then run a preview scan.';
+    const FOLLOWERS_PREVIEW_TTL_MS = 10 * 60 * 1000;
     const shellElement = documentRef.getElementById('popup-shell');
     const statusElement = documentRef.getElementById('status');
     const toastRegionElement = documentRef.getElementById('popup-toast-region');
@@ -1108,8 +1109,30 @@
       };
     }
 
-    function normalizeStoredFollowersPreview(preview, fallbackSource = followers.DEFAULT_FOLLOWERS_SOURCE) {
+    function normalizeFollowersPreviewSavedAt(savedAt) {
+      const normalizedSavedAt = Math.round(Number(savedAt));
+
+      return Number.isFinite(normalizedSavedAt) && normalizedSavedAt > 0
+        ? normalizedSavedAt
+        : null;
+    }
+
+    function isFollowersPreviewExpired(preview, now = Date.now()) {
+      const normalizedSavedAt = normalizeFollowersPreviewSavedAt(preview?.savedAt);
+
+      if (!normalizedSavedAt) {
+        return true;
+      }
+
+      return normalizedSavedAt + FOLLOWERS_PREVIEW_TTL_MS < now;
+    }
+
+    function normalizeStoredFollowersPreview(preview, fallbackSource = followers.DEFAULT_FOLLOWERS_SOURCE, now = Date.now()) {
       if (!preview || typeof preview !== 'object' || !Array.isArray(preview.candidates)) {
+        return null;
+      }
+
+      if (isFollowersPreviewExpired(preview, now)) {
         return null;
       }
 
@@ -1127,6 +1150,7 @@
         candidates,
         hasMorePages: Boolean(preview.hasMorePages),
         readyCount: Math.max(0, Math.round(Number(preview.readyCount) || candidates.length)),
+        savedAt: normalizeFollowersPreviewSavedAt(preview.savedAt),
         scanLimit: followers.normalizeFollowersScanLimit(preview.scanLimit),
         scannedCount: Math.max(0, Math.round(Number(preview.scannedCount) || 0)),
         source: followers.normalizeFollowersSource(preview.source ?? fallbackSource),
@@ -1137,10 +1161,11 @@
 
     function normalizeStoredFollowersPreviews(previews, fallbackPreview = null, fallbackSource = followers.DEFAULT_FOLLOWERS_SOURCE) {
       const normalizedPreviews = createEmptyFollowersPreviewState();
+      const now = Date.now();
 
       if (previews && typeof previews === 'object' && !Array.isArray(previews)) {
         for (const source of Object.values(followers.FOLLOWERS_SOURCES)) {
-          const normalizedPreview = normalizeStoredFollowersPreview(previews[source], source);
+          const normalizedPreview = normalizeStoredFollowersPreview(previews[source], source, now);
 
           if (normalizedPreview) {
             normalizedPreviews[source] = normalizedPreview;
@@ -1148,7 +1173,7 @@
         }
       }
 
-      const normalizedFallbackPreview = normalizeStoredFollowersPreview(fallbackPreview, fallbackSource);
+      const normalizedFallbackPreview = normalizeStoredFollowersPreview(fallbackPreview, fallbackSource, now);
 
       if (normalizedFallbackPreview) {
         const normalizedSource = followers.normalizeFollowersSource(normalizedFallbackPreview.source);
@@ -1172,12 +1197,12 @@
       }
 
       const normalizedSource = followers.normalizeFollowersSource(preview.source);
-      const normalizedPreview = normalizedSource === preview.source
-        ? preview
-        : {
-            ...preview,
-            source: normalizedSource
-          };
+      const normalizedSavedAt = normalizeFollowersPreviewSavedAt(preview.savedAt) || Date.now();
+      const normalizedPreview = {
+        ...preview,
+        savedAt: normalizedSavedAt,
+        source: normalizedSource
+      };
 
       currentFollowersPreviews[normalizedSource] = normalizedPreview;
       currentFollowersPreview = normalizedPreview;
@@ -1201,7 +1226,6 @@
 
       saveStoredPopupState({
         followersBlockLimit: currentFollowersBlockLimit,
-        followersPreview: currentFollowersPreview,
         followersPreviews: currentFollowersPreviews,
         followersScanLimit: currentFollowersScanLimit,
         followersSource: currentFollowersSource,
