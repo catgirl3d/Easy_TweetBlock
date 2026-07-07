@@ -50,20 +50,19 @@
     return normalizedUsernames;
   }
 
-  function parseUsernameText(text) {
-    if (typeof text !== 'string' || !text.trim()) {
-      return {
-        usernames: [],
-        invalidEntries: []
-      };
-    }
-
+  function parseUsernameEntries(entries) {
     const usernames = [];
     const invalidEntries = [];
     const seenUsernames = new Set();
-    const rawEntries = text.split(/[\s,]+/).map((entry) => entry.trim()).filter(Boolean);
 
-    for (const entry of rawEntries) {
+    for (const value of entries) {
+      const rawEntry = typeof value === 'string' ? value : String(value ?? '');
+      const entry = rawEntry.trim();
+
+      if (!entry) {
+        continue;
+      }
+
       const normalizedUsername = normalizeUsername(entry);
 
       if (!normalizedUsername) {
@@ -83,6 +82,17 @@
       usernames,
       invalidEntries
     };
+  }
+
+  function parseUsernameText(text) {
+    if (typeof text !== 'string' || !text.trim()) {
+      return {
+        usernames: [],
+        invalidEntries: []
+      };
+    }
+
+    return parseUsernameEntries(text.split(/[\s,]+/));
   }
 
   function serializeUsernameText(usernames) {
@@ -412,40 +422,14 @@
   }
 
   function parseUsernameValues(values) {
-    const usernames = [];
-    const invalidEntries = [];
-    const seenUsernames = new Set();
-
     if (!Array.isArray(values)) {
       return {
-        usernames,
-        invalidEntries
+        usernames: [],
+        invalidEntries: []
       };
     }
 
-    for (const value of values) {
-      const rawEntry = typeof value === 'string' ? value : String(value ?? '');
-      const normalizedUsername = normalizeUsername(rawEntry);
-
-      if (!normalizedUsername) {
-        if (rawEntry.trim()) {
-          invalidEntries.push(rawEntry.trim());
-        }
-        continue;
-      }
-
-      if (seenUsernames.has(normalizedUsername)) {
-        continue;
-      }
-
-      seenUsernames.add(normalizedUsername);
-      usernames.push(normalizedUsername);
-    }
-
-    return {
-      usernames,
-      invalidEntries
-    };
+    return parseUsernameEntries(values);
   }
 
   function parseJsonUsernameImport(payload) {

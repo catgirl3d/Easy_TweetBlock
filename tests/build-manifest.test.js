@@ -38,6 +38,7 @@ test("content script files load storage, settings, and shared modules before con
   assert.equal(CONTENT_SCRIPT_FILES.includes("src/shared/settings.js"), true);
   assert.equal(CONTENT_SCRIPT_FILES.includes("src/content/shared.js"), true);
   assert.equal(CONTENT_SCRIPT_FILES.includes("src/shared/blocklist.js"), true);
+  assert.equal(CONTENT_SCRIPT_FILES.includes("src/content/features.js"), true);
   assert.equal(
     CONTENT_SCRIPT_FILES.indexOf("src/shared/storage.js") < CONTENT_SCRIPT_FILES.indexOf("src/shared/settings.js"),
     true
@@ -51,7 +52,15 @@ test("content script files load storage, settings, and shared modules before con
     true
   );
   assert.equal(
-    CONTENT_SCRIPT_FILES.indexOf("src/shared/blocklist.js") < CONTENT_SCRIPT_FILES.indexOf("src/content/main.js"),
+    CONTENT_SCRIPT_FILES.indexOf("src/content/x-client-transaction.js") < CONTENT_SCRIPT_FILES.indexOf("src/content/features.js"),
+    true
+  );
+  assert.equal(
+    CONTENT_SCRIPT_FILES.indexOf("src/content/features.js") < CONTENT_SCRIPT_FILES.indexOf("src/content/api.js"),
+    true
+  );
+  assert.equal(
+    CONTENT_SCRIPT_FILES.indexOf("src/content/api.js") < CONTENT_SCRIPT_FILES.indexOf("src/content/main.js"),
     true
   );
 });

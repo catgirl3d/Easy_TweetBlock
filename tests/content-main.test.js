@@ -3,6 +3,7 @@ const test = require('node:test');
 
 const sharedBlocklist = require('../src/shared/blocklist.js');
 const sharedSettings = require('../src/shared/settings.js');
+const contentFeatures = require('../src/content/features.js');
 
 const {
   BLOCK_BUTTON_ATTRIBUTE,
@@ -1189,11 +1190,13 @@ test('buildXApiHeaders includes the shared web bearer and csrf token', () => {
 
 test('buildUserLookupUrls creates one candidate URL per known query id', () => {
   const urls = buildUserLookupUrls('Felixmfdo', 'https://x.com');
+  const lookupUrl = new URL(urls[0]);
 
   assert.equal(urls.length, USER_BY_SCREEN_NAME_QUERY_IDS.length);
   assert.equal(urls[0].startsWith(`https://x.com/i/api/graphql/${USER_BY_SCREEN_NAME_QUERY_IDS[0]}/UserByScreenName?`), true);
   assert.equal(urls[0].includes('screen_name'), true);
   assert.equal(urls[0].includes('Felixmfdo'), true);
+  assert.deepEqual(JSON.parse(lookupUrl.searchParams.get('features')), contentFeatures.USER_BY_SCREEN_NAME_FEATURES);
 });
 
 test('buildFollowersLookupUrls creates one candidate URL per known followers query id', () => {
@@ -1202,11 +1205,13 @@ test('buildFollowersLookupUrls creates one candidate URL per known followers que
     count: FOLLOWERS_PAGE_SIZE,
     cursor: 'bottom-cursor'
   });
+  const lookupUrl = new URL(urls[0]);
 
   assert.equal(urls.length, FOLLOWERS_QUERY_IDS.length);
   assert.equal(urls[0].startsWith(`https://x.com/i/api/graphql/${FOLLOWERS_QUERY_IDS[0]}/Followers?`), true);
   assert.equal(urls[0].includes('2743192327'), true);
   assert.equal(urls[0].includes('bottom-cursor'), true);
+  assert.deepEqual(JSON.parse(lookupUrl.searchParams.get('features')), contentFeatures.FOLLOWERS_FEATURES);
 });
 
 test('buildFollowersLookupUrls creates Following URLs for the following source', () => {

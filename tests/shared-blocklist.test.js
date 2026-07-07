@@ -343,6 +343,14 @@ test('parseUsernameImport supports text, json usernames, and json lists', () => 
   });
 });
 
+test('parseUsernameImport preserves JSON username values before validation', () => {
+  assert.deepEqual(parseUsernameImport('{"usernames":["Alice","bad name","bad,name","Alice",null,""]}', 'names.json'), {
+    invalidEntries: ['bad name', 'bad,name'],
+    lists: [],
+    usernames: ['alice']
+  });
+});
+
 test('mergeUsernameLists merges imported lists by name and deduplicates usernames', () => {
   assert.deepEqual(mergeUsernameLists([
     { id: 'spam', name: 'Spam', usernames: ['alice'] }

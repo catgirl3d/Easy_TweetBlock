@@ -9,6 +9,7 @@
     'src/shared/blocklist.js',
     'src/shared/followers.js',
     'src/content/x-client-transaction.js',
+    'src/content/features.js',
     'src/content/api.js',
     'src/content/dom.js',
     'src/content/main.js'
