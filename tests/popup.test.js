@@ -2033,6 +2033,117 @@ test('init scans following when the following source is selected', async () => {
   assert.equal(elements['followers-progress-label'].textContent, 'Ready to block 1 following account');
 });
 
+test('init keeps separate previews for followers and following when switching sources', async (t) => {
+  const originalLocalStorage = globalThis.localStorage;
+  const storage = createLocalStorageStub();
+
+  globalThis.localStorage = storage;
+  t.after(() => {
+    if (originalLocalStorage === undefined) {
+      delete globalThis.localStorage;
+      return;
+    }
+
+    globalThis.localStorage = originalLocalStorage;
+  });
+
+  const { documentRef, elements } = createPopupDocument();
+  const blocklist = {
+    ...sharedBlocklist,
+    async getStoredUsernames() {
+      return [];
+    }
+  };
+  const extensionApi = {
+    runtime: {},
+    tabs: {
+      async query(queryInfo) {
+        if (queryInfo.active) {
+          return [{ id: 42, url: 'https://x.com/targetuser/followers' }];
+        }
+
+        return [];
+      },
+      async sendMessage(_tabId, message) {
+        if (message.options?.source === 'following') {
+          return {
+            ok: true,
+            preview: {
+              alreadyBlockedCount: 0,
+              blockLimit: 10,
+              candidates: [{ restId: '303', username: 'charlie' }],
+              hasMorePages: false,
+              readyCount: 1,
+              scanLimit: 15,
+              scannedCount: 1,
+              source: 'following',
+              targetRestId: '999',
+              targetScreenName: 'targetuser'
+            }
+          };
+        }
+
+        return {
+          ok: true,
+          preview: {
+            alreadyBlockedCount: 0,
+            blockLimit: 10,
+            candidates: [{ restId: '101', username: 'alice' }],
+            hasMorePages: false,
+            readyCount: 1,
+            scanLimit: 15,
+            scannedCount: 1,
+            source: 'followers',
+            targetRestId: '999',
+            targetScreenName: 'targetuser'
+          }
+        };
+      }
+    }
+  };
+
+  init(documentRef, extensionApi, blocklist, sharedFollowers);
+  await flushAsyncWork();
+
+  elements['open-followers'].click();
+  elements['followers-block-limit'].value = '10';
+  elements['followers-scan-limit'].value = '15';
+  elements['scan-followers-preview'].click();
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  assert.equal(elements['followers-preview'].textContent, '@alice');
+  assert.equal(loadStoredPopupState(storage).followersPreviews.followers.candidates[0].username, 'alice');
+
+  elements['followers-source-following'].click();
+  assert.equal(elements['followers-summary'].textContent, 'Source changed to following. Run a new preview scan.');
+  assert.equal(elements['block-follower-candidates'].disabled, true);
+  assert.equal(loadStoredPopupState(storage).followersPreviews.followers.candidates[0].username, 'alice');
+
+  elements['scan-followers-preview'].click();
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  assert.equal(elements['followers-preview'].textContent, '@charlie');
+  assert.equal(loadStoredPopupState(storage).followersPreviews.following.candidates[0].username, 'charlie');
+
+  elements['followers-source-followers'].click();
+  assert.equal(elements['followers-preview'].textContent, '@alice');
+  assert.equal(elements['followers-summary'].textContent, 'Scanned 1 follower from @targetuser. Already blocked: 0. Ready: 1.');
+  assert.equal(elements['block-follower-candidates'].disabled, false);
+
+  elements['followers-source-following'].click();
+  assert.equal(elements['followers-preview'].textContent, '@charlie');
+  assert.equal(elements['followers-summary'].textContent, 'Scanned 1 following account from @targetuser. Already blocked: 0. Ready: 1.');
+
+  const reopenedPopup = createPopupDocument();
+  init(reopenedPopup.documentRef, extensionApi, blocklist, sharedFollowers);
+  await flushAsyncWork();
+
+  assert.equal(reopenedPopup.elements['followers-source-following'].dataset.active, 'true');
+  assert.equal(reopenedPopup.elements['followers-preview'].textContent, '@charlie');
+});
+
 test('init renders fatal popup text when the initial popup load rejects', async () => {
   const { documentRef } = createPopupDocument();
   const blocklist = {

@@ -1046,6 +1046,7 @@
     let currentFollowersBlockLimit = followers?.DEFAULT_FOLLOWERS_BLOCK_LIMIT;
     let currentFollowersBlockRunId = null;
     let currentFollowersPreview = null;
+    let currentFollowersPreviews = createEmptyFollowersPreviewState();
     let currentFollowersScanLimit = followers?.DEFAULT_FOLLOWERS_SCAN_LIMIT;
     let currentFollowersScanRunId = null;
     let currentFollowersSource = followers?.DEFAULT_FOLLOWERS_SOURCE;
@@ -1094,7 +1095,14 @@
 
     void emitPopupOpenDebug(extensionApi);
 
-    function normalizeStoredFollowersPreview(preview) {
+    function createEmptyFollowersPreviewState() {
+      return {
+        [followers.FOLLOWERS_SOURCES.followers]: null,
+        [followers.FOLLOWERS_SOURCES.following]: null
+      };
+    }
+
+    function normalizeStoredFollowersPreview(preview, fallbackSource = followers.DEFAULT_FOLLOWERS_SOURCE) {
       if (!preview || typeof preview !== 'object' || !Array.isArray(preview.candidates)) {
         return null;
       }
@@ -1115,10 +1123,69 @@
         readyCount: Math.max(0, Math.round(Number(preview.readyCount) || candidates.length)),
         scanLimit: followers.normalizeFollowersScanLimit(preview.scanLimit),
         scannedCount: Math.max(0, Math.round(Number(preview.scannedCount) || 0)),
-        source: followers.normalizeFollowersSource(preview.source),
+        source: followers.normalizeFollowersSource(preview.source ?? fallbackSource),
         targetRestId: preview.targetRestId == null ? null : String(preview.targetRestId),
         targetScreenName: preview.targetScreenName == null ? null : String(preview.targetScreenName)
       };
+    }
+
+    function normalizeStoredFollowersPreviews(previews, fallbackPreview = null, fallbackSource = followers.DEFAULT_FOLLOWERS_SOURCE) {
+      const normalizedPreviews = createEmptyFollowersPreviewState();
+
+      if (previews && typeof previews === 'object' && !Array.isArray(previews)) {
+        for (const source of Object.values(followers.FOLLOWERS_SOURCES)) {
+          const normalizedPreview = normalizeStoredFollowersPreview(previews[source], source);
+
+          if (normalizedPreview) {
+            normalizedPreviews[source] = normalizedPreview;
+          }
+        }
+      }
+
+      const normalizedFallbackPreview = normalizeStoredFollowersPreview(fallbackPreview, fallbackSource);
+
+      if (normalizedFallbackPreview) {
+        const normalizedSource = followers.normalizeFollowersSource(normalizedFallbackPreview.source);
+
+        if (!normalizedPreviews[normalizedSource]) {
+          normalizedPreviews[normalizedSource] = normalizedFallbackPreview;
+        }
+      }
+
+      return normalizedPreviews;
+    }
+
+    function getFollowersPreviewForSource(source = currentFollowersSource) {
+      return currentFollowersPreviews[followers.normalizeFollowersSource(source)] || null;
+    }
+
+    function storeFollowersPreview(preview) {
+      if (!preview) {
+        currentFollowersPreview = null;
+        return null;
+      }
+
+      const normalizedSource = followers.normalizeFollowersSource(preview.source);
+      const normalizedPreview = normalizedSource === preview.source
+        ? preview
+        : {
+            ...preview,
+            source: normalizedSource
+          };
+
+      currentFollowersPreviews[normalizedSource] = normalizedPreview;
+      currentFollowersPreview = normalizedPreview;
+      return normalizedPreview;
+    }
+
+    function clearStoredFollowersPreview(source = currentFollowersSource) {
+      currentFollowersPreviews[followers.normalizeFollowersSource(source)] = null;
+      currentFollowersPreview = getFollowersPreviewForSource(currentFollowersSource);
+    }
+
+    function clearAllStoredFollowersPreviews() {
+      currentFollowersPreviews = createEmptyFollowersPreviewState();
+      currentFollowersPreview = null;
     }
 
     function persistCurrentPopupState() {
@@ -1129,6 +1196,7 @@
       saveStoredPopupState({
         followersBlockLimit: currentFollowersBlockLimit,
         followersPreview: currentFollowersPreview,
+        followersPreviews: currentFollowersPreviews,
         followersScanLimit: currentFollowersScanLimit,
         followersSource: currentFollowersSource,
         statusMessage: getPersistedStatusMessage(statusElement.textContent || ''),
@@ -1857,8 +1925,13 @@
       return false;
     }
 
-    function clearFollowersPreview(summary = DEFAULT_FOLLOWERS_SUMMARY) {
-      currentFollowersPreview = null;
+    function clearFollowersPreview(summary = DEFAULT_FOLLOWERS_SUMMARY, { clearAll = false } = {}) {
+      if (clearAll) {
+        clearAllStoredFollowersPreviews();
+      } else {
+        clearStoredFollowersPreview();
+      }
+
       setFollowersSummary(summary);
       followersPreviewElement.textContent = '';
       persistCurrentPopupState();
@@ -1874,25 +1947,25 @@
         return;
       }
 
-      currentFollowersPreview = preview;
+      const normalizedPreview = storeFollowersPreview(preview);
 
-      const targetLabel = preview.targetScreenName ? `@${preview.targetScreenName}` : 'the active profile';
-      const previewLines = preview.candidates.slice(0, 10).map((candidate) => `@${candidate.username || candidate.restId || 'unknown'}`);
+      const targetLabel = normalizedPreview.targetScreenName ? `@${normalizedPreview.targetScreenName}` : 'the active profile';
+      const previewLines = normalizedPreview.candidates.slice(0, 10).map((candidate) => `@${candidate.username || candidate.restId || 'unknown'}`);
 
-      if (preview.candidates.length > 10) {
-        previewLines.push(`+${preview.candidates.length - 10} more`);
+      if (normalizedPreview.candidates.length > 10) {
+        previewLines.push(`+${normalizedPreview.candidates.length - 10} more`);
       }
 
-      setFollowersPreviewSummary(preview, targetLabel);
+      setFollowersPreviewSummary(normalizedPreview, targetLabel);
       followersPreviewElement.textContent = previewLines.length
         ? previewLines.join('\n')
-        : `No block-ready ${getFollowersSourceCopy(preview.source).accountsLabel} were found within the current scan limit.`;
-      renderFollowerBlockProgress(preview.candidates.length
+        : `No block-ready ${getFollowersSourceCopy(normalizedPreview.source).accountsLabel} were found within the current scan limit.`;
+      renderFollowerBlockProgress(normalizedPreview.candidates.length
         ? {
           delayMs: currentDelayMs,
           phase: 'ready',
-          source: preview.source,
-          total: preview.candidates.length
+          source: normalizedPreview.source,
+          total: normalizedPreview.candidates.length
         }
         : { phase: 'idle' });
       persistCurrentPopupState();
@@ -1949,9 +2022,16 @@
       }
 
       renderFollowersSource(nextSource);
-      clearFollowersPreview(`Source changed to ${getFollowersSourceCopy(nextSource).graphLabel}. Run a new preview scan.`);
-      renderFollowerBlockProgress({ phase: 'idle' });
-      persistCurrentPopupState();
+      const storedPreview = getFollowersPreviewForSource(nextSource);
+
+      if (storedPreview) {
+        renderFollowersPreview(storedPreview);
+      } else {
+        clearFollowersPreview(`Source changed to ${getFollowersSourceCopy(nextSource).graphLabel}. Run a new preview scan.`);
+        renderFollowerBlockProgress({ phase: 'idle' });
+      }
+
+      setBusyState();
     }
 
     function handleAsyncPopupAction(actionName, action) {
@@ -2014,8 +2094,17 @@
       currentFollowersScanLimit = followers.normalizeFollowersScanLimit(
         storedPopupState.followersScanLimit ?? followers.DEFAULT_FOLLOWERS_SCAN_LIMIT
       );
+      currentFollowersPreviews = normalizeStoredFollowersPreviews(
+        storedPopupState.followersPreviews,
+        storedPopupState.followersPreview,
+        storedPopupState.followersSource
+      );
       currentFollowersSource = followers.normalizeFollowersSource(
-        storedPopupState.followersSource ?? storedPopupState.followersPreview?.source ?? followers.DEFAULT_FOLLOWERS_SOURCE
+        storedPopupState.followersSource
+          ?? storedPopupState.followersPreview?.source
+          ?? currentFollowersPreviews[followers.FOLLOWERS_SOURCES.following]?.source
+          ?? currentFollowersPreviews[followers.FOLLOWERS_SOURCES.followers]?.source
+          ?? followers.DEFAULT_FOLLOWERS_SOURCE
       );
       renderFollowersBlockLimit(currentFollowersBlockLimit);
       renderFollowersScanLimit(currentFollowersScanLimit);
@@ -2023,7 +2112,7 @@
       renderPageButtonStyles(pageButtonStyles);
       renderUserCellAddButtonStyle(userCellAddButtonStyle);
       renderShowUserCellAddButton(showUserCellAddButton);
-      const storedFollowersPreview = normalizeStoredFollowersPreview(storedPopupState.followersPreview);
+      const storedFollowersPreview = getFollowersPreviewForSource(currentFollowersSource);
 
       if (storedFollowersPreview) {
         renderFollowersPreview(storedFollowersPreview);
@@ -2409,7 +2498,7 @@
           return;
         }
 
-        clearFollowersPreview('Preview cleared. Run a new scan for another batch.');
+        clearFollowersPreview('Preview cleared. Run a new scan for another batch.', { clearAll: true });
         setStatus(DEFAULT_STATUS_MESSAGE);
       } catch (error) {
         if (isFollowerRunCanceledError(error)) {
@@ -2852,14 +2941,14 @@
       renderFollowersBlockLimit(currentFollowersBlockLimit);
       currentFollowersScanLimit = readFollowersScanLimit();
       renderFollowersScanLimit(currentFollowersScanLimit);
-      clearFollowersPreview('Preview cleared. Run a new scan with the updated limits.');
+      clearFollowersPreview('Preview cleared. Run a new scan with the updated limits.', { clearAll: true });
       setBusyState();
     });
 
     followersScanLimitElement.addEventListener('change', () => {
       currentFollowersScanLimit = readFollowersScanLimit();
       renderFollowersScanLimit(currentFollowersScanLimit);
-      clearFollowersPreview('Preview cleared. Run a new scan with the updated limits.');
+      clearFollowersPreview('Preview cleared. Run a new scan with the updated limits.', { clearAll: true });
       setBusyState();
     });
 
