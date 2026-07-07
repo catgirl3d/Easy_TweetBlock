@@ -1054,9 +1054,9 @@ test('init loads stored popup state and supports settings navigation', async () 
   elements['open-settings'].click();
   assert.equal(elements['popup-shell'].dataset.view, POPUP_VIEWS.settings);
 
-  elements['batch-block-delay-ms'].value = '2600';
+  elements['batch-block-delay-ms'].value = '10500';
   elements['batch-block-delay-ms'].change();
-  assert.equal(elements['batch-block-delay-ms'].value, '2000');
+  assert.equal(elements['batch-block-delay-ms'].value, '10000');
   elements['page-button-style-tweet-icon'].click();
   assert.equal(elements['page-button-style-tweet-icon'].dataset.active, 'true');
   assert.equal(elements['page-button-style-tweet-text'].dataset.active, 'false');
@@ -1735,7 +1735,7 @@ test('init saves settings, updates the active delay, and returns to the main vie
   await flushAsyncWork();
 
   elements['open-settings'].click();
-  elements['batch-block-delay-ms'].value = '2301';
+  elements['batch-block-delay-ms'].value = '10500';
   elements['page-button-style-tweet-text'].click();
   elements['page-button-style-profile-text'].click();
   elements['page-button-style-user-cell-icon'].click();
@@ -1744,7 +1744,7 @@ test('init saves settings, updates the active delay, and returns to the main vie
   elements['save-settings'].click();
   await flushAsyncWork();
 
-  assert.equal(JSON.stringify(savedDelayInputs), JSON.stringify([2000]));
+  assert.equal(JSON.stringify(savedDelayInputs), JSON.stringify([10000]));
   assert.equal(JSON.stringify(savedStyles), JSON.stringify([{
     [sharedSettings.PAGE_BUTTON_STYLE_SURFACES.tweet]: sharedSettings.PAGE_BLOCK_BUTTON_STYLES.text,
     [sharedSettings.PAGE_BUTTON_STYLE_SURFACES.profile]: sharedSettings.PAGE_BLOCK_BUTTON_STYLES.text,

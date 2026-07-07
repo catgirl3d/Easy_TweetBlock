@@ -123,7 +123,7 @@ test('normalizeBatchBlockDelayMs clamps values into the supported range', () => 
   assert.equal(normalizeBatchBlockDelayMs(undefined), DEFAULT_BATCH_BLOCK_DELAY_MS);
   assert.equal(normalizeBatchBlockDelayMs('250'), MIN_BATCH_BLOCK_DELAY_MS);
   assert.equal(normalizeBatchBlockDelayMs('1200'), 1200);
-  assert.equal(normalizeBatchBlockDelayMs(2500), MAX_BATCH_BLOCK_DELAY_MS);
+  assert.equal(normalizeBatchBlockDelayMs(10500), MAX_BATCH_BLOCK_DELAY_MS);
 });
 
 test('getStoredUserCellAddButtonStyle defaults to icon and round-trips through storage', async () => {
@@ -141,7 +141,7 @@ test('getStoredUserCellAddButtonStyle defaults to icon and round-trips through s
 test('setStoredBatchBlockDelayMs and getStoredBatchBlockDelayMs round-trip through extension storage', async () => {
   const extensionApi = createExtensionApi();
 
-  const savedDelayMs = await setStoredBatchBlockDelayMs(2200, extensionApi);
+  const savedDelayMs = await setStoredBatchBlockDelayMs(10500, extensionApi);
   const loadedDelayMs = await getStoredBatchBlockDelayMs(extensionApi);
 
   assert.equal(savedDelayMs, MAX_BATCH_BLOCK_DELAY_MS);

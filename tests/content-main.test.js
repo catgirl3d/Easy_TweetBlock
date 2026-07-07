@@ -2538,7 +2538,7 @@ test('normalizeBatchBlockDelayMs clamps values into the supported range', () => 
   assert.equal(normalizeBatchBlockDelayMs(undefined), DEFAULT_BATCH_BLOCK_DELAY_MS);
   assert.equal(normalizeBatchBlockDelayMs(250), MIN_BATCH_BLOCK_DELAY_MS);
   assert.equal(normalizeBatchBlockDelayMs(1250), 1250);
-  assert.equal(normalizeBatchBlockDelayMs(2500), MAX_BATCH_BLOCK_DELAY_MS);
+  assert.equal(normalizeBatchBlockDelayMs(10500), MAX_BATCH_BLOCK_DELAY_MS);
 });
 
 test('content sleep delegates to the shared followers sleep helper', async (t) => {
