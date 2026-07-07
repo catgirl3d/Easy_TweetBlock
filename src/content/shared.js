@@ -515,9 +515,9 @@
     const label = getButtonLabel(kind, state, action, surface, mode);
     const title = getButtonTitle(kind, screenName, state, surface, action, mode);
     const displayStyle = action === BUTTON_ACTIONS.saveToList
-      ? normalizePageBlockButtonStyle(button?.dataset?.displayStyle || getCurrentUserCellAddButtonStyle())
+      ? getCurrentUserCellAddButtonStyle()
       : kind === BUTTON_KINDS.native
-      ? normalizePageBlockButtonStyle(button?.dataset?.displayStyle || getCurrentNativeButtonStyle(surface))
+      ? getCurrentNativeButtonStyle(surface)
       : PAGE_BLOCK_BUTTON_STYLES.text;
     button.dataset.state = state;
     button.dataset.displayStyle = displayStyle;

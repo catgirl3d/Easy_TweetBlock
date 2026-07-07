@@ -234,10 +234,6 @@
       button.dataset.kind = kind;
     }
 
-    button.dataset.displayStyle = buttonAction === BUTTON_ACTIONS.saveToList
-      ? namespace.getCurrentUserCellAddButtonStyle()
-      : kind === BUTTON_KINDS.native ? namespace.getCurrentNativeButtonStyle(surface) : PAGE_BLOCK_BUTTON_STYLES.text;
-
     if (surface) {
       button.dataset.surface = surface;
     }
@@ -503,10 +499,6 @@
     return namespace.contentState.showUserCellAddButton;
   }
 
-  function getCurrentUserCellAddButtonStyle() {
-    return namespace.getCurrentUserCellAddButtonStyle?.() || DEFAULT_USER_CELL_ADD_BUTTON_STYLE;
-  }
-
   function setCurrentUserCellAddButtonStyle(style) {
     return typeof namespace.setCurrentUserCellAddButtonStyle === 'function'
       ? namespace.setCurrentUserCellAddButtonStyle(style)
@@ -518,7 +510,6 @@
       return;
     }
 
-    button.dataset.displayStyle = getCurrentUserCellAddButtonStyle();
     namespace.setButtonState(button, button.dataset.state || 'idle', button.dataset.screenName || '', BUTTON_KINDS.native);
   }
 
@@ -770,7 +761,6 @@
     const nativeButtons = Array.from(documentRef.querySelectorAll(`[${BLOCK_BUTTON_ATTRIBUTE}][data-kind="native"]`));
 
     for (const button of nativeButtons) {
-      button.dataset.displayStyle = namespace.getCurrentNativeButtonStyle(button.dataset.surface || PAGE_BUTTON_STYLE_SURFACES.tweet);
       namespace.setButtonState(button, button.dataset.state || 'idle', button.dataset.screenName || '', BUTTON_KINDS.native);
     }
   }

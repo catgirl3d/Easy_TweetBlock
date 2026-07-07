@@ -762,11 +762,17 @@ test('readScreenNameFromProfilePage reads the username from the current profile 
   }), null);
 });
 
-test('setButtonState updates the visible label and accessibility metadata', () => {
+test('setButtonState updates the visible label and accessibility metadata', (t) => {
   const attributes = {};
+  setCurrentNativeButtonStyles({
+    ...DEFAULT_PAGE_BLOCK_BUTTON_STYLES,
+    [PAGE_BUTTON_STYLE_SURFACES.tweet]: PAGE_BLOCK_BUTTON_STYLES.text
+  });
+  t.after(() => {
+    setCurrentNativeButtonStyles(DEFAULT_PAGE_BLOCK_BUTTON_STYLES);
+  });
   const button = {
     dataset: {
-      displayStyle: PAGE_BLOCK_BUTTON_STYLES.text,
       kind: BUTTON_KINDS.native
     },
     disabled: false,
@@ -814,11 +820,17 @@ test('setButtonState uses API-specific labels and titles for the experimental bu
   assert.equal(button.title, 'Blocked @Felixmfdo via internal API');
 });
 
-test('setButtonState uses list-specific titles for user cell buttons', () => {
+test('setButtonState uses list-specific titles for user cell buttons', (t) => {
   const attributes = {};
+  setCurrentNativeButtonStyles({
+    ...DEFAULT_PAGE_BLOCK_BUTTON_STYLES,
+    [PAGE_BUTTON_STYLE_SURFACES.userCell]: PAGE_BLOCK_BUTTON_STYLES.text
+  });
+  t.after(() => {
+    setCurrentNativeButtonStyles(DEFAULT_PAGE_BLOCK_BUTTON_STYLES);
+  });
   const button = {
     dataset: {
-      displayStyle: PAGE_BLOCK_BUTTON_STYLES.text,
       kind: BUTTON_KINDS.native,
       surface: 'user-cell',
       userCellBlockMode: 'block'
@@ -854,8 +866,11 @@ test('setButtonState uses list-specific titles for user cell buttons', () => {
   assert.equal(attributes['aria-label'], 'Retry unblock for @Felixmfdo from this list');
 });
 
-test('setButtonState renders save-to-list labels and keeps listed buttons clickable for removal', () => {
+test('setButtonState renders save-to-list labels and keeps listed buttons clickable for removal', (t) => {
   setCurrentUserCellAddButtonStyle(PAGE_BLOCK_BUTTON_STYLES.text);
+  t.after(() => {
+    setCurrentUserCellAddButtonStyle(DEFAULT_USER_CELL_ADD_BUTTON_STYLE);
+  });
   const attributes = {
     'data-easy-tweetblock-action': BUTTON_ACTIONS.saveToList
   };
@@ -896,17 +911,19 @@ test('setButtonState renders save-to-list labels and keeps listed buttons clicka
   assert.equal(button.title, 'Retry removing @Felixmfdo from the active list');
   assert.equal(button.disabled, false);
 
-  setCurrentUserCellAddButtonStyle(DEFAULT_USER_CELL_ADD_BUTTON_STYLE);
 });
 
-test('setButtonState renders save-to-list icons (plus and checkmark) in icon mode', () => {
+test('setButtonState renders save-to-list icons (plus and checkmark) in icon mode', (t) => {
   const attributes = {
     'data-easy-tweetblock-action': BUTTON_ACTIONS.saveToList
   };
+  setCurrentUserCellAddButtonStyle(PAGE_BLOCK_BUTTON_STYLES.icon);
+  t.after(() => {
+    setCurrentUserCellAddButtonStyle(DEFAULT_USER_CELL_ADD_BUTTON_STYLE);
+  });
   const button = {
     dataset: {
       easyTweetblockAction: BUTTON_ACTIONS.saveToList,
-      displayStyle: PAGE_BLOCK_BUTTON_STYLES.icon,
       surface: 'user-cell'
     },
     disabled: false,
@@ -939,10 +956,16 @@ test('setButtonState renders save-to-list icons (plus and checkmark) in icon mod
   assert.equal(button.innerHTML.includes('M9.55 16.94'), true); // CHECK_ICON_SVG path present
 });
 
-test('setButtonState keeps the block icon for user-cell success states in icon mode', () => {
+test('setButtonState keeps the block icon for user-cell success states in icon mode', (t) => {
+  setCurrentNativeButtonStyles({
+    ...DEFAULT_PAGE_BLOCK_BUTTON_STYLES,
+    [PAGE_BUTTON_STYLE_SURFACES.userCell]: PAGE_BLOCK_BUTTON_STYLES.icon
+  });
+  t.after(() => {
+    setCurrentNativeButtonStyles(DEFAULT_PAGE_BLOCK_BUTTON_STYLES);
+  });
   const button = {
     dataset: {
-      displayStyle: PAGE_BLOCK_BUTTON_STYLES.icon,
       kind: BUTTON_KINDS.native,
       surface: 'user-cell'
     },
@@ -963,10 +986,16 @@ test('setButtonState keeps the block icon for user-cell success states in icon m
   assert.equal(button.innerHTML.includes('M12 3.75'), true);
 });
 
-test('setButtonState keeps the block icon for non-list native buttons after success', () => {
+test('setButtonState keeps the block icon for non-list native buttons after success', (t) => {
+  setCurrentNativeButtonStyles({
+    ...DEFAULT_PAGE_BLOCK_BUTTON_STYLES,
+    [PAGE_BUTTON_STYLE_SURFACES.tweet]: PAGE_BLOCK_BUTTON_STYLES.icon
+  });
+  t.after(() => {
+    setCurrentNativeButtonStyles(DEFAULT_PAGE_BLOCK_BUTTON_STYLES);
+  });
   const button = {
     dataset: {
-      displayStyle: PAGE_BLOCK_BUTTON_STYLES.icon,
       kind: BUTTON_KINDS.native,
       surface: 'tweet'
     },
@@ -980,6 +1009,75 @@ test('setButtonState keeps the block icon for non-list native buttons after succ
   setButtonState(button, 'success', 'Felixmfdo');
   assert.equal(button.innerHTML.includes('M12 3.75'), true);
   assert.equal(button.innerHTML.includes('M9.55 16.94'), false);
+});
+
+test('setButtonState recalculates display style from current settings instead of cached dataset', (t) => {
+  t.after(() => {
+    setCurrentNativeButtonStyles(DEFAULT_PAGE_BLOCK_BUTTON_STYLES);
+    setCurrentUserCellAddButtonStyle(DEFAULT_USER_CELL_ADD_BUTTON_STYLE);
+  });
+
+  setCurrentNativeButtonStyles({
+    ...DEFAULT_PAGE_BLOCK_BUTTON_STYLES,
+    [PAGE_BUTTON_STYLE_SURFACES.tweet]: PAGE_BLOCK_BUTTON_STYLES.text
+  });
+
+  const nativeButton = {
+    dataset: {
+      displayStyle: PAGE_BLOCK_BUTTON_STYLES.icon,
+      kind: BUTTON_KINDS.native,
+      surface: PAGE_BUTTON_STYLE_SURFACES.tweet
+    },
+    disabled: false,
+    innerHTML: '',
+    textContent: '',
+    title: '',
+    setAttribute() {}
+  };
+
+  setButtonState(nativeButton, 'idle', 'Felixmfdo');
+  assert.equal(nativeButton.dataset.displayStyle, PAGE_BLOCK_BUTTON_STYLES.text);
+  assert.equal(nativeButton.textContent, 'Block');
+
+  setCurrentNativeButtonStyles({
+    ...DEFAULT_PAGE_BLOCK_BUTTON_STYLES,
+    [PAGE_BUTTON_STYLE_SURFACES.tweet]: PAGE_BLOCK_BUTTON_STYLES.icon
+  });
+  setButtonState(nativeButton, 'error', 'Felixmfdo');
+  assert.equal(nativeButton.dataset.displayStyle, PAGE_BLOCK_BUTTON_STYLES.icon);
+  assert.equal(nativeButton.innerHTML.includes('M12 3.75'), true);
+
+  setCurrentUserCellAddButtonStyle(PAGE_BLOCK_BUTTON_STYLES.icon);
+
+  const listAttributes = {
+    [BUTTON_ACTION_ATTRIBUTE]: BUTTON_ACTIONS.saveToList
+  };
+  const listButton = {
+    dataset: {
+      displayStyle: PAGE_BLOCK_BUTTON_STYLES.text,
+      easyTweetblockAction: BUTTON_ACTIONS.saveToList,
+      surface: PAGE_BUTTON_STYLE_SURFACES.userCell
+    },
+    disabled: false,
+    getAttribute(name) {
+      return listAttributes[name] || null;
+    },
+    innerHTML: '',
+    textContent: '',
+    title: '',
+    setAttribute(name, value) {
+      listAttributes[name] = value;
+    }
+  };
+
+  setButtonState(listButton, 'idle', 'Felixmfdo');
+  assert.equal(listButton.dataset.displayStyle, PAGE_BLOCK_BUTTON_STYLES.icon);
+  assert.equal(listButton.innerHTML.includes('M11.25 4.75'), true);
+
+  setCurrentUserCellAddButtonStyle(PAGE_BLOCK_BUTTON_STYLES.text);
+  setButtonState(listButton, 'listed', 'Felixmfdo');
+  assert.equal(listButton.dataset.displayStyle, PAGE_BLOCK_BUTTON_STYLES.text);
+  assert.equal(listButton.textContent, 'Remove');
 });
 
 test('waitForElement resolves when an element appears and rejects on timeout', async (t) => {
