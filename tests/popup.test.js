@@ -232,6 +232,7 @@ function createPopupDocument() {
     'page-button-style-user-cell-icon': createPopupElement({ setAttribute() {} }),
     'page-button-style-user-cell-text': createPopupElement({ setAttribute() {} }),
     'popup-shell': createPopupElement({ dataset: {} }),
+    'popup-toast-region': createPopupElement({ hidden: true }),
     'rename-username-list': createPopupElement(),
     'scan-followers-preview': createPopupElement(),
     'save-blocklist': createPopupElement(),
@@ -265,6 +266,10 @@ function createPopupDocument() {
     },
     elements
   };
+}
+
+function getToastText(elements) {
+  return elements['popup-toast-region'].textContent;
 }
 
 test('normalizePopupView falls back to the main screen for unknown values', () => {
@@ -1171,7 +1176,8 @@ test('init clear list only updates the local draft until the user saves', async 
     baseText: '@alice\n@bob',
     text: ''
   });
-  assert.equal(elements.status.textContent, 'List cleared. Click Save list to save this change.');
+  assert.equal(elements.status.textContent, 'Save usernames for later, or block the whole list immediately through any open X tab.');
+  assert.equal(getToastText(elements), 'List cleared. Click Save list to save this change.');
 });
 
 test('init loads, switches, saves, creates, renames, and deletes username lists', async (t) => {
@@ -1312,7 +1318,8 @@ test('init preserves a dirty username draft while renaming the active list', asy
   assert.equal(extensionApi.store[sharedBlocklist.USERNAME_LISTS_STORAGE_KEY][0].name, 'Renamed blocklist');
   assert.equal(elements['username-blocklist'].value, '@alice\n@bob');
   assert.equal(loadStoredPopupState(storage).usernameDrafts.blocklist.text, '@alice\n@bob');
-  assert.equal(elements.status.textContent, 'Renamed list to Renamed blocklist.');
+  assert.equal(elements.status.textContent, 'Save usernames for later, or block the whole list immediately through any open X tab.');
+  assert.equal(getToastText(elements), 'Renamed list to Renamed blocklist.');
 });
 
 test('init imports usernames into the active list and JSON lists by name', async () => {
@@ -1337,7 +1344,8 @@ test('init imports usernames into the active list and JSON lists by name', async
   await flushAsyncWork();
 
   assert.deepEqual(extensionApi.store[sharedBlocklist.USERNAME_LISTS_STORAGE_KEY][0].usernames, ['alice', 'bob']);
-  assert.equal(elements.status.textContent, 'Imported 2 usernames into Blocklist. Skipped invalid values: bad-name.');
+  assert.equal(elements.status.textContent, 'Save usernames for later, or block the whole list immediately through any open X tab.');
+  assert.equal(getToastText(elements), 'Imported 2 usernames into Blocklist. Skipped invalid values: bad-name.');
 
   elements['import-usernames-file'].files = [{
     name: 'lists.json',
@@ -1386,7 +1394,8 @@ test('init protects incompatible drafts and reacts to external list changes', as
   await flushAsyncWork();
 
   assert.equal(elements['username-blocklist'].value, '@alice');
-  assert.equal(elements.status.textContent, 'Unsaved draft was outdated; loaded the saved list.');
+  assert.equal(elements.status.textContent, 'Save usernames for later, or block the whole list immediately through any open X tab.');
+  assert.equal(getToastText(elements), 'Unsaved draft was outdated; loaded the saved list.');
 
   await sharedBlocklist.addUsernameToActiveList('Bob', extensionApi);
   await flushAsyncWork();
@@ -1400,7 +1409,8 @@ test('init protects incompatible drafts and reacts to external list changes', as
   await flushAsyncWork();
 
   assert.equal(elements['username-blocklist'].value, '@local_draft');
-  assert.equal(elements.status.textContent, 'The active list changed elsewhere; your unsaved edits were kept.');
+  assert.equal(elements.status.textContent, 'Save usernames for later, or block the whole list immediately through any open X tab.');
+  assert.equal(getToastText(elements), 'The active list changed elsewhere; your unsaved edits were kept.');
 });
 
 test('init saves dirty username drafts without dropping external active-list additions', async () => {
@@ -1424,7 +1434,8 @@ test('init saves dirty username drafts without dropping external active-list add
   await flushAsyncWork();
 
   assert.equal(elements['username-blocklist'].value, '@alice\n@bob');
-  assert.equal(elements.status.textContent, 'The active list changed elsewhere; your unsaved edits were kept.');
+  assert.equal(elements.status.textContent, 'Save usernames for later, or block the whole list immediately through any open X tab.');
+  assert.equal(getToastText(elements), 'The active list changed elsewhere; your unsaved edits were kept.');
 
   elements['save-blocklist'].click();
   await flushAsyncWork();
@@ -1433,7 +1444,8 @@ test('init saves dirty username drafts without dropping external active-list add
   assert.deepEqual(extensionApi.store[sharedBlocklist.USERNAME_LISTS_STORAGE_KEY][0].usernames, ['alice', 'carol', 'bob']);
   assert.equal(elements['username-blocklist'].value, '@alice\n@carol\n@bob');
   assert.equal(elements['username-count'].textContent, '3 usernames');
-  assert.equal(elements.status.textContent, 'Saved 3 usernames.');
+  assert.equal(elements.status.textContent, 'Save usernames for later, or block the whole list immediately through any open X tab.');
+  assert.equal(getToastText(elements), 'Saved 3 usernames.');
 
   elements['username-blocklist'].value = '@carol\n@bob';
   elements['username-blocklist'].dispatch('input');
@@ -1443,7 +1455,8 @@ test('init saves dirty username drafts without dropping external active-list add
 
   assert.deepEqual(extensionApi.store[sharedBlocklist.USERNAME_LISTS_STORAGE_KEY][0].usernames, ['carol', 'bob']);
   assert.equal(elements['username-blocklist'].value, '@carol\n@bob');
-  assert.equal(elements.status.textContent, 'Saved 2 usernames.');
+  assert.equal(elements.status.textContent, 'Save usernames for later, or block the whole list immediately through any open X tab.');
+  assert.equal(getToastText(elements), 'Saved 2 usernames.');
 });
 
 test('init ignores a persisted completed follower-run status and restores the default header copy', async (t) => {
@@ -1475,6 +1488,7 @@ test('init ignores a persisted completed follower-run status and restores the de
   await flushAsyncWork();
 
   assert.equal(elements.status.textContent, 'Save usernames for later, or block the whole list immediately through any open X tab.');
+  assert.equal(getToastText(elements), '');
 });
 
 test('init ignores a persisted list CRUD status and restores the default header copy', async (t) => {
@@ -1506,6 +1520,46 @@ test('init ignores a persisted list CRUD status and restores the default header 
   await flushAsyncWork();
 
   assert.equal(elements.status.textContent, 'Save usernames for later, or block the whole list immediately through any open X tab.');
+  assert.equal(getToastText(elements), '');
+});
+
+test('init auto-dismisses transient popup toasts without changing the header copy', async (t) => {
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  const scheduledCallbacks = [];
+
+  globalThis.setTimeout = (callback) => {
+    scheduledCallbacks.push(callback);
+    return scheduledCallbacks.length;
+  };
+  globalThis.clearTimeout = () => {};
+  t.after(() => {
+    globalThis.setTimeout = originalSetTimeout;
+    globalThis.clearTimeout = originalClearTimeout;
+  });
+
+  const extensionApi = createStorageExtensionApi({
+    [sharedBlocklist.ACTIVE_USERNAME_LIST_ID_STORAGE_KEY]: 'blocklist',
+    [sharedBlocklist.USERNAME_LISTS_STORAGE_KEY]: [
+      { id: 'blocklist', name: 'Blocklist', usernames: ['alice'] }
+    ]
+  });
+  const { documentRef, elements } = createPopupDocument();
+
+  init(documentRef, extensionApi, sharedBlocklist, sharedFollowers);
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  elements['clear-list'].click();
+
+  assert.equal(getToastText(elements), 'List cleared. Click Save list to save this change.');
+  assert.equal(elements.status.textContent, 'Save usernames for later, or block the whole list immediately through any open X tab.');
+  assert.equal(scheduledCallbacks.length > 0, true);
+
+  scheduledCallbacks.at(-1)();
+
+  assert.equal(getToastText(elements), '');
+  assert.equal(elements.status.textContent, 'Save usernames for later, or block the whole list immediately through any open X tab.');
 });
 
 test('init saves the blocklist, disables actions while saving, and reports invalid entries', async () => {
@@ -1531,7 +1585,8 @@ test('init saves the blocklist, disables actions while saving, and reports inval
   await flushAsyncWork();
 
   assert.equal(JSON.stringify(persistedUsernames), JSON.stringify([['alice', 'bob']]));
-  assert.equal(elements.status.textContent, 'Saving blocklist...');
+  assert.equal(elements.status.textContent, 'Save usernames for later, or block the whole list immediately through any open X tab.');
+  assert.equal(getToastText(elements), 'Saving blocklist...');
   assert.equal(elements['save-blocklist'].disabled, true);
   assert.equal(elements['block-now'].disabled, true);
   assert.equal(elements['save-settings'].disabled, true);
@@ -1541,7 +1596,8 @@ test('init saves the blocklist, disables actions while saving, and reports inval
 
   assert.equal(elements['username-blocklist'].value, '@alice\n@bob');
   assert.equal(elements['username-count'].textContent, '2 usernames');
-  assert.equal(elements.status.textContent, 'Saved 2 usernames. Skipped invalid values: bad-name');
+  assert.equal(elements.status.textContent, 'Save usernames for later, or block the whole list immediately through any open X tab.');
+  assert.equal(getToastText(elements), 'Saved 2 usernames. Skipped invalid values: bad-name');
   assert.equal(elements['save-blocklist'].disabled, false);
   assert.equal(elements['block-now'].disabled, false);
   assert.equal(elements['save-settings'].disabled, false);
@@ -1620,7 +1676,8 @@ test('init saves settings, updates the active delay, and returns to the main vie
   }]));
   assert.equal(JSON.stringify(savedAddStyles), JSON.stringify([sharedSettings.PAGE_BLOCK_BUTTON_STYLES.text]));
   assert.equal(JSON.stringify(savedVisibilityInputs), JSON.stringify([false]));
-  assert.equal(elements.status.textContent, 'Saving settings...');
+  assert.equal(elements.status.textContent, 'Save usernames for later, or block the whole list immediately through any open X tab.');
+  assert.equal(getToastText(elements), 'Saving settings...');
   assert.equal(elements['save-blocklist'].disabled, true);
   assert.equal(elements['block-now'].disabled, true);
   assert.equal(elements['save-settings'].disabled, true);
@@ -1642,7 +1699,8 @@ test('init saves settings, updates the active delay, and returns to the main vie
   assert.equal(elements['page-button-style-user-cell-icon'].dataset.active, 'true');
   assert.equal(elements['user-cell-add-button-style-text'].dataset.active, 'true');
   assert.equal(elements['show-user-cell-add-button'].checked, false);
-  assert.equal(elements.status.textContent, 'Saved settings. Delay: 1900 ms.');
+  assert.equal(elements.status.textContent, 'Save usernames for later, or block the whole list immediately through any open X tab.');
+  assert.equal(getToastText(elements), 'Saved settings. Delay: 1900 ms.');
   assert.equal(elements['save-blocklist'].disabled, false);
   assert.equal(elements['block-now'].disabled, false);
   assert.equal(elements['save-settings'].disabled, false);
@@ -1716,7 +1774,8 @@ test('init blocks the saved list through an open X tab and reports failures with
   });
   assert.equal(elements['username-blocklist'].value, '@alice\n@bob');
   assert.equal(elements['username-count'].textContent, '2 usernames');
-  assert.equal(elements.status.textContent, 'Blocked 1/2 usernames with 1300 ms delay. Failed: @bob. Invalid: bad-name.');
+  assert.equal(elements.status.textContent, 'Save usernames for later, or block the whole list immediately through any open X tab.');
+  assert.equal(getToastText(elements), 'Blocked 1/2 usernames with 1300 ms delay. Failed: @bob. Invalid: bad-name.');
 });
 
 test('init requires at least one valid username before blocking', async () => {
@@ -1734,7 +1793,8 @@ test('init requires at least one valid username before blocking', async () => {
   elements['block-now'].click();
   await flushAsyncWork();
 
-  assert.equal(elements.status.textContent, 'Add at least one valid username before blocking.');
+  assert.equal(elements.status.textContent, 'Save usernames for later, or block the whole list immediately through any open X tab.');
+  assert.equal(getToastText(elements), 'Add at least one valid username before blocking.');
 });
 
 test('init scans followers in the active tab and blocks only the ready preview candidates', async () => {
@@ -1824,7 +1884,8 @@ test('init scans followers in the active tab and blocks only the ready preview c
   await flushAsyncWork();
   await flushAsyncWork();
 
-  assert.equal(elements.status.textContent, 'Preview ready: 2 followers can be blocked from @targetuser.');
+  assert.equal(elements.status.textContent, 'Save usernames for later, or block the whole list immediately through any open X tab.');
+  assert.equal(getToastText(elements), 'Preview ready: 2 followers can be blocked from @targetuser.');
   assert.equal(elements['followers-summary'].textContent, 'Scanned 5 followers from @targetuser. Already blocked: 2. Ready: 2. More followers remain beyond this preview.');
   assert.equal(elements['followers-preview'].textContent, '@alice\n@bob');
   assert.equal(elements['block-follower-candidates'].disabled, false);
@@ -1844,6 +1905,7 @@ test('init scans followers in the active tab and blocks only the ready preview c
   await flushAsyncWork();
 
   assert.equal(elements.status.textContent, 'Save usernames for later, or block the whole list immediately through any open X tab.');
+  assert.equal(getToastText(elements), '');
   assert.equal(elements['followers-progress-label'].textContent, 'Block run complete');
   assert.equal(elements['followers-progress-count'].textContent, '2/2');
   assert.equal(elements['followers-progress-detail'].textContent, 'Blocked 2/2. Failed: 0. Delay used: 1100 ms between requests.');
@@ -1964,7 +2026,8 @@ test('init can cancel an active follower block run', async () => {
   assert.equal(messages.at(-1).message.type, FOLLOWERS_CANCEL_MESSAGE_TYPE);
   assert.equal(messages.at(-1).tabId, 43);
   assert.equal(ports.some((port) => port.name === `${FOLLOWERS_RUN_PORT_PREFIX}${activeBlockRunId}`), true);
-  assert.equal(elements.status.textContent, 'Block run canceled for followers.');
+  assert.equal(elements.status.textContent, 'Save usernames for later, or block the whole list immediately through any open X tab.');
+  assert.equal(getToastText(elements), 'Block run canceled for followers.');
   assert.equal(elements['followers-progress-label'].textContent, 'Run canceled');
 });
 
@@ -2028,7 +2091,8 @@ test('init scans following when the following source is selected', async () => {
     source: 'following'
   });
   assert.equal(typeof messages[0].message.runId, 'string');
-  assert.equal(elements.status.textContent, 'Preview ready: 1 following account can be blocked from @targetuser.');
+  assert.equal(elements.status.textContent, 'Save usernames for later, or block the whole list immediately through any open X tab.');
+  assert.equal(getToastText(elements), 'Preview ready: 1 following account can be blocked from @targetuser.');
   assert.equal(elements['followers-summary'].textContent, 'Scanned 1 following account from @targetuser. Already blocked: 0. Ready: 1.');
   assert.equal(elements['followers-progress-label'].textContent, 'Ready to block 1 following account');
 });

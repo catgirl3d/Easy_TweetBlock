@@ -6,6 +6,7 @@
   const OUTDATED_USERNAME_DRAFT_STATUS = 'Unsaved draft was outdated; loaded the saved list.';
   const EXTERNAL_USERNAME_LIST_CHANGE_STATUS = 'The active list changed elsewhere; your unsaved edits were kept.';
   const MAX_POPUP_DEBUG_ENTRIES = 120;
+  const TOAST_AUTO_DISMISS_MS = 4200;
   const popupDebugEntriesCache = new Map();
 
   function safeSerializePopupDetails(details) {
@@ -951,6 +952,7 @@
     const DEFAULT_FOLLOWERS_SUMMARY = 'Open a profile, followers, or following page in the active X tab, then run a preview scan.';
     const shellElement = documentRef.getElementById('popup-shell');
     const statusElement = documentRef.getElementById('status');
+    const toastRegionElement = documentRef.getElementById('popup-toast-region');
     const textareaElement = documentRef.getElementById('username-blocklist');
     const usernameListSelectLabelElement = documentRef.getElementById('username-list-select-label');
     const usernameListSelectElement = documentRef.getElementById('username-list-select');
@@ -1060,14 +1062,18 @@
     let isUsernameListDropdownOpen = false;
     let highlightedUsernameListIndex = -1;
     let draftListId = null;
+    let activeToastTimeoutId = null;
+    let currentPersistentStatusMessage = '';
     const usernameDrafts = storedPopupState.usernameDrafts && typeof storedPopupState.usernameDrafts === 'object' && !Array.isArray(storedPopupState.usernameDrafts)
       ? { ...storedPopupState.usernameDrafts }
       : {};
     let isHydratingPopupState = true;
 
-    if (!blocklist || !followers || !settings || !extensionApi || !shellElement || !statusElement || !textareaElement || !usernameListSelectLabelElement || !usernameListSelectElement || !usernameListOptionsElement || !newUsernameListButton || !renameUsernameListButton || !deleteUsernameListButton || !importUsernamesButton || !importUsernamesFileInput || !delayInputElement || !pageButtonStyleTweetIconElement || !pageButtonStyleTweetTextElement || !pageButtonStyleProfileIconElement || !pageButtonStyleProfileTextElement || !pageButtonStyleUserCellIconElement || !pageButtonStyleUserCellTextElement || !showUserCellAddButtonElement || !openSettingsButton || !openFollowersButton || !backToMainButton || !backFromFollowersButton || !saveButton || !saveSettingsButton || !blockNowButton || !cancelFollowersRunButton || !countElement || !followersBlockLimitElement || !followersScanLimitElement || !followersSummaryElement || !followersPreviewElement || !followersBlockProgressElement || !followersProgressCountElement || !followersProgressDetailElement || !followersProgressFillElement || !followersProgressLabelElement || !followersSourceFollowersElement || !followersSourceFollowingElement || !scanFollowersButton || !blockFollowerCandidatesButton || !popupDebugLogElement || !clearPopupDebugLogButton || !addFollowersToListButton || !clearListButton) {
+    if (!blocklist || !followers || !settings || !extensionApi || !shellElement || !statusElement || !toastRegionElement || !textareaElement || !usernameListSelectLabelElement || !usernameListSelectElement || !usernameListOptionsElement || !newUsernameListButton || !renameUsernameListButton || !deleteUsernameListButton || !importUsernamesButton || !importUsernamesFileInput || !delayInputElement || !pageButtonStyleTweetIconElement || !pageButtonStyleTweetTextElement || !pageButtonStyleProfileIconElement || !pageButtonStyleProfileTextElement || !pageButtonStyleUserCellIconElement || !pageButtonStyleUserCellTextElement || !showUserCellAddButtonElement || !openSettingsButton || !openFollowersButton || !backToMainButton || !backFromFollowersButton || !saveButton || !saveSettingsButton || !blockNowButton || !cancelFollowersRunButton || !countElement || !followersBlockLimitElement || !followersScanLimitElement || !followersSummaryElement || !followersPreviewElement || !followersBlockProgressElement || !followersProgressCountElement || !followersProgressDetailElement || !followersProgressFillElement || !followersProgressLabelElement || !followersSourceFollowersElement || !followersSourceFollowingElement || !scanFollowersButton || !blockFollowerCandidatesButton || !popupDebugLogElement || !clearPopupDebugLogButton || !addFollowersToListButton || !clearListButton) {
       return;
     }
+
+    statusElement.textContent = DEFAULT_STATUS_MESSAGE;
 
     async function readStoredPageButtonStyles() {
       return settings.getStoredPageBlockButtonStyles(extensionApi);
@@ -1199,14 +1205,80 @@
         followersPreviews: currentFollowersPreviews,
         followersScanLimit: currentFollowersScanLimit,
         followersSource: currentFollowersSource,
-        statusMessage: getPersistedStatusMessage(statusElement.textContent || ''),
+        statusMessage: currentPersistentStatusMessage,
         usernameDrafts,
         view: normalizePopupView(shellElement.dataset.view)
       });
     }
 
-    function setStatus(message) {
-      statusElement.textContent = message;
+    function clearToastTimeout() {
+      if (activeToastTimeoutId == null || typeof globalThis.clearTimeout !== 'function') {
+        return;
+      }
+
+      globalThis.clearTimeout(activeToastTimeoutId);
+      activeToastTimeoutId = null;
+    }
+
+    function clearToast() {
+      clearToastTimeout();
+      toastRegionElement.hidden = true;
+
+      if (typeof toastRegionElement.replaceChildren === 'function') {
+        toastRegionElement.replaceChildren();
+        return;
+      }
+
+      toastRegionElement.textContent = '';
+    }
+
+    function showToast(message, { duration = TOAST_AUTO_DISMISS_MS, sticky = false, tone = 'info' } = {}) {
+      const normalizedMessage = typeof message === 'string' ? message.trim() : '';
+
+      if (!normalizedMessage) {
+        clearToast();
+        return;
+      }
+
+      clearToastTimeout();
+
+      const toastElement = documentRef.createElement('div');
+      toastElement.className = 'popup-toast';
+      toastElement.dataset.tone = tone;
+      toastElement.textContent = normalizedMessage;
+      toastElement.setAttribute('aria-live', tone === 'error' ? 'assertive' : 'polite');
+      toastElement.setAttribute('role', tone === 'error' || tone === 'warning' ? 'alert' : 'status');
+
+      toastRegionElement.hidden = false;
+      toastRegionElement.replaceChildren(toastElement);
+
+      if (sticky || duration <= 0 || typeof globalThis.setTimeout !== 'function') {
+        return;
+      }
+
+      activeToastTimeoutId = globalThis.setTimeout(() => {
+        activeToastTimeoutId = null;
+        clearToast();
+      }, duration);
+    }
+
+    function setStatus(message, { duration = TOAST_AUTO_DISMISS_MS, tone = 'info' } = {}) {
+      const normalizedMessage = typeof message === 'string' ? message.trim() : '';
+      const persistedStatusMessage = getPersistedStatusMessage(normalizedMessage);
+
+      if (!normalizedMessage || normalizedMessage === DEFAULT_STATUS_MESSAGE) {
+        currentPersistentStatusMessage = '';
+        clearToast();
+        persistCurrentPopupState();
+        return;
+      }
+
+      currentPersistentStatusMessage = persistedStatusMessage;
+      showToast(normalizedMessage, {
+        duration,
+        sticky: Boolean(persistedStatusMessage),
+        tone: persistedStatusMessage ? 'warning' : tone
+      });
       persistCurrentPopupState();
     }
 
@@ -2040,7 +2112,7 @@
         .catch((error) => {
           logPopupError(`${actionName} crashed with an unhandled error.`, error);
           refreshPopupDebugLog();
-          setStatus(error instanceof Error ? error.message : String(error));
+          setStatus(error instanceof Error ? error.message : String(error), { tone: 'error' });
         });
     }
 
@@ -2060,7 +2132,7 @@
         phase: 'canceling',
         total: currentFollowersPreview?.candidates?.length || currentFollowersScanLimit
       });
-      setStatus('Cancel requested. Waiting for the active X request to stop...');
+      setStatus('Cancel requested. Waiting for the active X request to stop...', { tone: 'info' });
       refreshPopupDebugLog();
 
       try {
@@ -2068,7 +2140,7 @@
       } catch (error) {
         logPopupError('Follower run cancel request failed.', error);
         refreshPopupDebugLog();
-        setStatus(error instanceof Error ? error.message : String(error));
+        setStatus(error instanceof Error ? error.message : String(error), { tone: 'error' });
       }
     }
 
@@ -2136,7 +2208,7 @@
 
       isSaving = true;
       setBusyState();
-      setStatus('Saving blocklist...');
+      setStatus('Saving blocklist...', { tone: 'info' });
 
       try {
         const baseUsernames = getCurrentDraftBaseUsernames();
@@ -2148,13 +2220,13 @@
         persistCurrentPopupState();
 
         if (invalidEntries.length) {
-          setStatus(`Saved ${savedUsernames.length} usernames. Skipped invalid values: ${invalidEntries.slice(0, 3).join(', ')}`);
+          setStatus(`Saved ${savedUsernames.length} usernames. Skipped invalid values: ${invalidEntries.slice(0, 3).join(', ')}`, { tone: 'warning' });
           return;
         }
 
-        setStatus(`Saved ${savedUsernames.length} usernames.`);
+        setStatus(`Saved ${savedUsernames.length} usernames.`, { tone: 'success' });
       } catch (error) {
-        setStatus(error instanceof Error ? error.message : String(error));
+        setStatus(error instanceof Error ? error.message : String(error), { tone: 'error' });
       } finally {
         isSaving = false;
         setBusyState();
@@ -2173,7 +2245,7 @@
 
       isSaving = true;
       setBusyState();
-      setStatus('Saving settings...');
+      setStatus('Saving settings...', { tone: 'info' });
 
       try {
         const [savedDelayMs, savedPageButtonStyles, savedUserCellAddButtonStyle, savedShowUserCellAddButton] = await Promise.all([
@@ -2191,10 +2263,10 @@
         renderUserCellAddButtonStyle(savedUserCellAddButtonStyle);
         currentShowUserCellAddButton = savedShowUserCellAddButton;
         renderShowUserCellAddButton(savedShowUserCellAddButton);
-        setStatus(`Saved settings. Delay: ${savedDelayMs} ms.`);
+        setStatus(`Saved settings. Delay: ${savedDelayMs} ms.`, { tone: 'success' });
         showMainView();
       } catch (error) {
-        setStatus(error instanceof Error ? error.message : String(error));
+        setStatus(error instanceof Error ? error.message : String(error), { tone: 'error' });
       } finally {
         isSaving = false;
         setBusyState();
@@ -2209,13 +2281,13 @@
       const { usernames, invalidEntries } = blocklist.parseUsernameText(textareaElement.value);
 
       if (!usernames.length) {
-        setStatus('Add at least one valid username before blocking.');
+        setStatus('Add at least one valid username before blocking.', { tone: 'warning' });
         return;
       }
 
       isBlocking = true;
       setBusyState();
-      setStatus('Blocking listed usernames through the X page context...');
+      setStatus('Blocking listed usernames through the X page context...', { tone: 'info' });
       logPopupInfo('Starting immediate username block request.', {
         delayMs: currentDelayMs,
         requestedUsernames: usernames
@@ -2255,19 +2327,19 @@
         if (failedEntries.length) {
           const failedPreview = failedEntries.slice(0, 3).map((entry) => `@${entry.username}`).join(', ');
           const invalidSuffix = invalidEntries.length ? ` Invalid: ${invalidEntries.slice(0, 3).join(', ')}.` : '';
-          setStatus(`Blocked ${successCount}/${results.length} usernames with ${currentDelayMs} ms delay. Failed: ${failedPreview}.${invalidSuffix}`);
+          setStatus(`Blocked ${successCount}/${results.length} usernames with ${currentDelayMs} ms delay. Failed: ${failedPreview}.${invalidSuffix}`, { tone: 'warning' });
           return;
         }
 
         if (invalidEntries.length) {
-          setStatus(`Blocked ${successCount} usernames with ${currentDelayMs} ms delay. Skipped invalid values: ${invalidEntries.slice(0, 3).join(', ')}`);
+          setStatus(`Blocked ${successCount} usernames with ${currentDelayMs} ms delay. Skipped invalid values: ${invalidEntries.slice(0, 3).join(', ')}`, { tone: 'warning' });
           return;
         }
 
-        setStatus(`Blocked ${successCount} usernames with ${currentDelayMs} ms delay.`);
+        setStatus(`Blocked ${successCount} usernames with ${currentDelayMs} ms delay.`, { tone: 'success' });
       } catch (error) {
         logPopupError('Immediate username block flow threw an error.', error);
-        setStatus(error instanceof Error ? error.message : String(error));
+        setStatus(error instanceof Error ? error.message : String(error), { tone: 'error' });
       } finally {
         isBlocking = false;
         setBusyState();
@@ -2294,7 +2366,7 @@
         logPopupInfo('Followers preview scan: active tab resolved.', targetTab);
 
         if (!targetTab?.id) {
-          setStatus('Make the target x.com profile tab active first.');
+          setStatus('Make the target x.com profile tab active first.', { tone: 'warning' });
           refreshPopupDebugLog();
           return;
         }
@@ -2322,7 +2394,7 @@
           source: currentFollowersSource,
           total: currentFollowersScanLimit
         });
-        setStatus(`${sourceCopy.graphLabel} scan running.`);
+        setStatus(`${sourceCopy.graphLabel} scan running.`, { tone: 'info' });
         logPopupInfo('Starting followers preview scan.', {
           blockLimit: currentFollowersBlockLimit,
           runId: scanRunId,
@@ -2342,7 +2414,7 @@
             source: currentFollowersSource,
             total: currentFollowersScanLimit
           });
-          setStatus(`${sourceCopy.graphLabel} scan canceled.`);
+          setStatus(`${sourceCopy.graphLabel} scan canceled.`, { tone: 'warning' });
           return;
         }
 
@@ -2356,11 +2428,11 @@
         refreshPopupDebugLog();
 
         if (!response?.preview?.candidates?.length) {
-          setStatus(`Scan complete. No block-ready ${sourceCopy.accountsLabel} found within ${currentFollowersScanLimit} scanned accounts.`);
+          setStatus(`Scan complete. No block-ready ${sourceCopy.accountsLabel} found within ${currentFollowersScanLimit} scanned accounts.`, { tone: 'info' });
           return;
         }
 
-        setStatus(`Preview ready: ${response.preview.readyCount} ${response.preview.readyCount === 1 ? sourceCopy.accountLabel : sourceCopy.readyLabel} can be blocked from @${response.preview.targetScreenName}.`);
+        setStatus(`Preview ready: ${response.preview.readyCount} ${response.preview.readyCount === 1 ? sourceCopy.accountLabel : sourceCopy.readyLabel} can be blocked from @${response.preview.targetScreenName}.`, { tone: 'success' });
       } catch (error) {
         if (isFollowerRunCanceledError(error)) {
           const sourceCopy = getFollowersSourceCopy(currentFollowersSource);
@@ -2371,7 +2443,7 @@
             source: currentFollowersSource,
             total: currentFollowersScanLimit
           });
-          setStatus(`${sourceCopy.graphLabel} scan canceled.`);
+          setStatus(`${sourceCopy.graphLabel} scan canceled.`, { tone: 'warning' });
           refreshPopupDebugLog();
           return;
         }
@@ -2380,7 +2452,7 @@
         refreshPopupDebugLog();
         setFollowersSummary(`Scan failed: ${error instanceof Error ? error.message : String(error)}`);
         renderFollowerBlockProgress({ phase: 'idle' });
-        setStatus(error instanceof Error ? error.message : String(error));
+        setStatus(error instanceof Error ? error.message : String(error), { tone: 'error' });
       } finally {
         isFollowersScanning = false;
 
@@ -2413,7 +2485,7 @@
         }
 
         if (!currentFollowersPreview?.candidates?.length) {
-          setStatus(`Run a ${getFollowersSourceCopy().graphLabel} preview scan first.`);
+          setStatus(`Run a ${getFollowersSourceCopy().graphLabel} preview scan first.`, { tone: 'warning' });
           refreshPopupDebugLog();
           return;
         }
@@ -2425,7 +2497,7 @@
         logPopupInfo('Follower block run: active tab resolved.', targetTab);
 
         if (!targetTab?.id) {
-          setStatus('Make the target x.com profile tab active first.');
+          setStatus('Make the target x.com profile tab active first.', { tone: 'warning' });
           refreshPopupDebugLog();
           return;
         }
@@ -2441,7 +2513,7 @@
           source: currentFollowersPreview.source || currentFollowersSource,
           total: currentFollowersPreview.candidates.length
         });
-        setStatus(`Blocking ${currentFollowersPreview.candidates.length} scanned ${sourceCopy.readyLabel} with ${currentDelayMs} ms delay between requests...`);
+        setStatus(`Blocking ${currentFollowersPreview.candidates.length} scanned ${sourceCopy.readyLabel} with ${currentDelayMs} ms delay between requests...`, { tone: 'info' });
         logPopupInfo('Starting follower block run from preview.', {
           candidateCount: currentFollowersPreview.candidates.length,
           delayMs: currentDelayMs,
@@ -2461,7 +2533,7 @@
             source: previousPreview.source || currentFollowersSource,
             total: previousPreview.candidates.length
           });
-          setStatus(`Block run canceled for ${sourceCopy.graphLabel}.`);
+          setStatus(`Block run canceled for ${sourceCopy.graphLabel}.`, { tone: 'warning' });
           return;
         }
 
@@ -2494,7 +2566,7 @@
             })),
             readyCount: failedEntries.length
           });
-          setStatus(`Block run finished with errors: blocked ${successCount}/${results.length} ${sourceCopy.readyLabel}, failed ${failedEntries.length}. Delay used: ${currentDelayMs} ms. Failed: ${failedPreview}.`);
+          setStatus(`Block run finished with errors: blocked ${successCount}/${results.length} ${sourceCopy.readyLabel}, failed ${failedEntries.length}. Delay used: ${currentDelayMs} ms. Failed: ${failedPreview}.`, { tone: 'warning' });
           return;
         }
 
@@ -2510,7 +2582,7 @@
             source: sourceCopy.source,
             total: currentFollowersPreview?.candidates?.length || 0
           });
-          setStatus(`Block run canceled for ${sourceCopy.graphLabel}.`);
+          setStatus(`Block run canceled for ${sourceCopy.graphLabel}.`, { tone: 'warning' });
           refreshPopupDebugLog();
           return;
         }
@@ -2524,7 +2596,7 @@
           successCount: 0,
           total: currentFollowersPreview?.candidates?.length || 0
         });
-        setStatus(error instanceof Error ? error.message : String(error));
+        setStatus(error instanceof Error ? error.message : String(error), { tone: 'error' });
       } finally {
         isFollowersBlocking = false;
 
@@ -2561,7 +2633,7 @@
       persistUsernameDraft();
       await blocklist.setActiveUsernameListId(listId, extensionApi);
       const draftStatus = await refreshUsernameListStateFromStorage();
-      setStatus(draftStatus || `Active list: ${currentActiveUsernameList?.name || 'Blocklist'}.`);
+      setStatus(draftStatus || `Active list: ${currentActiveUsernameList?.name || 'Blocklist'}.`, { tone: 'info' });
       setBusyState();
       persistCurrentPopupState();
     }
@@ -2586,7 +2658,7 @@
       await blocklist.setStoredUsernameLists([...currentUsernameLists, nextList], extensionApi);
       await blocklist.setActiveUsernameListId(nextList.id, extensionApi);
       await refreshUsernameListStateFromStorage();
-      setStatus(`Created list: ${nextList.name}.`);
+      setStatus(`Created list: ${nextList.name}.`, { tone: 'success' });
       setBusyState();
       persistCurrentPopupState();
     }
@@ -2608,7 +2680,7 @@
 
       await blocklist.setStoredUsernameLists(nextLists, extensionApi);
       await refreshUsernameListStateFromStorage();
-      setStatus(`Renamed list to ${listName}.`);
+      setStatus(`Renamed list to ${listName}.`, { tone: 'success' });
       setBusyState();
       persistCurrentPopupState();
     }
@@ -2631,7 +2703,7 @@
       await blocklist.setStoredUsernameLists(nextLists, extensionApi);
       await blocklist.setActiveUsernameListId(nextActiveList.id, extensionApi);
       await refreshUsernameListStateFromStorage();
-      setStatus(`Deleted list. Active list: ${currentActiveUsernameList?.name || nextActiveList.name}.`);
+      setStatus(`Deleted list. Active list: ${currentActiveUsernameList?.name || nextActiveList.name}.`, { tone: 'success' });
       setBusyState();
       persistCurrentPopupState();
     }
@@ -2676,14 +2748,14 @@
 
         await blocklist.setStoredUsernameLists(nextLists, extensionApi);
         await refreshUsernameListStateFromStorage();
-        setStatus(`Imported ${parsedImport.lists.length} list${parsedImport.lists.length === 1 ? '' : 's'}.${invalidSuffix}`);
+        setStatus(`Imported ${parsedImport.lists.length} list${parsedImport.lists.length === 1 ? '' : 's'}.${invalidSuffix}`, { tone: invalidSuffix ? 'warning' : 'success' });
         setBusyState();
         persistCurrentPopupState();
         return;
       }
 
       if (!parsedImport.usernames.length) {
-        setStatus(`No valid usernames found in import.${invalidSuffix}`);
+        setStatus(`No valid usernames found in import.${invalidSuffix}`, { tone: 'warning' });
         return;
       }
 
@@ -2695,7 +2767,7 @@
       ]));
 
       applySavedUsernamesToDraft(savedUsernames);
-      setStatus(`Imported ${parsedImport.usernames.length} username${parsedImport.usernames.length === 1 ? '' : 's'} into ${currentActiveUsernameList?.name || 'the active list'}.${invalidSuffix}`);
+      setStatus(`Imported ${parsedImport.usernames.length} username${parsedImport.usernames.length === 1 ? '' : 's'} into ${currentActiveUsernameList?.name || 'the active list'}.${invalidSuffix}`, { tone: invalidSuffix ? 'warning' : 'success' });
       setBusyState();
       persistCurrentPopupState();
     }
@@ -2711,7 +2783,7 @@
       }
 
       if (!currentFollowersPreview?.candidates?.length) {
-        setStatus('No scanned candidates to add.');
+        setStatus('No scanned candidates to add.', { tone: 'warning' });
         return;
       }
 
@@ -2720,13 +2792,13 @@
         .filter((username) => typeof username === 'string' && username.trim() !== '');
 
       if (!scannedUsernames.length) {
-        setStatus('No valid usernames found in the scan.');
+        setStatus('No valid usernames found in the scan.', { tone: 'warning' });
         return;
       }
 
       isSaving = true;
       setBusyState();
-      setStatus('Adding scanned users to active list...');
+      setStatus('Adding scanned users to active list...', { tone: 'info' });
 
       try {
         const visibleUsernames = blocklist.parseUsernameText(textareaElement.value).usernames;
@@ -2739,9 +2811,9 @@
         applySavedUsernamesToDraft(savedUsernames);
         persistCurrentPopupState();
 
-        setStatus(`Added ${scannedUsernames.length} usernames to list "${currentActiveUsernameList?.name || 'Blocklist'}".`);
+        setStatus(`Added ${scannedUsernames.length} usernames to list "${currentActiveUsernameList?.name || 'Blocklist'}".`, { tone: 'success' });
       } catch (error) {
-        setStatus(error instanceof Error ? error.message : String(error));
+        setStatus(error instanceof Error ? error.message : String(error), { tone: 'error' });
       } finally {
         isSaving = false;
         setBusyState();
@@ -2791,7 +2863,7 @@
     clearListButton.addEventListener('click', () => {
       textareaElement.value = '';
       persistUsernameDraft();
-      setStatus('List cleared. Click Save list to save this change.');
+      setStatus('List cleared. Click Save list to save this change.', { tone: 'info' });
     });
 
     usernameListSelectLabelElement.addEventListener('click', () => {
