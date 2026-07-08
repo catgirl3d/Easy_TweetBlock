@@ -8,6 +8,7 @@ const {
   FOLLOWERS_SOURCES,
   MAX_FOLLOWERS_BLOCK_LIMIT,
   MAX_FOLLOWERS_SCAN_LIMIT,
+  isReservedPathSegment,
   normalizeFollowersBlockLimit,
   normalizeFollowersScanLimit,
   normalizeFollowersSource,
@@ -32,6 +33,12 @@ test('normalizeFollowersSource accepts followers and following only', () => {
   assert.equal(normalizeFollowersSource(FOLLOWERS_SOURCES.followers), FOLLOWERS_SOURCES.followers);
   assert.equal(normalizeFollowersSource(FOLLOWERS_SOURCES.following), FOLLOWERS_SOURCES.following);
   assert.equal(normalizeFollowersSource('unknown'), DEFAULT_FOLLOWERS_SOURCE);
+});
+
+test('isReservedPathSegment trims casing and rejects internal routes including login', () => {
+  assert.equal(isReservedPathSegment(' Login '), true);
+  assert.equal(isReservedPathSegment('HOME'), true);
+  assert.equal(isReservedPathSegment('targetuser'), false);
 });
 
 test('sleep delegates to the provided setTimeout implementation', async () => {

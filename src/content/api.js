@@ -4,10 +4,13 @@
   if (typeof module !== 'undefined' && module.exports) {
     require('./shared.js');
     require('./features.js');
+    require('../shared/follower-scan-session.js');
   }
 
   const followersApi = globalThis.EasyTweetBlockFollowers
     || (typeof module !== 'undefined' && module.exports ? require('../shared/followers.js') : null);
+  const followerScanSessionsApi = globalThis.EasyTweetBlockFollowerScanSessions
+    || (typeof module !== 'undefined' && module.exports ? require('../shared/follower-scan-session.js') : null);
   const contentFeaturesApi = globalThis.EasyTweetBlockContentFeatures
     || (typeof module !== 'undefined' && module.exports ? require('./features.js') : null);
 
@@ -17,6 +20,10 @@
 
   if (!contentFeaturesApi) {
     throw new Error('Missing Easy TweetBlock content features API.');
+  }
+
+  if (!followerScanSessionsApi) {
+    throw new Error('Missing Easy TweetBlock follower scan session API.');
   }
 
   const namespace = globalThis.EasyTweetBlockContent || (globalThis.EasyTweetBlockContent = {});
@@ -36,6 +43,9 @@
     FOLLOWERS_FEATURES,
     USER_BY_SCREEN_NAME_FEATURES
   } = contentFeaturesApi;
+  const {
+    getFollowerScanCandidateIdentityKeys
+  } = followerScanSessionsApi;
 
   const X_WEB_BEARER_TOKEN = 'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
   const USER_ID_PATTERN = /^\d+$/;
@@ -789,26 +799,99 @@
     };
   }
 
-  function getCandidateIdentityKeys(candidate) {
-    if (!candidate) {
+  function normalizeResumeIdentityKeys(keys) {
+    const normalizedKeys = [];
+    const seenKeys = new Set();
+
+    if (!Array.isArray(keys)) {
+      return normalizedKeys;
+    }
+
+    for (const key of keys) {
+      if (typeof key !== 'string') {
+        continue;
+      }
+
+      const normalizedKey = key.trim();
+
+      if (!normalizedKey || seenKeys.has(normalizedKey)) {
+        continue;
+      }
+
+      seenKeys.add(normalizedKey);
+      normalizedKeys.push(normalizedKey);
+    }
+
+    return normalizedKeys;
+  }
+
+  function normalizeResumePendingUser(user) {
+    const normalizedCandidate = normalizeFollowerBlockCandidate(user);
+
+    if (!normalizedCandidate) {
+      return null;
+    }
+
+    return {
+      ...normalizedCandidate,
+      blocking: user?.blocking === true
+    };
+  }
+
+  function normalizeResumePendingUsers(users) {
+    if (!Array.isArray(users)) {
       return [];
     }
 
-    const identityKeys = [];
+    const normalizedUsers = [];
 
-    if (candidate.restId) {
-      identityKeys.push(`id:${candidate.restId}`);
+    for (const user of users) {
+      const normalizedUser = normalizeResumePendingUser(user);
+
+      if (normalizedUser) {
+        normalizedUsers.push(normalizedUser);
+      }
     }
 
-    if (candidate.username) {
-      identityKeys.push(`username:${candidate.username}`);
-    }
-
-    return identityKeys;
+    return normalizedUsers;
   }
 
-  function getFollowerBlockCandidateKey(candidate) {
-    return getCandidateIdentityKeys(candidate)[0] || null;
+  function normalizeResumeCount(value) {
+    return Math.max(0, Math.round(Number(value) || 0));
+  }
+
+  function normalizeResumeCursor(value) {
+    return typeof value === 'string' && value.trim()
+      ? value.trim()
+      : null;
+  }
+
+  function normalizeScanResumeState(resumeState) {
+    const normalizedResumeState = resumeState && typeof resumeState === 'object' && !Array.isArray(resumeState)
+      ? resumeState
+      : null;
+
+    return {
+      alreadyBlockedKeys: normalizeResumeIdentityKeys(normalizedResumeState?.alreadyBlockedKeys),
+      existingReadyCount: normalizeResumeCount(normalizedResumeState?.existingReadyCount),
+      existingReadyKeys: normalizeResumeIdentityKeys(normalizedResumeState?.existingReadyKeys),
+      hasExplicitResumeState: Boolean(normalizedResumeState),
+      hasMorePages: typeof normalizedResumeState?.hasMorePages === 'boolean'
+        ? normalizedResumeState.hasMorePages
+        : null,
+      nextCursor: normalizeResumeCursor(normalizedResumeState?.nextCursor),
+      pendingUsers: normalizeResumePendingUsers(normalizedResumeState?.pendingUsers),
+      raw: normalizedResumeState ? { ...normalizedResumeState } : null
+    };
+  }
+
+  function createScanResumeStateOutput({ nextCursor, pendingUsers, alreadyBlockedKeys, hasMorePages }) {
+    return {
+      nextCursor: nextCursor || null,
+      pendingUsers,
+      alreadyBlockedKeys,
+      hasMorePages: Boolean(hasMorePages)
+    };
   }
 
   function createFollowerBlockCandidates(candidates) {
@@ -826,7 +909,7 @@
         continue;
       }
 
-      const identityKeys = getCandidateIdentityKeys(normalizedCandidate);
+      const identityKeys = getFollowerScanCandidateIdentityKeys(normalizedCandidate);
 
       if (identityKeys.some((identityKey) => seenKeys.has(identityKey))) {
         continue;
@@ -860,6 +943,7 @@
 
     const blockLimit = normalizeFollowersBlockLimit(options.blockLimit);
     const scanLimit = normalizeFollowersScanLimit(options.scanLimit);
+    const normalizedResumeState = normalizeScanResumeState(options.resumeState);
     signal?.throwIfAborted?.();
 
     const targetRestId = await lookupUserRestId(targetScreenName, {
@@ -875,23 +959,129 @@
     // Two consecutive empty pages with hasNext=true usually mean the cursor is
     // stuck or throttled, so stop before we loop forever on empty responses.
     const MAX_CONSECUTIVE_EMPTY_PAGES = 2;
-    const seenAlreadyBlockedKeys = new Set();
-    const seenCandidateKeys = new Set();
+    const seenAlreadyBlockedKeys = new Set(normalizedResumeState.alreadyBlockedKeys);
+    const seenCandidateKeys = new Set(normalizedResumeState.existingReadyKeys);
+    const existingReadyCount = normalizedResumeState.existingReadyCount;
     let alreadyBlockedCount = 0;
     let consecutiveEmptyPageCount = 0;
-    let cursor = typeof options.cursor === 'string' ? options.cursor : '';
+    let cursor = normalizedResumeState.nextCursor;
+    let pendingUsers = normalizedResumeState.pendingUsers.slice();
     let processedUserCount = 0;
-    let hasMorePages = false;
+    let hasMorePages = pendingUsers.length > 0 || Boolean(cursor) || normalizedResumeState.hasMorePages === true;
     let stoppedByBlockLimit = false;
     let stoppedByScanLimit = false;
 
-    while (processedUserCount < scanLimit && candidates.length < blockLimit) {
+    if (existingReadyCount >= blockLimit) {
+      return {
+        alreadyBlockedCount: 0,
+        blockLimit,
+        candidates: [],
+        hasMorePages,
+        readyCount: 0,
+        resumeState: normalizedResumeState.raw
+          ? { ...normalizedResumeState.raw }
+          : createScanResumeStateOutput({
+            alreadyBlockedKeys: normalizedResumeState.alreadyBlockedKeys,
+            hasMorePages,
+            nextCursor: cursor,
+            pendingUsers
+          }),
+        scanLimit,
+        scannedCount: 0,
+        source: sourceConfig.source,
+        stoppedByBlockLimit: false,
+        stoppedByScanLimit: false,
+        targetRestId,
+        targetScreenName
+      };
+    }
+
+    function consumeUsers(users) {
+      for (let index = 0; index < users.length; index += 1) {
+        const user = users[index];
+
+        signal?.throwIfAborted?.();
+
+        if (processedUserCount >= scanLimit) {
+          stoppedByScanLimit = true;
+          return users.slice(index);
+        }
+
+        processedUserCount += 1;
+
+        if (user.blocking) {
+          const normalizedAlreadyBlockedUser = normalizeFollowerBlockCandidate(user);
+          const identityKeys = getFollowerScanCandidateIdentityKeys(normalizedAlreadyBlockedUser);
+
+          if (!identityKeys.some((identityKey) => seenAlreadyBlockedKeys.has(identityKey))) {
+            for (const identityKey of identityKeys) {
+              seenAlreadyBlockedKeys.add(identityKey);
+            }
+
+            if (identityKeys.length) {
+              alreadyBlockedCount += 1;
+            }
+          }
+
+          continue;
+        }
+
+        const normalizedCandidate = normalizeFollowerBlockCandidate(user);
+
+        if (!normalizedCandidate) {
+          continue;
+        }
+
+        const identityKeys = getFollowerScanCandidateIdentityKeys(normalizedCandidate);
+
+        if (!identityKeys.length || identityKeys.some((identityKey) => seenCandidateKeys.has(identityKey))) {
+          continue;
+        }
+
+        for (const identityKey of identityKeys) {
+          seenCandidateKeys.add(identityKey);
+        }
+
+        candidates.push(normalizedCandidate);
+
+        if (existingReadyCount + candidates.length >= blockLimit) {
+          stoppedByBlockLimit = true;
+          return users.slice(index + 1);
+        }
+      }
+
+      return null;
+    }
+
+    while (processedUserCount < scanLimit && existingReadyCount + candidates.length < blockLimit) {
+      if (pendingUsers.length) {
+        const remainingPendingUsers = consumeUsers(pendingUsers);
+
+        if (remainingPendingUsers) {
+          pendingUsers = normalizeResumePendingUsers(remainingPendingUsers);
+          hasMorePages = pendingUsers.length > 0 || Boolean(cursor) || normalizedResumeState.hasMorePages === true;
+          break;
+        }
+
+        pendingUsers = [];
+      }
+
+      if (stoppedByBlockLimit || stoppedByScanLimit) {
+        hasMorePages = pendingUsers.length > 0 || Boolean(cursor) || normalizedResumeState.hasMorePages === true;
+        break;
+      }
+
+      if (normalizedResumeState.hasExplicitResumeState && !pendingUsers.length && !cursor && normalizedResumeState.hasMorePages === false) {
+        hasMorePages = false;
+        break;
+      }
+
       signal?.throwIfAborted?.();
 
       const page = await fetchFollowersPage(targetRestId, {
         baseOrigin,
         count: FOLLOWERS_PAGE_SIZE,
-        cursor,
+        cursor: cursor || '',
         documentRef,
         fetchImpl,
         queryIds,
@@ -914,60 +1104,25 @@
           consecutiveEmptyPageCount,
           nextCursor: page.nextCursor
         });
-        hasMorePages = page.hasNext;
+        cursor = page.nextCursor || null;
+        hasMorePages = Boolean(page.hasNext && page.nextCursor);
         break;
       }
 
-      for (const user of users) {
-        signal?.throwIfAborted?.();
+      const remainingPageUsers = consumeUsers(users);
 
-        if (processedUserCount >= scanLimit) {
-          stoppedByScanLimit = true;
-          hasMorePages = true;
-          break;
-        }
-
-        processedUserCount += 1;
-
-        if (user.blocking) {
-          const normalizedAlreadyBlockedUser = normalizeFollowerBlockCandidate(user);
-          const alreadyBlockedKey = getFollowerBlockCandidateKey(normalizedAlreadyBlockedUser);
-
-          if (alreadyBlockedKey && seenAlreadyBlockedKeys.has(alreadyBlockedKey)) {
-            continue;
-          }
-
-          if (alreadyBlockedKey) {
-            seenAlreadyBlockedKeys.add(alreadyBlockedKey);
-          }
-
-          alreadyBlockedCount += 1;
-          continue;
-        }
-
-        const normalizedCandidate = normalizeFollowerBlockCandidate(user);
-
-        if (!normalizedCandidate) {
-          continue;
-        }
-
-        const candidateKey = getFollowerBlockCandidateKey(normalizedCandidate);
-
-        if (seenCandidateKeys.has(candidateKey)) {
-          continue;
-        }
-
-        seenCandidateKeys.add(candidateKey);
-        candidates.push(normalizedCandidate);
-
-        if (candidates.length >= blockLimit) {
-          stoppedByBlockLimit = true;
-          hasMorePages = true;
-          break;
-        }
+      if (remainingPageUsers) {
+        pendingUsers = normalizeResumePendingUsers(remainingPageUsers);
+        cursor = page.nextCursor || null;
+        hasMorePages = Boolean(page.hasNext && page.nextCursor);
+        break;
       }
 
+      pendingUsers = [];
+
       if (stoppedByBlockLimit || stoppedByScanLimit) {
+        cursor = page.nextCursor || null;
+        hasMorePages = Boolean(page.hasNext && page.nextCursor);
         break;
       }
 
@@ -976,6 +1131,7 @@
       // is offered. Also covers terminal empty pages, so no separate guard
       // is needed for them above.
       if (!page.hasNext || !page.nextCursor) {
+        cursor = null;
         hasMorePages = false;
         break;
       }
@@ -989,6 +1145,7 @@
       blockLimit,
       candidateCount: candidates.length,
       hasMorePages,
+      pendingUserCount: pendingUsers.length,
       scanLimit,
       scannedCount: processedUserCount,
       source: sourceConfig.source,
@@ -1002,6 +1159,12 @@
       candidates,
       hasMorePages,
       readyCount: candidates.length,
+      resumeState: createScanResumeStateOutput({
+        alreadyBlockedKeys: Array.from(seenAlreadyBlockedKeys),
+        hasMorePages,
+        nextCursor: cursor,
+        pendingUsers
+      }),
       scanLimit,
       // Keep the public field name for popup/UI compatibility.
       scannedCount: processedUserCount,

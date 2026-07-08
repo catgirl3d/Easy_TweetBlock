@@ -5,9 +5,10 @@
   const CONTENT_SCRIPT_FILES = Object.freeze([
     'src/shared/storage.js',
     'src/shared/settings.js',
+    'src/shared/followers.js',
     'src/content/shared.js',
     'src/shared/blocklist.js',
-    'src/shared/followers.js',
+    'src/shared/follower-scan-session.js',
     'src/content/x-client-transaction.js',
     'src/content/features.js',
     'src/content/api.js',

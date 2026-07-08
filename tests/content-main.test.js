@@ -707,6 +707,7 @@ test('extractScreenNameFromHref reads a screen name from profile links', () => {
 test('extractScreenNameFromHref rejects reserved internal paths', () => {
   assert.equal(extractScreenNameFromHref('/i/web/status/2072691291956068443'), null);
   assert.equal(extractScreenNameFromHref('/home'), null);
+  assert.equal(extractScreenNameFromHref('/login'), null);
   assert.equal(extractScreenNameFromHref('/search?q=test'), null);
 });
 
@@ -1578,6 +1579,80 @@ test('createFollowerBlockCandidates deduplicates a user appearing in both restId
   ]);
 });
 
+function createFollowersLookupResponse(restId = '999') {
+  return {
+    ok: true,
+    async json() {
+      return {
+        data: {
+          user: {
+            result: {
+              rest_id: restId
+            }
+          }
+        }
+      };
+    }
+  };
+}
+
+function createFollowersUserEntry(screenName, restId, blocking = false) {
+  return {
+    content: {
+      itemContent: {
+        user_results: {
+          result: {
+            core: { screen_name: screenName },
+            relationship_perspectives: { blocking },
+            rest_id: restId
+          }
+        }
+      }
+    }
+  };
+}
+
+function createFollowersBottomCursorEntry(cursor) {
+  return {
+    content: {
+      cursorType: 'Bottom',
+      value: cursor
+    }
+  };
+}
+
+function createFollowersTimelineResponse(entries) {
+  return {
+    ok: true,
+    async json() {
+      return {
+        data: {
+          user: {
+            result: {
+              timeline: {
+                timeline: {
+                  instructions: [{ entries }]
+                }
+              }
+            }
+          }
+        }
+      };
+    }
+  };
+}
+
+function createFollowersScanDocument(pathname = '/targetuser/followers') {
+  return {
+    cookie: 'ct0=token123',
+    documentElement: { lang: 'en-US' },
+    location: {
+      origin: 'https://x.com',
+      pathname
+    }
+  };
+}
+
 test('scanFollowersForBlocking skips already blocked followers and stops once the block limit is filled', async () => {
   const requestedFollowersUrls = [];
 
@@ -1715,6 +1790,322 @@ test('scanFollowersForBlocking skips already blocked followers and stops once th
     { restId: '101', username: 'alice' },
     { restId: '202', username: 'bob' }
   ]);
+});
+
+test('scanFollowersForBlocking returns resume state with pending users when blockLimit stops in the middle of a page', async () => {
+  let timelineRequestCount = 0;
+
+  async function fetchImpl(url) {
+    if (url.includes('/UserByScreenName')) {
+      return createFollowersLookupResponse();
+    }
+
+    timelineRequestCount += 1;
+
+    return createFollowersTimelineResponse([
+      createFollowersUserEntry('Alice', '101'),
+      createFollowersUserEntry('Bob', '202'),
+      createFollowersUserEntry('Charlie', '303'),
+      createFollowersBottomCursorEntry('cursor-bottom')
+    ]);
+  }
+
+  const preview = await scanFollowersForBlocking({
+    blockLimit: 2,
+    scanLimit: 10
+  }, {
+    documentRef: createFollowersScanDocument(),
+    fetchImpl,
+    queryIds: ['followersWorkingQueryId'],
+    userLookupQueryIds: ['workingUserLookup']
+  });
+
+  assert.equal(timelineRequestCount, 1);
+  assert.equal(preview.scannedCount, 2);
+  assert.equal(preview.stoppedByBlockLimit, true);
+  assert.equal(preview.hasMorePages, true);
+  assert.deepEqual(preview.candidates, [
+    { restId: '101', username: 'alice' },
+    { restId: '202', username: 'bob' }
+  ]);
+  assert.deepEqual(preview.resumeState, {
+    nextCursor: 'cursor-bottom',
+    pendingUsers: [{ restId: '303', username: 'charlie', blocking: false }],
+    alreadyBlockedKeys: [],
+    hasMorePages: true
+  });
+});
+
+test('scanFollowersForBlocking returns resume state with pending users when scanLimit stops in the middle of a page', async () => {
+  async function fetchImpl(url) {
+    if (url.includes('/UserByScreenName')) {
+      return createFollowersLookupResponse();
+    }
+
+    return createFollowersTimelineResponse([
+      createFollowersUserEntry('Alice', '101'),
+      createFollowersUserEntry('Bob', '202'),
+      createFollowersUserEntry('Charlie', '303'),
+      createFollowersBottomCursorEntry('cursor-bottom')
+    ]);
+  }
+
+  const preview = await scanFollowersForBlocking({
+    blockLimit: 10,
+    scanLimit: 2
+  }, {
+    documentRef: createFollowersScanDocument(),
+    fetchImpl,
+    queryIds: ['followersWorkingQueryId'],
+    userLookupQueryIds: ['workingUserLookup']
+  });
+
+  assert.equal(preview.scannedCount, 2);
+  assert.equal(preview.readyCount, 2);
+  assert.equal(preview.stoppedByScanLimit, true);
+  assert.equal(preview.hasMorePages, true);
+  assert.deepEqual(preview.resumeState, {
+    nextCursor: 'cursor-bottom',
+    pendingUsers: [{ restId: '303', username: 'charlie', blocking: false }],
+    alreadyBlockedKeys: [],
+    hasMorePages: true
+  });
+});
+
+test('scanFollowersForBlocking returns zero counters and echoes resumeState when the existing ready queue already fills the block limit', async () => {
+  let timelineRequestCount = 0;
+  const resumeState = {
+    alreadyBlockedKeys: ['id:301'],
+    existingReadyCount: 2,
+    existingReadyKeys: ['id:101', 'username:alice'],
+    hasMorePages: true,
+    nextCursor: 'cursor-resume',
+    pendingUsers: [{ restId: '202', username: 'bob', blocking: false }]
+  };
+
+  async function fetchImpl(url) {
+    if (url.includes('/UserByScreenName')) {
+      return createFollowersLookupResponse();
+    }
+
+    timelineRequestCount += 1;
+    throw new Error('timeline fetch should not run when the ready queue is already full');
+  }
+
+  const preview = await scanFollowersForBlocking({
+    blockLimit: 2,
+    resumeState,
+    scanLimit: 10
+  }, {
+    documentRef: createFollowersScanDocument(),
+    fetchImpl,
+    queryIds: ['followersWorkingQueryId'],
+    userLookupQueryIds: ['workingUserLookup']
+  });
+
+  assert.equal(timelineRequestCount, 0);
+  assert.equal(preview.scannedCount, 0);
+  assert.equal(preview.readyCount, 0);
+  assert.equal(preview.alreadyBlockedCount, 0);
+  assert.deepEqual(preview.resumeState, resumeState);
+});
+
+test('scanFollowersForBlocking consumes pending users before fetching resumeState.nextCursor', async () => {
+  const requestedCursors = [];
+
+  async function fetchImpl(url) {
+    if (url.includes('/UserByScreenName')) {
+      return createFollowersLookupResponse();
+    }
+
+    requestedCursors.push(JSON.parse(new URL(url).searchParams.get('variables')).cursor);
+    return createFollowersTimelineResponse([
+      createFollowersUserEntry('Dave', '404')
+    ]);
+  }
+
+  const preview = await scanFollowersForBlocking({
+    blockLimit: 10,
+    resumeState: {
+      hasMorePages: true,
+      nextCursor: 'cursor-resume',
+      pendingUsers: [{ restId: '303', username: 'charlie', blocking: false }]
+    },
+    scanLimit: 10
+  }, {
+    documentRef: createFollowersScanDocument(),
+    fetchImpl,
+    queryIds: ['followersWorkingQueryId'],
+    userLookupQueryIds: ['workingUserLookup']
+  });
+
+  assert.deepEqual(requestedCursors, ['cursor-resume']);
+  assert.equal(preview.scannedCount, 2);
+  assert.deepEqual(preview.candidates, [
+    { restId: '303', username: 'charlie' },
+    { restId: '404', username: 'dave' }
+  ]);
+  assert.deepEqual(preview.resumeState, {
+    nextCursor: null,
+    pendingUsers: [],
+    alreadyBlockedKeys: [],
+    hasMorePages: false
+  });
+});
+
+test('scanFollowersForBlocking seeds duplicate protection from existingReadyKeys and existingReadyCount', async () => {
+  async function fetchImpl(url) {
+    if (url.includes('/UserByScreenName')) {
+      return createFollowersLookupResponse();
+    }
+
+    return createFollowersTimelineResponse([
+      createFollowersUserEntry('Alice', '101'),
+      createFollowersUserEntry('Bob', '202'),
+      createFollowersBottomCursorEntry('cursor-bottom')
+    ]);
+  }
+
+  const preview = await scanFollowersForBlocking({
+    blockLimit: 2,
+    resumeState: {
+      existingReadyCount: 1,
+      existingReadyKeys: ['id:101', 'username:alice'],
+      hasMorePages: true
+    },
+    scanLimit: 10
+  }, {
+    documentRef: createFollowersScanDocument(),
+    fetchImpl,
+    queryIds: ['followersWorkingQueryId'],
+    userLookupQueryIds: ['workingUserLookup']
+  });
+
+  assert.equal(preview.scannedCount, 2);
+  assert.equal(preview.readyCount, 1);
+  assert.equal(preview.stoppedByBlockLimit, true);
+  assert.deepEqual(preview.candidates, [
+    { restId: '202', username: 'bob' }
+  ]);
+  assert.deepEqual(preview.resumeState.pendingUsers, []);
+});
+
+test('scanFollowersForBlocking counts resumed blocking users without turning them into candidates and does not double count already blocked identities', async () => {
+  let timelineRequestCount = 0;
+
+  async function fetchImpl(url) {
+    if (url.includes('/UserByScreenName')) {
+      return createFollowersLookupResponse();
+    }
+
+    timelineRequestCount += 1;
+    throw new Error('timeline fetch should not run after fully consuming pending users with hasMorePages=false');
+  }
+
+  const preview = await scanFollowersForBlocking({
+    blockLimit: 10,
+    resumeState: {
+      alreadyBlockedKeys: ['id:301', 'username:alreadyblocked'],
+      hasMorePages: false,
+      pendingUsers: [
+        { restId: '301', username: 'alreadyblocked', blocking: true },
+        { restId: '202', username: 'bob', blocking: false }
+      ]
+    },
+    scanLimit: 10
+  }, {
+    documentRef: createFollowersScanDocument(),
+    fetchImpl,
+    queryIds: ['followersWorkingQueryId'],
+    userLookupQueryIds: ['workingUserLookup']
+  });
+
+  assert.equal(timelineRequestCount, 0);
+  assert.equal(preview.scannedCount, 2);
+  assert.equal(preview.alreadyBlockedCount, 0);
+  assert.deepEqual(preview.candidates, [
+    { restId: '202', username: 'bob' }
+  ]);
+  assert.deepEqual(preview.resumeState, {
+    nextCursor: null,
+    pendingUsers: [],
+    alreadyBlockedKeys: ['id:301', 'username:alreadyblocked'],
+    hasMorePages: false
+  });
+});
+
+test('scanFollowersForBlocking does not fetch timeline pages when explicit resume state is fully drained', async () => {
+  let timelineRequestCount = 0;
+
+  async function fetchImpl(url) {
+    if (url.includes('/UserByScreenName')) {
+      return createFollowersLookupResponse();
+    }
+
+    timelineRequestCount += 1;
+    throw new Error('timeline fetch should not run when the explicit resume state has no continuation left');
+  }
+
+  const preview = await scanFollowersForBlocking({
+    blockLimit: 10,
+    resumeState: {
+      alreadyBlockedKeys: ['id:301'],
+      hasMorePages: false,
+      nextCursor: '   ',
+      pendingUsers: []
+    },
+    scanLimit: 10
+  }, {
+    documentRef: createFollowersScanDocument(),
+    fetchImpl,
+    queryIds: ['followersWorkingQueryId'],
+    userLookupQueryIds: ['workingUserLookup']
+  });
+
+  assert.equal(timelineRequestCount, 0);
+  assert.equal(preview.scannedCount, 0);
+  assert.equal(preview.readyCount, 0);
+  assert.equal(preview.hasMorePages, false);
+  assert.equal(preview.stoppedByBlockLimit, false);
+  assert.equal(preview.stoppedByScanLimit, false);
+  assert.deepEqual(preview.candidates, []);
+  assert.deepEqual(preview.resumeState, {
+    nextCursor: null,
+    pendingUsers: [],
+    alreadyBlockedKeys: ['id:301'],
+    hasMorePages: false
+  });
+});
+
+test('scanFollowersForBlocking resumes from resumeState.nextCursor', async () => {
+  const requestedCursors = [];
+
+  async function fetchImpl(url) {
+    if (url.includes('/UserByScreenName')) {
+      return createFollowersLookupResponse();
+    }
+
+    requestedCursors.push(JSON.parse(new URL(url).searchParams.get('variables')).cursor);
+    return createFollowersTimelineResponse([
+      createFollowersUserEntry('Alice', '101')
+    ]);
+  }
+
+  await scanFollowersForBlocking({
+    blockLimit: 10,
+    resumeState: {
+      hasMorePages: true,
+      nextCursor: 'resume-cursor'
+    },
+    scanLimit: 10
+  }, {
+    documentRef: createFollowersScanDocument(),
+    fetchImpl,
+    queryIds: ['followersWorkingQueryId'],
+    userLookupQueryIds: ['workingUserLookup']
+  });
+
+  assert.deepEqual(requestedCursors, ['resume-cursor']);
 });
 
 test('scanFollowersForBlocking uses Following operation for the following source', async () => {

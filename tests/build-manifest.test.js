@@ -38,17 +38,30 @@ test("content script files load storage, settings, and shared modules before con
   assert.equal(CONTENT_SCRIPT_FILES.includes("src/shared/settings.js"), true);
   assert.equal(CONTENT_SCRIPT_FILES.includes("src/content/shared.js"), true);
   assert.equal(CONTENT_SCRIPT_FILES.includes("src/shared/blocklist.js"), true);
+  assert.equal(CONTENT_SCRIPT_FILES.includes("src/shared/follower-scan-session.js"), true);
   assert.equal(CONTENT_SCRIPT_FILES.includes("src/content/features.js"), true);
   assert.equal(
     CONTENT_SCRIPT_FILES.indexOf("src/shared/storage.js") < CONTENT_SCRIPT_FILES.indexOf("src/shared/settings.js"),
     true
   );
   assert.equal(
-    CONTENT_SCRIPT_FILES.indexOf("src/shared/settings.js") < CONTENT_SCRIPT_FILES.indexOf("src/content/shared.js"),
+    CONTENT_SCRIPT_FILES.indexOf("src/shared/settings.js") < CONTENT_SCRIPT_FILES.indexOf("src/shared/followers.js"),
+    true
+  );
+  assert.equal(
+    CONTENT_SCRIPT_FILES.indexOf("src/shared/followers.js") < CONTENT_SCRIPT_FILES.indexOf("src/content/shared.js"),
     true
   );
   assert.equal(
     CONTENT_SCRIPT_FILES.indexOf("src/content/shared.js") < CONTENT_SCRIPT_FILES.indexOf("src/shared/blocklist.js"),
+    true
+  );
+  assert.equal(
+    CONTENT_SCRIPT_FILES.indexOf("src/shared/followers.js") < CONTENT_SCRIPT_FILES.indexOf("src/shared/follower-scan-session.js"),
+    true
+  );
+  assert.equal(
+    CONTENT_SCRIPT_FILES.indexOf("src/shared/follower-scan-session.js") < CONTENT_SCRIPT_FILES.indexOf("src/content/api.js"),
     true
   );
   assert.equal(

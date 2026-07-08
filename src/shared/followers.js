@@ -10,6 +10,20 @@
     following: 'following'
   });
   const DEFAULT_FOLLOWERS_SOURCE = FOLLOWERS_SOURCES.followers;
+  const RESERVED_PATH_SEGMENTS = new Set([
+    'compose',
+    'explore',
+    'hashtag',
+    'home',
+    'i',
+    'intent',
+    'login',
+    'messages',
+    'notifications',
+    'search',
+    'settings',
+    'share'
+  ]);
 
   function clampRoundedNumber(value, fallback, minimum, maximum) {
     const numericValue = Number(value);
@@ -50,6 +64,10 @@
     return value === FOLLOWERS_SOURCES.following ? FOLLOWERS_SOURCES.following : DEFAULT_FOLLOWERS_SOURCE;
   }
 
+  function isReservedPathSegment(value) {
+    return typeof value === 'string' && RESERVED_PATH_SEGMENTS.has(value.trim().toLowerCase());
+  }
+
   const followersApi = {
     clampRoundedNumber,
     DEFAULT_FOLLOWERS_SOURCE,
@@ -58,6 +76,8 @@
     FOLLOWERS_SOURCES,
     MAX_FOLLOWERS_BLOCK_LIMIT,
     MAX_FOLLOWERS_SCAN_LIMIT,
+    RESERVED_PATH_SEGMENTS,
+    isReservedPathSegment,
     normalizeFollowersBlockLimit,
     normalizeFollowersScanLimit,
     normalizeFollowersSource,

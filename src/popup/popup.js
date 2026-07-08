@@ -222,6 +222,8 @@
     || (typeof module !== 'undefined' && module.exports ? require('../shared/content-script-files.js') : null);
   const followersApi = globalThis.EasyTweetBlockFollowers
     || (typeof module !== 'undefined' && module.exports ? require('../shared/followers.js') : null);
+  const followerScanSessionsApi = globalThis.EasyTweetBlockFollowerScanSessions
+    || (typeof module !== 'undefined' && module.exports ? require('../shared/follower-scan-session.js') : null);
   const settingsApi = globalThis.EasyTweetBlockSettings
     || (typeof module !== 'undefined' && module.exports ? require('../shared/settings.js') : null);
 
@@ -232,6 +234,11 @@
 
   if (!followersApi) {
     renderFatalPopupError(new Error('Missing Easy TweetBlock followers shared API.'));
+    return;
+  }
+
+  if (!followerScanSessionsApi) {
+    renderFatalPopupError(new Error('Missing Easy TweetBlock follower scan session API.'));
     return;
   }
 
@@ -313,6 +320,33 @@
   function isSupportedTabUrl(url) {
     return typeof url === 'string'
       && (url.startsWith('https://x.com/') || url.startsWith('https://twitter.com/'));
+  }
+
+  function readScreenNameFromTabUrl(url) {
+    if (!isSupportedTabUrl(url)) {
+      return null;
+    }
+
+    try {
+      const pathname = new URL(url).pathname || '';
+      const [firstPathSegment] = pathname.split('/').filter(Boolean);
+      const normalizedSegment = typeof firstPathSegment === 'string' ? firstPathSegment.trim() : '';
+
+      if (!normalizedSegment) {
+        return null;
+      }
+
+      if (typeof followersApi?.isReservedPathSegment === 'function' && followersApi.isReservedPathSegment(normalizedSegment)) {
+        return null;
+      }
+
+      const normalizedScreenName = normalizedSegment.replace(/^@+/, '').toLowerCase();
+      return /^[a-z0-9_]{1,15}$/i.test(normalizedScreenName)
+        ? normalizedScreenName
+        : null;
+    } catch {
+      return null;
+    }
   }
 
   function isMissingReceiverError(error) {
@@ -680,13 +714,13 @@
     }
   }
 
-  async function invokeFollowersPreviewInTab(tabId, blockLimit, scanLimit, source, extensionApi = getExtensionApi(), runId = null) {
+  async function invokeFollowersPreviewInTab(tabId, blockLimit, scanLimit, source, extensionApi = getExtensionApi(), runId = null, resumeState = null) {
     const port = connectFollowerRunPort(tabId, runId, extensionApi);
 
     try {
       const results = await executeTabFunction(
         tabId,
-        async (requestedBlockLimit, requestedScanLimit, requestedSource, requestedRunId) => {
+        async (requestedBlockLimit, requestedScanLimit, requestedSource, requestedResumeState, requestedRunId) => {
           if (typeof globalThis.EasyTweetBlockContent?.scanFollowersForBlocking !== 'function') {
             throw new Error('Easy TweetBlock followers preview runner is not available in this tab.');
           }
@@ -696,6 +730,7 @@
           try {
             return await globalThis.EasyTweetBlockContent.scanFollowersForBlocking({
               blockLimit: requestedBlockLimit,
+              resumeState: requestedResumeState,
               scanLimit: requestedScanLimit,
               source: requestedSource
             }, {
@@ -705,7 +740,7 @@
             globalThis.EasyTweetBlockContent.finishFollowerRun?.(followerRun.runId, followerRun.controller);
           }
         },
-        [blockLimit, scanLimit, source, runId],
+        [blockLimit, scanLimit, source, resumeState, runId],
         extensionApi
       );
       const firstResult = Array.isArray(results) ? results[0] : null;
@@ -785,10 +820,11 @@
     }
   }
 
-  async function requestFollowersPreview(tabId, blockLimit, scanLimit, source, extensionApi = getExtensionApi(), runId = null) {
+  async function requestFollowersPreview(tabId, blockLimit, scanLimit, source, extensionApi = getExtensionApi(), runId = null, resumeState = null) {
     const message = {
       options: {
         blockLimit,
+        resumeState,
         scanLimit,
         source
       },
@@ -826,10 +862,11 @@
         logPopupError(`Followers preview message retry failed for tab ${tabId}; falling back to direct execution.`, retryError);
         logPopupInfo(`Invoking followers preview directly in tab ${tabId} after message retry failure.`, {
           blockLimit,
+          hasResumeState: Boolean(resumeState),
           scanLimit,
           source
         });
-        return invokeFollowersPreviewInTab(tabId, blockLimit, scanLimit, source, extensionApi, runId);
+        return invokeFollowersPreviewInTab(tabId, blockLimit, scanLimit, source, extensionApi, runId, resumeState);
       }
     }
   }
@@ -948,9 +985,16 @@
     }
   }
 
-  function init(documentRef = document, extensionApi = getExtensionApi(), blocklist = globalThis.EasyTweetBlockBlocklist, followers = followersApi, settings = globalThis.EasyTweetBlockSettings || settingsApi) {
+  function init(
+    documentRef = document,
+    extensionApi = getExtensionApi(),
+    blocklist = globalThis.EasyTweetBlockBlocklist,
+    followers = followersApi,
+    settings = globalThis.EasyTweetBlockSettings || settingsApi,
+    followerScanSessions = globalThis.EasyTweetBlockFollowerScanSessions
+      || (typeof module !== 'undefined' && module.exports ? require('../shared/follower-scan-session.js') : null)
+  ) {
     const DEFAULT_FOLLOWERS_SUMMARY = 'Open a profile, followers, or following page in the active X tab, then run a preview scan.';
-    const FOLLOWERS_PREVIEW_TTL_MS = 10 * 60 * 1000;
     const shellElement = documentRef.getElementById('popup-shell');
     const statusElement = documentRef.getElementById('status');
     const toastRegionElement = documentRef.getElementById('popup-toast-region');
@@ -996,6 +1040,7 @@
     const followersSourceFollowersElement = documentRef.getElementById('followers-source-followers');
     const followersSourceFollowingElement = documentRef.getElementById('followers-source-following');
     const scanFollowersButton = documentRef.getElementById('scan-followers-preview');
+    const scanFollowersButtonLabelElement = documentRef.getElementById('scan-followers-preview-label');
     const blockFollowerCandidatesButton = documentRef.getElementById('block-follower-candidates');
     const popupDebugLogElement = documentRef.getElementById('popup-debug-log');
     const clearPopupDebugLogButton = documentRef.getElementById('clear-popup-debug-log');
@@ -1048,8 +1093,12 @@
     let currentShowUserCellAddButton = settings?.DEFAULT_USER_CELL_ADD_BUTTON_VISIBILITY;
     let currentFollowersBlockLimit = followers?.DEFAULT_FOLLOWERS_BLOCK_LIMIT;
     let currentFollowersBlockRunId = null;
+    let currentFollowerScanSession = null;
+    let currentFollowerScanSessionStore = followerScanSessions?.normalizeFollowerScanSessionStore?.({}) || {
+      activeSession: null,
+      version: 1
+    };
     let currentFollowersPreview = null;
-    let currentFollowersPreviews = createEmptyFollowersPreviewState();
     let currentFollowersScanLimit = followers?.DEFAULT_FOLLOWERS_SCAN_LIMIT;
     let currentFollowersScanRunId = null;
     let currentFollowersSource = followers?.DEFAULT_FOLLOWERS_SOURCE;
@@ -1070,7 +1119,12 @@
       : {};
     let isHydratingPopupState = true;
 
-    if (!blocklist || !followers || !settings || !extensionApi || !shellElement || !statusElement || !toastRegionElement || !textareaElement || !usernameListSelectLabelElement || !usernameListSelectElement || !usernameListOptionsElement || !newUsernameListButton || !renameUsernameListButton || !deleteUsernameListButton || !importUsernamesButton || !importUsernamesFileInput || !delayInputElement || !pageButtonStyleTweetIconElement || !pageButtonStyleTweetTextElement || !pageButtonStyleProfileIconElement || !pageButtonStyleProfileTextElement || !pageButtonStyleUserCellIconElement || !pageButtonStyleUserCellTextElement || !showUserCellAddButtonElement || !openSettingsButton || !openFollowersButton || !backToMainButton || !backFromFollowersButton || !saveButton || !saveSettingsButton || !blockNowButton || !cancelFollowersRunButton || !countElement || !followersBlockLimitElement || !followersScanLimitElement || !followersSummaryElement || !followersPreviewElement || !followersBlockProgressElement || !followersProgressCountElement || !followersProgressDetailElement || !followersProgressFillElement || !followersProgressLabelElement || !followersSourceFollowersElement || !followersSourceFollowingElement || !scanFollowersButton || !blockFollowerCandidatesButton || !popupDebugLogElement || !clearPopupDebugLogButton || !addFollowersToListButton || !clearListButton) {
+    if (!followerScanSessions) {
+      renderFatalPopupError(new Error('Missing Easy TweetBlock follower scan session API.'), documentRef);
+      return;
+    }
+
+    if (!blocklist || !followers || !settings || !extensionApi || !shellElement || !statusElement || !toastRegionElement || !textareaElement || !usernameListSelectLabelElement || !usernameListSelectElement || !usernameListOptionsElement || !newUsernameListButton || !renameUsernameListButton || !deleteUsernameListButton || !importUsernamesButton || !importUsernamesFileInput || !delayInputElement || !pageButtonStyleTweetIconElement || !pageButtonStyleTweetTextElement || !pageButtonStyleProfileIconElement || !pageButtonStyleProfileTextElement || !pageButtonStyleUserCellIconElement || !pageButtonStyleUserCellTextElement || !showUserCellAddButtonElement || !openSettingsButton || !openFollowersButton || !backToMainButton || !backFromFollowersButton || !saveButton || !saveSettingsButton || !blockNowButton || !cancelFollowersRunButton || !countElement || !followersBlockLimitElement || !followersScanLimitElement || !followersSummaryElement || !followersPreviewElement || !followersBlockProgressElement || !followersProgressCountElement || !followersProgressDetailElement || !followersProgressFillElement || !followersProgressLabelElement || !followersSourceFollowersElement || !followersSourceFollowingElement || !scanFollowersButton || !scanFollowersButtonLabelElement || !blockFollowerCandidatesButton || !popupDebugLogElement || !clearPopupDebugLogButton || !addFollowersToListButton || !clearListButton) {
       return;
     }
 
@@ -1102,121 +1156,319 @@
 
     void emitPopupOpenDebug(extensionApi);
 
-    function createEmptyFollowersPreviewState() {
+    function stripFollowerSessionCandidates(candidates) {
+      return Array.isArray(candidates)
+        ? candidates.map((candidate) => ({
+          restId: candidate?.restId || null,
+          username: candidate?.username || null
+        }))
+        : [];
+    }
+
+    function countRetryableFailedCandidates(candidates) {
+      return Array.isArray(candidates)
+        ? candidates.filter((candidate) => Math.max(0, Math.round(Number(candidate?.attempts) || 0)) > 0).length
+        : 0;
+    }
+
+    function getFollowerScanReadyKeys(candidates) {
+      const readyKeys = [];
+      const seenKeys = new Set();
+
+      for (const candidate of Array.isArray(candidates) ? candidates : []) {
+        const identityKeys = followerScanSessions.getFollowerScanCandidateIdentityKeys(candidate);
+
+        for (const identityKey of identityKeys) {
+          if (seenKeys.has(identityKey)) {
+            continue;
+          }
+
+          seenKeys.add(identityKey);
+          readyKeys.push(identityKey);
+        }
+      }
+
+      return readyKeys;
+    }
+
+    function computeFollowerScanSessionStatus(session) {
+      if (!session) {
+        return 'idle';
+      }
+
+      if (Array.isArray(session.readyCandidates) && session.readyCandidates.length) {
+        return 'ready';
+      }
+
+      if (!session.pendingUsers?.length && session.hasMorePages === false) {
+        return 'completed';
+      }
+
+      return 'idle';
+    }
+
+    function normalizeFollowerScanSessionForPopup(session) {
+      if (!session) {
+        return null;
+      }
+
+      if (session.status !== 'scanning' && session.status !== 'blocking') {
+        return session;
+      }
+
       return {
-        [followers.FOLLOWERS_SOURCES.followers]: null,
-        [followers.FOLLOWERS_SOURCES.following]: null
+        ...session,
+        status: computeFollowerScanSessionStatus(session)
       };
     }
 
-    function normalizeFollowersPreviewSavedAt(savedAt) {
-      const normalizedSavedAt = Math.round(Number(savedAt));
+    function followerScanSessionHasRemainingWork(session) {
+      return Boolean(session?.pendingUsers?.length) || session?.hasMorePages === true;
+    }
 
-      return Number.isFinite(normalizedSavedAt) && normalizedSavedAt > 0
-        ? normalizedSavedAt
+    function followerScanSessionHasReadyCandidates(session) {
+      return Array.isArray(session?.readyCandidates) && session.readyCandidates.length > 0;
+    }
+
+    function getFollowerScanSessionForCurrentSource() {
+      return currentFollowerScanSession?.source === currentFollowersSource
+        ? currentFollowerScanSession
         : null;
     }
 
-    function isFollowersPreviewExpired(preview, now = Date.now()) {
-      const normalizedSavedAt = normalizeFollowersPreviewSavedAt(preview?.savedAt);
-
-      if (!normalizedSavedAt) {
-        return true;
-      }
-
-      return normalizedSavedAt + FOLLOWERS_PREVIEW_TTL_MS < now;
-    }
-
-    function normalizeStoredFollowersPreview(preview, fallbackSource = followers.DEFAULT_FOLLOWERS_SOURCE, now = Date.now()) {
-      if (!preview || typeof preview !== 'object' || !Array.isArray(preview.candidates)) {
+    function deriveFollowersPreviewFromSession(session) {
+      if (!session) {
         return null;
       }
 
-      if (isFollowersPreviewExpired(preview, now)) {
-        return null;
-      }
-
-      const candidates = preview.candidates
-        .filter((candidate) => candidate && typeof candidate === 'object')
-        .map((candidate) => ({
-          restId: candidate.restId == null ? null : String(candidate.restId),
-          username: candidate.username == null ? null : String(candidate.username)
-        }))
-        .filter((candidate) => candidate.restId || candidate.username);
+      const candidates = stripFollowerSessionCandidates(session.readyCandidates);
 
       return {
-        alreadyBlockedCount: Math.max(0, Math.round(Number(preview.alreadyBlockedCount) || 0)),
-        blockLimit: followers.normalizeFollowersBlockLimit(preview.blockLimit),
+        abandonedFailedCount: Math.max(0, Math.round(Number(session?.totals?.abandonedFailed) || 0)),
+        alreadyBlockedCount: Math.max(0, Math.round(Number(session?.totals?.alreadyBlocked) || 0)),
+        blockedFailedCount: countRetryableFailedCandidates(session.readyCandidates),
+        blockedSuccessCount: Math.max(0, Math.round(Number(session?.totals?.blockedSuccess) || 0)),
+        blockLimit: followers.normalizeFollowersBlockLimit(session.blockLimit),
         candidates,
-        hasMorePages: Boolean(preview.hasMorePages),
-        readyCount: Math.max(0, Math.round(Number(preview.readyCount) || candidates.length)),
-        savedAt: normalizeFollowersPreviewSavedAt(preview.savedAt),
-        scanLimit: followers.normalizeFollowersScanLimit(preview.scanLimit),
-        scannedCount: Math.max(0, Math.round(Number(preview.scannedCount) || 0)),
-        source: followers.normalizeFollowersSource(preview.source ?? fallbackSource),
-        targetRestId: preview.targetRestId == null ? null : String(preview.targetRestId),
-        targetScreenName: preview.targetScreenName == null ? null : String(preview.targetScreenName)
+        hasMorePages: Boolean(session.hasMorePages),
+        readyCount: candidates.length,
+        scanLimit: followers.normalizeFollowersScanLimit(session.scanLimit),
+        scannedCount: Math.max(0, Math.round(Number(session?.totals?.scanned) || 0)),
+        source: followers.normalizeFollowersSource(session.source),
+        targetRestId: session.targetRestId == null ? null : String(session.targetRestId),
+        targetScreenName: session.targetScreenName == null ? null : String(session.targetScreenName)
       };
     }
 
-    function normalizeStoredFollowersPreviews(previews, fallbackPreview = null, fallbackSource = followers.DEFAULT_FOLLOWERS_SOURCE) {
-      const normalizedPreviews = createEmptyFollowersPreviewState();
-      const now = Date.now();
+    function syncFollowerScanSessionState(session) {
+      currentFollowerScanSession = normalizeFollowerScanSessionForPopup(session);
 
-      if (previews && typeof previews === 'object' && !Array.isArray(previews)) {
-        for (const source of Object.values(followers.FOLLOWERS_SOURCES)) {
-          const normalizedPreview = normalizeStoredFollowersPreview(previews[source], source, now);
-
-          if (normalizedPreview) {
-            normalizedPreviews[source] = normalizedPreview;
-          }
-        }
+      if (currentFollowerScanSessionStore && currentFollowerScanSessionStore.activeSession !== currentFollowerScanSession) {
+        currentFollowerScanSessionStore = {
+          ...currentFollowerScanSessionStore,
+          activeSession: currentFollowerScanSession
+        };
       }
 
-      const normalizedFallbackPreview = normalizeStoredFollowersPreview(fallbackPreview, fallbackSource, now);
-
-      if (normalizedFallbackPreview) {
-        const normalizedSource = followers.normalizeFollowersSource(normalizedFallbackPreview.source);
-
-        if (!normalizedPreviews[normalizedSource]) {
-          normalizedPreviews[normalizedSource] = normalizedFallbackPreview;
-        }
-      }
-
-      return normalizedPreviews;
+      currentFollowersPreview = deriveFollowersPreviewFromSession(currentFollowerScanSession);
+      return currentFollowersPreview;
     }
 
-    function getFollowersPreviewForSource(source = currentFollowersSource) {
-      return currentFollowersPreviews[followers.normalizeFollowersSource(source)] || null;
-    }
-
-    function storeFollowersPreview(preview) {
-      if (!preview) {
-        currentFollowersPreview = null;
+    function setCurrentFollowerScanSessionStatus(status) {
+      if (!currentFollowerScanSession) {
         return null;
       }
 
-      const normalizedSource = followers.normalizeFollowersSource(preview.source);
-      const normalizedSavedAt = normalizeFollowersPreviewSavedAt(preview.savedAt) || Date.now();
-      const normalizedPreview = {
-        ...preview,
-        savedAt: normalizedSavedAt,
-        source: normalizedSource
+      currentFollowerScanSession = {
+        ...currentFollowerScanSession,
+        status,
+        updatedAt: Date.now()
+      };
+      currentFollowerScanSessionStore = {
+        ...currentFollowerScanSessionStore,
+        activeSession: currentFollowerScanSession
+      };
+      currentFollowersPreview = deriveFollowersPreviewFromSession(currentFollowerScanSession);
+      return currentFollowerScanSession;
+    }
+
+    function restoreCurrentFollowerScanSessionStatus(activeStatus) {
+      if (currentFollowerScanSession?.status !== activeStatus) {
+        return currentFollowerScanSession;
+      }
+
+      return setCurrentFollowerScanSessionStatus(computeFollowerScanSessionStatus(currentFollowerScanSession));
+    }
+
+    async function saveFollowerScanSessionStoreValue(store) {
+      currentFollowerScanSessionStore = await followerScanSessions.saveFollowerScanSessionStore(store, extensionApi);
+      syncFollowerScanSessionState(currentFollowerScanSessionStore.activeSession);
+      return currentFollowerScanSessionStore;
+    }
+
+    async function clearPersistedFollowerScanSession() {
+      return saveFollowerScanSessionStoreValue(
+        followerScanSessions.clearActiveFollowerScanSession(currentFollowerScanSessionStore)
+      );
+    }
+
+    function createFollowerScanResumeState(session, { includeContinuation = true } = {}) {
+      if (!session) {
+        return null;
+      }
+
+      return {
+        alreadyBlockedKeys: Array.isArray(session?.dedupe?.alreadyBlockedKeys)
+          ? [...session.dedupe.alreadyBlockedKeys]
+          : [],
+        existingReadyCount: Array.isArray(session.readyCandidates) ? session.readyCandidates.length : 0,
+        existingReadyKeys: getFollowerScanReadyKeys(session.readyCandidates),
+        hasMorePages: includeContinuation ? Boolean(session.hasMorePages) : true,
+        nextCursor: includeContinuation ? session.nextCursor || null : null,
+        pendingUsers: includeContinuation ? [...(session.pendingUsers || [])] : []
+      };
+    }
+
+    function buildFollowerScanExpectedKey(targetScreenName, source = currentFollowersSource, blockLimit = currentFollowersBlockLimit, scanLimit = currentFollowersScanLimit) {
+      const normalizedTargetScreenName = readScreenNameFromTabUrl(`https://x.com/${targetScreenName || ''}`) || targetScreenName;
+
+      if (!normalizedTargetScreenName) {
+        return null;
+      }
+
+      return followerScanSessions.createFollowerScanSessionKey({
+        targetScreenName: normalizedTargetScreenName,
+        source,
+        blockLimit,
+        scanLimit
+      });
+    }
+
+    function createEmptyFollowerScanSessionForTarget(targetScreenName, source, blockLimit, scanLimit) {
+      const expectedKey = buildFollowerScanExpectedKey(targetScreenName, source, blockLimit, scanLimit);
+
+      if (!expectedKey) {
+        return null;
+      }
+
+      return followerScanSessions.createEmptyFollowerScanSession({
+        blockLimit,
+        key: expectedKey,
+        scanLimit,
+        source,
+        targetScreenName
+      });
+    }
+
+    function updateFollowerScanSessionFromPreview(baseSession, preview, expectedKey, fallbackTargetScreenName) {
+      const now = Date.now();
+      const nextReadyCandidates = followerScanSessions.mergeFollowerScanReadyCandidates(
+        baseSession?.readyCandidates,
+        preview?.candidates
+      );
+      const nextSession = {
+        ...(baseSession || {}),
+        blockLimit: followers.normalizeFollowersBlockLimit(preview?.blockLimit ?? baseSession?.blockLimit),
+        dedupe: {
+          alreadyBlockedKeys: Array.isArray(preview?.resumeState?.alreadyBlockedKeys)
+            ? preview.resumeState.alreadyBlockedKeys
+            : (baseSession?.dedupe?.alreadyBlockedKeys || [])
+        },
+        hasMorePages: Boolean(preview?.resumeState?.hasMorePages),
+        key: expectedKey,
+        nextCursor: preview?.resumeState?.nextCursor || null,
+        pendingUsers: Array.isArray(preview?.resumeState?.pendingUsers)
+          ? preview.resumeState.pendingUsers
+          : [],
+        readyCandidates: nextReadyCandidates,
+        scanLimit: followers.normalizeFollowersScanLimit(preview?.scanLimit ?? baseSession?.scanLimit),
+        source: followers.normalizeFollowersSource(preview?.source ?? baseSession?.source),
+        startedAt: baseSession?.startedAt || now,
+        status: 'idle',
+        targetRestId: preview?.targetRestId || baseSession?.targetRestId || null,
+        targetScreenName: preview?.targetScreenName || baseSession?.targetScreenName || fallbackTargetScreenName || null,
+        totals: {
+          abandonedFailed: Math.max(0, Math.round(Number(baseSession?.totals?.abandonedFailed) || 0)),
+          alreadyBlocked: Math.max(0, Math.round(Number(baseSession?.totals?.alreadyBlocked) || 0)) + Math.max(0, Math.round(Number(preview?.alreadyBlockedCount) || 0)),
+          blockedFailed: countRetryableFailedCandidates(nextReadyCandidates),
+          blockedSuccess: Math.max(0, Math.round(Number(baseSession?.totals?.blockedSuccess) || 0)),
+          scanned: Math.max(0, Math.round(Number(baseSession?.totals?.scanned) || 0)) + Math.max(0, Math.round(Number(preview?.scannedCount) || 0))
+        },
+        updatedAt: now,
+        version: baseSession?.version || 1
       };
 
-      currentFollowersPreviews[normalizedSource] = normalizedPreview;
-      currentFollowersPreview = normalizedPreview;
-      return normalizedPreview;
+      nextSession.status = computeFollowerScanSessionStatus(nextSession);
+      return nextSession;
     }
 
-    function clearStoredFollowersPreview(source = currentFollowersSource) {
-      currentFollowersPreviews[followers.normalizeFollowersSource(source)] = null;
-      currentFollowersPreview = getFollowersPreviewForSource(currentFollowersSource);
+    function createContinuationResetFollowerScanSession(session) {
+      if (!session) {
+        return null;
+      }
+
+      const now = Date.now();
+      const nextSession = {
+        ...session,
+        hasMorePages: true,
+        nextCursor: null,
+        pendingUsers: [],
+        status: computeFollowerScanSessionStatus({
+          ...session,
+          hasMorePages: true,
+          nextCursor: null,
+          pendingUsers: []
+        }),
+        updatedAt: now
+      };
+
+      return nextSession;
     }
 
-    function clearAllStoredFollowersPreviews() {
-      currentFollowersPreviews = createEmptyFollowersPreviewState();
-      currentFollowersPreview = null;
+    function renderFollowersPreviewFromSession(session, options = {}) {
+      return renderFollowersPreview(deriveFollowersPreviewFromSession(session), options);
+    }
+
+    function renderFollowersScanButton() {
+      const session = getFollowerScanSessionForCurrentSource();
+      const hasRemainingWork = followerScanSessionHasRemainingWork(session);
+      const readyCandidateCount = Array.isArray(session?.readyCandidates) ? session.readyCandidates.length : 0;
+      const shouldDisableForSession = Boolean(session)
+        && (
+          session.status === 'scanning'
+          || session.status === 'blocking'
+          || (readyCandidateCount > 0 && (!hasRemainingWork || readyCandidateCount >= currentFollowersBlockLimit))
+        );
+
+      scanFollowersButtonLabelElement.textContent = hasRemainingWork ? 'Resume scan' : 'Scan';
+      scanFollowersButton.disabled = isSaving || isBlocking || isFollowersScanning || isFollowersBlocking || shouldDisableForSession;
+    }
+
+    async function updateSessionFromScan(preview, activeFollowerScanSession, expectedSessionKey, targetScreenName) {
+      const baseSession = activeFollowerScanSession
+        || createEmptyFollowerScanSessionForTarget(
+          targetScreenName,
+          currentFollowersSource,
+          currentFollowersBlockLimit,
+          currentFollowersScanLimit
+        );
+
+      if (!baseSession || !expectedSessionKey) {
+        throw new Error('Unable to build a follower scan session for the active profile.');
+      }
+
+      const nextSession = updateFollowerScanSessionFromPreview(
+        baseSession,
+        preview,
+        expectedSessionKey,
+        targetScreenName
+      );
+
+      await saveFollowerScanSessionStoreValue(
+        followerScanSessions.setActiveFollowerScanSession(currentFollowerScanSessionStore, nextSession)
+      );
+      renderFollowersPreviewFromSession(currentFollowerScanSession);
+      return currentFollowerScanSession;
     }
 
     function persistCurrentPopupState() {
@@ -1226,7 +1478,6 @@
 
       saveStoredPopupState({
         followersBlockLimit: currentFollowersBlockLimit,
-        followersPreviews: currentFollowersPreviews,
         followersScanLimit: currentFollowersScanLimit,
         followersSource: currentFollowersSource,
         statusMessage: currentPersistentStatusMessage,
@@ -1869,7 +2120,8 @@
     function formatFollowersPreviewSummaryText(preview, targetLabel) {
       const sourceCopy = getFollowersSourceCopy(preview.source);
       const scannedLabel = preview.scannedCount === 1 ? `1 ${sourceCopy.accountLabel}` : `${preview.scannedCount} ${sourceCopy.accountsLabel}`;
-      return `Scanned ${scannedLabel} from ${targetLabel}. Already blocked: ${preview.alreadyBlockedCount}. Ready: ${preview.readyCount}.${preview.hasMorePages ? ` More ${sourceCopy.accountsLabel} remain beyond this preview.` : ''}`;
+      const abandonedSuffix = preview.abandonedFailedCount ? ` Abandoned after retries: ${preview.abandonedFailedCount}.` : '';
+      return `Scanned ${scannedLabel} from ${targetLabel}. Already blocked: ${preview.alreadyBlockedCount}. Blocked this session: ${preview.blockedSuccessCount || 0}. Ready: ${preview.readyCount}.${abandonedSuffix}${preview.hasMorePages ? ` More ${sourceCopy.accountsLabel} remain beyond this preview.` : ''}`;
     }
 
     function appendFollowersSummaryText(nodes, text, className = '') {
@@ -1899,9 +2151,17 @@
       appendFollowersSummaryText(summaryNodes, targetLabel, 'followers-summary-accent');
       appendFollowersSummaryText(summaryNodes, '. Already blocked: ');
       appendFollowersSummaryText(summaryNodes, String(preview.alreadyBlockedCount), 'followers-summary-strong');
+      appendFollowersSummaryText(summaryNodes, '. Blocked this session: ');
+      appendFollowersSummaryText(summaryNodes, String(preview.blockedSuccessCount || 0), 'followers-summary-strong');
       appendFollowersSummaryText(summaryNodes, '. Ready: ');
       appendFollowersSummaryText(summaryNodes, String(preview.readyCount), 'followers-summary-strong');
       appendFollowersSummaryText(summaryNodes, '.');
+
+      if (preview.abandonedFailedCount) {
+        appendFollowersSummaryText(summaryNodes, ' Abandoned after retries: ', 'followers-summary-note');
+        appendFollowersSummaryText(summaryNodes, String(preview.abandonedFailedCount), 'followers-summary-strong');
+        appendFollowersSummaryText(summaryNodes, '.', 'followers-summary-note');
+      }
 
       if (preview.hasMorePages) {
         appendFollowersSummaryText(summaryNodes, ` More ${sourceCopy.accountsLabel} remain beyond this preview.`, 'followers-summary-note');
@@ -2021,13 +2281,8 @@
       return false;
     }
 
-    function clearFollowersPreview(summary = DEFAULT_FOLLOWERS_SUMMARY, { clearAll = false } = {}) {
-      if (clearAll) {
-        clearAllStoredFollowersPreviews();
-      } else {
-        clearStoredFollowersPreview();
-      }
-
+    function clearFollowersPreview(summary = DEFAULT_FOLLOWERS_SUMMARY) {
+      currentFollowersPreview = null;
       setFollowersSummary(summary);
       followersPreviewElement.textContent = '';
       persistCurrentPopupState();
@@ -2037,13 +2292,18 @@
       renderPopupDebugLog(popupDebugLogElement);
     }
 
-    function renderFollowersPreview(preview) {
+    function renderFollowersPreview(preview, { preserveProgress = false } = {}) {
       if (!preview) {
         clearFollowersPreview();
         return;
       }
 
-      const normalizedPreview = storeFollowersPreview(preview);
+      const normalizedPreview = {
+        ...preview,
+        source: followers.normalizeFollowersSource(preview.source)
+      };
+
+      currentFollowersPreview = normalizedPreview;
 
       const targetLabel = normalizedPreview.targetScreenName ? `@${normalizedPreview.targetScreenName}` : 'the active profile';
       const previewLines = normalizedPreview.candidates.slice(0, 10).map((candidate) => `@${candidate.username || candidate.restId || 'unknown'}`);
@@ -2055,15 +2315,21 @@
       setFollowersPreviewSummary(normalizedPreview, targetLabel);
       followersPreviewElement.textContent = previewLines.length
         ? previewLines.join('\n')
-        : `No block-ready ${getFollowersSourceCopy(normalizedPreview.source).accountsLabel} were found within the current scan limit.`;
-      renderFollowerBlockProgress(normalizedPreview.candidates.length
-        ? {
-          delayMs: currentDelayMs,
-          phase: 'ready',
-          source: normalizedPreview.source,
-          total: normalizedPreview.candidates.length
-        }
-        : { phase: 'idle' });
+        : followerScanSessionHasRemainingWork(currentFollowerScanSession)
+          ? `No block-ready ${getFollowersSourceCopy(normalizedPreview.source).accountsLabel} are queued right now. Continue scanning for the next batch.`
+          : `No block-ready ${getFollowersSourceCopy(normalizedPreview.source).accountsLabel} were found within the current scan limit.`;
+
+      if (!preserveProgress) {
+        renderFollowerBlockProgress(normalizedPreview.candidates.length
+          ? {
+            delayMs: currentDelayMs,
+            phase: 'ready',
+            source: normalizedPreview.source,
+            total: normalizedPreview.candidates.length
+          }
+          : { phase: 'idle' });
+      }
+
       persistCurrentPopupState();
     }
 
@@ -2089,10 +2355,10 @@
       backFromFollowersButton.disabled = isAnyBusy;
       followersSourceFollowersElement.disabled = isAnyBusy;
       followersSourceFollowingElement.disabled = isAnyBusy;
-      scanFollowersButton.disabled = isAnyBusy;
       blockFollowerCandidatesButton.disabled = isAnyBusy || !currentFollowersPreview?.candidates?.length;
       cancelFollowersRunButton.disabled = !(isFollowersScanning || isFollowersBlocking);
       addFollowersToListButton.disabled = isAnyBusy || !currentFollowersPreview?.candidates?.length;
+      renderFollowersScanButton();
     }
 
     function showMainView() {
@@ -2110,7 +2376,14 @@
       persistCurrentPopupState();
     }
 
-    function updateFollowersSource(source) {
+    async function resetFollowerScanSession(summary = DEFAULT_FOLLOWERS_SUMMARY) {
+      await clearPersistedFollowerScanSession();
+      clearFollowersPreview(summary);
+      renderFollowerBlockProgress({ phase: 'idle' });
+      setBusyState();
+    }
+
+    async function updateFollowersSource(source) {
       const nextSource = followers.normalizeFollowersSource(source);
 
       if (nextSource === currentFollowersSource) {
@@ -2118,16 +2391,7 @@
       }
 
       renderFollowersSource(nextSource);
-      const storedPreview = getFollowersPreviewForSource(nextSource);
-
-      if (storedPreview) {
-        renderFollowersPreview(storedPreview);
-      } else {
-        clearFollowersPreview(`Source changed to ${getFollowersSourceCopy(nextSource).graphLabel}. Run a new preview scan.`);
-        renderFollowerBlockProgress({ phase: 'idle' });
-      }
-
-      setBusyState();
+      await resetFollowerScanSession(`Source changed to ${getFollowersSourceCopy(nextSource).graphLabel}. Run a new scan.`);
     }
 
     function handleAsyncPopupAction(actionName, action) {
@@ -2169,13 +2433,15 @@
     }
 
     async function loadBlocklist() {
-      const [usernameListState, delayMs, pageButtonStyles, userCellAddButtonStyle, showUserCellAddButton] = await Promise.all([
+      const [usernameListState, delayMs, pageButtonStyles, userCellAddButtonStyle, showUserCellAddButton, followerScanSessionStore] = await Promise.all([
         readUsernameListState(),
         settings.getStoredBatchBlockDelayMs(extensionApi),
         readStoredPageButtonStyles(),
         readStoredUserCellAddButtonStyle(),
-        settings.getStoredUserCellAddButtonVisibility(extensionApi)
+        settings.getStoredUserCellAddButtonVisibility(extensionApi),
+        followerScanSessions.loadFollowerScanSessionStore(extensionApi)
       ]);
+      let activeFollowerScanSession = followerScanSessions.getActiveFollowerScanSession(followerScanSessionStore);
 
       setCurrentUsernameListState(usernameListState.lists, usernameListState.activeList);
       const usernameDraftStatus = renderActiveUsernameList();
@@ -2185,33 +2451,36 @@
       currentUserCellAddButtonStyle = userCellAddButtonStyle;
       currentShowUserCellAddButton = showUserCellAddButton;
       currentFollowersBlockLimit = followers.normalizeFollowersBlockLimit(
-        storedPopupState.followersBlockLimit ?? followers.DEFAULT_FOLLOWERS_BLOCK_LIMIT
+        activeFollowerScanSession?.blockLimit
+          ?? storedPopupState.followersBlockLimit
+          ?? followers.DEFAULT_FOLLOWERS_BLOCK_LIMIT
       );
       currentFollowersScanLimit = followers.normalizeFollowersScanLimit(
-        storedPopupState.followersScanLimit ?? followers.DEFAULT_FOLLOWERS_SCAN_LIMIT
-      );
-      currentFollowersPreviews = normalizeStoredFollowersPreviews(
-        storedPopupState.followersPreviews,
-        storedPopupState.followersPreview,
-        storedPopupState.followersSource
+        activeFollowerScanSession?.scanLimit
+          ?? storedPopupState.followersScanLimit
+          ?? followers.DEFAULT_FOLLOWERS_SCAN_LIMIT
       );
       currentFollowersSource = followers.normalizeFollowersSource(
-        storedPopupState.followersSource
-          ?? storedPopupState.followersPreview?.source
-          ?? currentFollowersPreviews[followers.FOLLOWERS_SOURCES.following]?.source
-          ?? currentFollowersPreviews[followers.FOLLOWERS_SOURCES.followers]?.source
+        activeFollowerScanSession?.source
+          ?? storedPopupState.followersSource
           ?? followers.DEFAULT_FOLLOWERS_SOURCE
       );
+      currentFollowerScanSessionStore = followerScanSessionStore;
+
+      if (!activeFollowerScanSession && currentFollowerScanSessionStore?.activeSession) {
+        await clearPersistedFollowerScanSession();
+      } else {
+        syncFollowerScanSessionState(activeFollowerScanSession);
+      }
+
       renderFollowersBlockLimit(currentFollowersBlockLimit);
       renderFollowersScanLimit(currentFollowersScanLimit);
       renderFollowersSource(currentFollowersSource);
       renderPageButtonStyles(pageButtonStyles);
       renderUserCellAddButtonStyle(userCellAddButtonStyle);
       renderShowUserCellAddButton(showUserCellAddButton);
-      const storedFollowersPreview = getFollowersPreviewForSource(currentFollowersSource);
-
-      if (storedFollowersPreview) {
-        renderFollowersPreview(storedFollowersPreview);
+      if (currentFollowerScanSession?.source === currentFollowersSource) {
+        renderFollowersPreviewFromSession(currentFollowerScanSession);
       } else {
         clearFollowersPreview();
       }
@@ -2370,6 +2639,98 @@
       }
     }
 
+    function doesFollowerBlockResultMatchCandidate(result, candidate) {
+      const resultIdentityKeys = followerScanSessions.getFollowerScanCandidateIdentityKeys(result);
+      const candidateIdentityKeys = followerScanSessions.getFollowerScanCandidateIdentityKeys(candidate);
+
+      if (!resultIdentityKeys.length || !candidateIdentityKeys.length) {
+        return true;
+      }
+
+      return resultIdentityKeys.some((identityKey) => candidateIdentityKeys.includes(identityKey));
+    }
+
+    function updateFollowerScanSessionAfterBlock(session, results) {
+      const normalizedResults = Array.isArray(results) ? results : [];
+      const readyCandidates = Array.isArray(session?.readyCandidates) ? session.readyCandidates : [];
+      const nextReadyCandidates = [];
+      let batchFailedCount = 0;
+      let mismatchedCount = 0;
+      let successCount = 0;
+      let abandonedCount = 0;
+
+      for (let index = 0; index < readyCandidates.length; index += 1) {
+        const candidate = readyCandidates[index];
+        const result = normalizedResults[index];
+
+        // The block API contract is index-aligned with the queued readyCandidates array.
+        // Guard against mismatches anyway so a duplicated or out-of-order response cannot
+        // silently drop the wrong candidate from the retry queue.
+        if (result && !doesFollowerBlockResultMatchCandidate(result, candidate)) {
+          mismatchedCount += 1;
+          batchFailedCount += 1;
+          const nextAttempts = Math.max(0, Math.round(Number(candidate?.attempts) || 0)) + 1;
+
+          if (nextAttempts >= followerScanSessions.MAX_FOLLOWER_SCAN_CANDIDATE_ATTEMPTS) {
+            abandonedCount += 1;
+            continue;
+          }
+
+          nextReadyCandidates.push({
+            ...candidate,
+            attempts: nextAttempts,
+            lastError: 'Block result did not match the queued candidate.'
+          });
+          continue;
+        }
+
+        if (result?.ok) {
+          successCount += 1;
+          continue;
+        }
+
+        batchFailedCount += 1;
+        const nextAttempts = Math.max(0, Math.round(Number(candidate?.attempts) || 0)) + 1;
+
+        if (nextAttempts >= followerScanSessions.MAX_FOLLOWER_SCAN_CANDIDATE_ATTEMPTS) {
+          abandonedCount += 1;
+          continue;
+        }
+
+        nextReadyCandidates.push({
+          ...candidate,
+          attempts: nextAttempts,
+          lastError: typeof result?.error === 'string' && result.error.trim()
+            ? result.error.trim()
+            : 'Block request failed.'
+        });
+      }
+
+      const nextSession = {
+        ...session,
+        readyCandidates: nextReadyCandidates,
+        status: 'idle',
+        totals: {
+          ...session.totals,
+          abandonedFailed: Math.max(0, Math.round(Number(session?.totals?.abandonedFailed) || 0)) + abandonedCount,
+          blockedFailed: countRetryableFailedCandidates(nextReadyCandidates),
+          blockedSuccess: Math.max(0, Math.round(Number(session?.totals?.blockedSuccess) || 0)) + successCount
+        },
+        updatedAt: Date.now()
+      };
+
+      nextSession.status = computeFollowerScanSessionStatus(nextSession);
+
+      return {
+        abandonedCount,
+        batchFailedCount,
+        failedCount: nextReadyCandidates.length,
+        mismatchedCount,
+        session: nextSession,
+        successCount
+      };
+    }
+
     async function scanFollowersPreview() {
       let scanRunId = null;
 
@@ -2403,6 +2764,36 @@
         currentFollowersScanLimit = readFollowersScanLimit();
         currentFollowersSource = readFollowersSource();
         const sourceCopy = getFollowersSourceCopy(currentFollowersSource);
+        const targetScreenName = readScreenNameFromTabUrl(targetTab.url);
+
+        if (!targetScreenName) {
+          setStatus('Open a profile, followers, or following page in the active X tab first.', { tone: 'warning' });
+          refreshPopupDebugLog();
+          return;
+        }
+
+        const expectedSessionKey = buildFollowerScanExpectedKey(
+          targetScreenName,
+          currentFollowersSource,
+          currentFollowersBlockLimit,
+          currentFollowersScanLimit
+        );
+        let activeFollowerScanSession = followerScanSessions.getActiveFollowerScanSession(
+          currentFollowerScanSessionStore,
+          expectedSessionKey
+        );
+
+        if (!activeFollowerScanSession && currentFollowerScanSessionStore?.activeSession) {
+          await clearPersistedFollowerScanSession();
+        }
+
+        if (activeFollowerScanSession?.readyCandidates?.length >= currentFollowersBlockLimit) {
+          renderFollowersPreviewFromSession(activeFollowerScanSession);
+          setStatus(`Queue already has ${activeFollowerScanSession.readyCandidates.length} ${sourceCopy.readyLabel}. Block or retry the current queue first.`, { tone: 'warning' });
+          refreshPopupDebugLog();
+          return;
+        }
+
         scanRunId = createFollowerBlockRunId();
         renderFollowersBlockLimit(currentFollowersBlockLimit);
         renderFollowersScanLimit(currentFollowersScanLimit);
@@ -2411,6 +2802,7 @@
         isFollowersScanning = true;
         currentFollowersScanRunId = scanRunId;
         currentFollowerRunTabId = targetTab.id;
+        setCurrentFollowerScanSessionStatus('scanning');
         setBusyState();
         setFollowersSummary(`Scanning up to ${currentFollowersScanLimit} ${sourceCopy.accountsLabel} from the active X tab...`);
         renderFollowerBlockProgress({
@@ -2429,9 +2821,54 @@
         });
         refreshPopupDebugLog();
 
-        const response = await requestFollowersPreview(targetTab.id, currentFollowersBlockLimit, currentFollowersScanLimit, currentFollowersSource, extensionApi, scanRunId);
+        const runPreviewRequest = async (resumeState) => {
+          const response = await requestFollowersPreview(
+            targetTab.id,
+            currentFollowersBlockLimit,
+            currentFollowersScanLimit,
+            currentFollowersSource,
+            extensionApi,
+            scanRunId,
+            resumeState
+          );
+
+          if (response?.canceled) {
+            return response;
+          }
+
+          if (!response?.ok) {
+            logPopupError('Followers preview scan returned a non-ok response.', response);
+            throw new Error(response?.error || 'The X page did not accept the followers scan request.');
+          }
+
+          return response;
+        };
+
+        let response;
+        let fallbackStatusMessage = '';
+
+        try {
+          response = await runPreviewRequest(createFollowerScanResumeState(activeFollowerScanSession));
+        } catch (error) {
+          if (isFollowerRunCanceledError(error) || !activeFollowerScanSession) {
+            throw error;
+          }
+
+          logPopupWarn('Saved follower scan continuation failed; retrying once from the top.', error);
+          const resetSession = createContinuationResetFollowerScanSession(activeFollowerScanSession);
+
+          await saveFollowerScanSessionStoreValue(
+            followerScanSessions.setActiveFollowerScanSession(currentFollowerScanSessionStore, resetSession)
+          );
+          activeFollowerScanSession = currentFollowerScanSession;
+          fallbackStatusMessage = 'Saved scan position was invalid. Started a fresh scan from the top.';
+          response = await runPreviewRequest(createFollowerScanResumeState(activeFollowerScanSession, {
+            includeContinuation: false
+          }));
+        }
 
         if (response?.canceled) {
+          restoreCurrentFollowerScanSessionStatus('scanning');
           setFollowersSummary(`${sourceCopy.graphLabel} scan canceled.`);
           renderFollowerBlockProgress({
             phase: 'canceled',
@@ -2442,23 +2879,34 @@
           return;
         }
 
-        if (!response?.ok) {
-          logPopupError('Followers preview scan returned a non-ok response.', response);
-          throw new Error(response?.error || 'The X page did not accept the followers scan request.');
-        }
-
         logPopupInfo('Followers preview scan response received.', response.preview || response);
-        renderFollowersPreview(response.preview || null);
+        await updateSessionFromScan(
+          response.preview,
+          activeFollowerScanSession,
+          expectedSessionKey,
+          targetScreenName
+        );
         refreshPopupDebugLog();
 
-        if (!response?.preview?.candidates?.length) {
-          setStatus(`Scan complete. No block-ready ${sourceCopy.accountsLabel} found within ${currentFollowersScanLimit} scanned accounts.`, { tone: 'info' });
+        if (!currentFollowerScanSession?.readyCandidates?.length) {
+          if (followerScanSessionHasRemainingWork(currentFollowerScanSession)) {
+            setStatus(`Scan complete. No block-ready ${sourceCopy.accountsLabel} found in this pass. Continue scanning for the next batch.`, { tone: fallbackStatusMessage ? 'warning' : 'info' });
+            return;
+          }
+
+          setStatus(`Scan complete. No block-ready ${sourceCopy.accountsLabel} found within ${currentFollowersScanLimit} scanned accounts.`, { tone: fallbackStatusMessage ? 'warning' : 'info' });
           return;
         }
 
-        setStatus(`Preview ready: ${response.preview.readyCount} ${response.preview.readyCount === 1 ? sourceCopy.accountLabel : sourceCopy.readyLabel} can be blocked from @${response.preview.targetScreenName}.`, { tone: 'success' });
+        const readyCount = currentFollowerScanSession.readyCandidates.length;
+        const readyMessage = `Preview ready: ${readyCount} ${readyCount === 1 ? sourceCopy.accountLabel : sourceCopy.readyLabel} can be blocked from @${currentFollowerScanSession.targetScreenName}.`;
+        setStatus(
+          fallbackStatusMessage ? `${fallbackStatusMessage} ${readyMessage}` : readyMessage,
+          { tone: fallbackStatusMessage ? 'warning' : 'success' }
+        );
       } catch (error) {
         if (isFollowerRunCanceledError(error)) {
+          restoreCurrentFollowerScanSessionStatus('scanning');
           const sourceCopy = getFollowersSourceCopy(currentFollowersSource);
 
           setFollowersSummary(`${sourceCopy.graphLabel} scan canceled.`);
@@ -2473,6 +2921,7 @@
         }
 
         logPopupError('Followers preview scan failed.', error);
+        restoreCurrentFollowerScanSessionStatus('scanning');
         refreshPopupDebugLog();
         setFollowersSummary(`Scan failed: ${error instanceof Error ? error.message : String(error)}`);
         renderFollowerBlockProgress({ phase: 'idle' });
@@ -2508,13 +2957,14 @@
           return;
         }
 
-        if (!currentFollowersPreview?.candidates?.length) {
+        if (!currentFollowerScanSession?.readyCandidates?.length || !currentFollowersPreview?.candidates?.length) {
           setStatus(`Run a ${getFollowersSourceCopy().graphLabel} preview scan first.`, { tone: 'warning' });
           refreshPopupDebugLog();
           return;
         }
 
         const sourceCopy = getFollowersSourceCopy(currentFollowersPreview.source || currentFollowersSource);
+        const queuedCandidates = stripFollowerSessionCandidates(currentFollowerScanSession.readyCandidates);
 
         logPopupInfo('Follower block run: resolving active X tab.');
         const targetTab = await findActiveXTab(extensionApi);
@@ -2530,16 +2980,17 @@
         blockRunId = createFollowerBlockRunId();
         currentFollowersBlockRunId = blockRunId;
         currentFollowerRunTabId = targetTab.id;
+        setCurrentFollowerScanSessionStatus('blocking');
         setBusyState();
         renderFollowerBlockProgress({
           delayMs: currentDelayMs,
           phase: 'started',
           source: currentFollowersPreview.source || currentFollowersSource,
-          total: currentFollowersPreview.candidates.length
+          total: queuedCandidates.length
         });
-        setStatus(`Blocking ${currentFollowersPreview.candidates.length} scanned ${sourceCopy.readyLabel} with ${currentDelayMs} ms delay between requests...`, { tone: 'info' });
+        setStatus(`Blocking ${queuedCandidates.length} scanned ${sourceCopy.readyLabel} with ${currentDelayMs} ms delay between requests...`, { tone: 'info' });
         logPopupInfo('Starting follower block run from preview.', {
-          candidateCount: currentFollowersPreview.candidates.length,
+          candidateCount: queuedCandidates.length,
           delayMs: currentDelayMs,
           runId: currentFollowersBlockRunId,
           tabId: targetTab.id,
@@ -2548,9 +2999,10 @@
         refreshPopupDebugLog();
 
         const previousPreview = currentFollowersPreview;
-        const response = await requestFollowerBlocks(targetTab.id, previousPreview.candidates, currentDelayMs, extensionApi, blockRunId);
+        const response = await requestFollowerBlocks(targetTab.id, queuedCandidates, currentDelayMs, extensionApi, blockRunId);
 
         if (response?.canceled) {
+          restoreCurrentFollowerScanSessionStatus('blocking');
           renderFollowerBlockProgress({
             delayMs: currentDelayMs,
             phase: 'canceled',
@@ -2563,41 +3015,53 @@
 
         if (!response?.ok) {
           logPopupError('Follower block run returned a non-ok response.', response);
+          restoreCurrentFollowerScanSessionStatus('blocking');
           throw new Error(response?.error || 'The X page did not accept the followers block request.');
         }
 
         const results = Array.isArray(response.results) ? response.results : [];
-        const successCount = results.filter((entry) => entry?.ok).length;
         const failedEntries = results.filter((entry) => !entry?.ok);
 
         renderFollowerBlockResultProgress(results, currentDelayMs, currentFollowersPreview.source || currentFollowersSource);
 
+        const blockUpdate = updateFollowerScanSessionAfterBlock(currentFollowerScanSession, results);
+
         logPopupInfo('Follower block run finished.', {
+          batchFailedCount: blockUpdate.batchFailedCount,
           failedEntries,
+          mismatchedCount: blockUpdate.mismatchedCount,
           results,
-          successCount
+          successCount: blockUpdate.successCount
         });
         refreshPopupDebugLog();
 
-        if (failedEntries.length) {
-          const failedPreview = failedEntries.slice(0, 3).map((entry) => `@${entry.username || entry.restId || 'unknown'}`).join(', ');
+        await saveFollowerScanSessionStoreValue(
+          followerScanSessions.setActiveFollowerScanSession(currentFollowerScanSessionStore, blockUpdate.session)
+        );
+        renderFollowersPreviewFromSession(currentFollowerScanSession, { preserveProgress: true });
 
-          renderFollowersPreview({
-            ...previousPreview,
-            candidates: failedEntries.map((entry) => ({
-              restId: entry.restId || null,
-              username: entry.username || null
-            })),
-            readyCount: failedEntries.length
-          });
-          setStatus(`Block run finished with errors: blocked ${successCount}/${results.length} ${sourceCopy.readyLabel}, failed ${failedEntries.length}. Delay used: ${currentDelayMs} ms. Failed: ${failedPreview}.`, { tone: 'warning' });
+        if (blockUpdate.batchFailedCount) {
+          const failedPreview = failedEntries.slice(0, 3).map((entry) => `@${entry.username || entry.restId || 'unknown'}`).join(', ');
+          const mismatchSuffix = blockUpdate.mismatchedCount
+            ? ` Mismatched results: ${blockUpdate.mismatchedCount}.`
+            : '';
+          const abandonedSuffix = blockUpdate.abandonedCount
+            ? ` Abandoned after retry cap: ${blockUpdate.abandonedCount}.`
+            : '';
+          const failedPreviewSuffix = failedPreview ? ` Failed: ${failedPreview}.` : '';
+          setStatus(`Block run finished with errors: blocked ${blockUpdate.successCount}/${results.length} ${sourceCopy.readyLabel}, failed ${blockUpdate.batchFailedCount}.${mismatchSuffix}${abandonedSuffix} Delay used: ${currentDelayMs} ms.${failedPreviewSuffix}`, { tone: 'warning' });
           return;
         }
 
-        clearFollowersPreview('Preview cleared. Run a new scan for another batch.', { clearAll: true });
-        setStatus(DEFAULT_STATUS_MESSAGE);
+        if (followerScanSessionHasRemainingWork(currentFollowerScanSession)) {
+          setStatus('Batch blocked. Continue scanning for the next batch.', { tone: 'success' });
+          return;
+        }
+
+        setStatus(`Block run complete: blocked ${blockUpdate.successCount}/${results.length} ${sourceCopy.readyLabel}. Session complete.`, { tone: 'success' });
       } catch (error) {
         if (isFollowerRunCanceledError(error)) {
+          restoreCurrentFollowerScanSessionStatus('blocking');
           const sourceCopy = getFollowersSourceCopy(currentFollowersPreview?.source || currentFollowersSource);
 
           renderFollowerBlockProgress({
@@ -2612,6 +3076,7 @@
         }
 
         logPopupError('Follower block run failed.', error);
+        restoreCurrentFollowerScanSessionStatus('blocking');
         refreshPopupDebugLog();
         renderFollowerBlockProgress({
           delayMs: currentDelayMs,
@@ -3018,11 +3483,11 @@
     });
 
     followersSourceFollowersElement.addEventListener('click', () => {
-      updateFollowersSource(followers.FOLLOWERS_SOURCES.followers);
+      handleAsyncPopupAction('updateFollowersSourceFollowers', () => updateFollowersSource(followers.FOLLOWERS_SOURCES.followers));
     });
 
     followersSourceFollowingElement.addEventListener('click', () => {
-      updateFollowersSource(followers.FOLLOWERS_SOURCES.following);
+      handleAsyncPopupAction('updateFollowersSourceFollowing', () => updateFollowersSource(followers.FOLLOWERS_SOURCES.following));
     });
 
     delayInputElement.addEventListener('change', () => {
@@ -3033,19 +3498,37 @@
     textareaElement.addEventListener('change', persistUsernameDraft);
 
     followersBlockLimitElement.addEventListener('change', () => {
-      currentFollowersBlockLimit = readFollowersBlockLimit();
-      renderFollowersBlockLimit(currentFollowersBlockLimit);
-      currentFollowersScanLimit = readFollowersScanLimit();
-      renderFollowersScanLimit(currentFollowersScanLimit);
-      clearFollowersPreview('Preview cleared. Run a new scan with the updated limits.', { clearAll: true });
-      setBusyState();
+      handleAsyncPopupAction('updateFollowersBlockLimit', async () => {
+        const previousBlockLimit = currentFollowersBlockLimit;
+
+        currentFollowersBlockLimit = readFollowersBlockLimit();
+        renderFollowersBlockLimit(currentFollowersBlockLimit);
+        currentFollowersScanLimit = readFollowersScanLimit();
+        renderFollowersScanLimit(currentFollowersScanLimit);
+
+        if (currentFollowersBlockLimit === previousBlockLimit) {
+          setBusyState();
+          return;
+        }
+
+        await resetFollowerScanSession('Preview cleared. Run a new scan with the updated limits.');
+      });
     });
 
     followersScanLimitElement.addEventListener('change', () => {
-      currentFollowersScanLimit = readFollowersScanLimit();
-      renderFollowersScanLimit(currentFollowersScanLimit);
-      clearFollowersPreview('Preview cleared. Run a new scan with the updated limits.', { clearAll: true });
-      setBusyState();
+      handleAsyncPopupAction('updateFollowersScanLimit', async () => {
+        const previousScanLimit = currentFollowersScanLimit;
+
+        currentFollowersScanLimit = readFollowersScanLimit();
+        renderFollowersScanLimit(currentFollowersScanLimit);
+
+        if (currentFollowersScanLimit === previousScanLimit) {
+          setBusyState();
+          return;
+        }
+
+        await resetFollowerScanSession('Preview cleared. Run a new scan with the updated limits.');
+      });
     });
 
     clearPopupDebugLogButton.addEventListener('click', () => {

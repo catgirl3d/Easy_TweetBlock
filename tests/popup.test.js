@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const sharedBlocklist = require('../src/shared/blocklist.js');
+const sharedFollowerScanSessions = require('../src/shared/follower-scan-session.js');
 const sharedFollowers = require('../src/shared/followers.js');
 const sharedSettings = require('../src/shared/settings.js');
 const {
@@ -130,6 +131,21 @@ function createStorageExtensionApi(initialStore = {}) {
   };
 }
 
+function createStoredFollowerScanSession(overrides = {}) {
+  const session = sharedFollowerScanSessions.createEmptyFollowerScanSession({
+    blockLimit: 25,
+    scanLimit: 80,
+    source: 'followers',
+    targetRestId: '999',
+    targetScreenName: 'targetuser'
+  });
+
+  return sharedFollowerScanSessions.normalizeFollowerScanSession({
+    ...session,
+    ...overrides
+  });
+}
+
 function createPopupElement(overrides = {}) {
   const listeners = new Map();
   const element = {
@@ -235,6 +251,7 @@ function createPopupDocument() {
     'popup-toast-region': createPopupElement({ hidden: true }),
     'rename-username-list': createPopupElement(),
     'scan-followers-preview': createPopupElement(),
+    'scan-followers-preview-label': createPopupElement({ textContent: 'Scan' }),
     'save-blocklist': createPopupElement(),
     'save-settings': createPopupElement(),
     'user-cell-add-button-style-icon': createPopupElement({ setAttribute() {} }),
@@ -774,6 +791,7 @@ test('requestFollowersPreview and requestFollowerBlocks send the expected messag
       message: {
         options: {
           blockLimit: 25,
+          resumeState: null,
           scanLimit: 80,
           source: 'following'
         },
@@ -1076,10 +1094,37 @@ test('init loads stored popup state and supports settings navigation', async () 
   assert.equal(elements['popup-shell'].dataset.view, POPUP_VIEWS.main);
 });
 
-test('init restores persisted followers preview and username draft state', async (t) => {
+test('init renders a fatal error when the injected follower scan session API is missing', () => {
+  const { documentRef } = createPopupDocument();
+
+  init(documentRef, { runtime: {}, tabs: {} }, sharedBlocklist, sharedFollowers, sharedSettings, null);
+
+  assert.equal(documentRef.body.textContent.includes('Missing Easy TweetBlock follower scan session API.'), true);
+});
+
+test('init restores the active follower scan session from extension storage and keeps username draft state in localStorage', async (t) => {
   const originalLocalStorage = globalThis.localStorage;
   const storage = createLocalStorageStub();
-  const savedAt = Date.now();
+  const extensionApi = createStorageExtensionApi({
+    [sharedBlocklist.ACTIVE_USERNAME_LIST_ID_STORAGE_KEY]: 'blocklist',
+    [sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY]: {
+      version: 1,
+      activeSession: createStoredFollowerScanSession({
+        hasMorePages: true,
+        readyCandidates: [{ restId: '101', username: 'alice', attempts: 0, lastError: null }],
+        totals: {
+          scanned: 5,
+          alreadyBlocked: 1,
+          blockedSuccess: 2,
+          blockedFailed: 0,
+          abandonedFailed: 0
+        }
+      })
+    },
+    [sharedBlocklist.USERNAME_LISTS_STORAGE_KEY]: [
+      { id: 'blocklist', name: 'Blocklist', usernames: ['saveduser'] }
+    ]
+  });
 
   globalThis.localStorage = storage;
   t.after(() => {
@@ -1093,18 +1138,6 @@ test('init restores persisted followers preview and username draft state', async
 
   saveStoredPopupState({
     followersBlockLimit: 25,
-    followersPreview: {
-      alreadyBlockedCount: 1,
-      blockLimit: 25,
-      candidates: [{ restId: '101', username: 'alice' }],
-      hasMorePages: true,
-      readyCount: 1,
-      savedAt,
-      scanLimit: 80,
-      scannedCount: 5,
-      targetRestId: '999',
-      targetScreenName: 'targetuser'
-    },
     followersScanLimit: 80,
     statusMessage: 'Preview ready: 1 followers can be blocked from @targetuser.',
     usernameDrafts: {
@@ -1118,12 +1151,10 @@ test('init restores persisted followers preview and username draft state', async
 
   const { documentRef, elements } = createPopupDocument();
 
-  init(documentRef, { runtime: {}, tabs: {} }, {
+  init(documentRef, extensionApi, {
     ...sharedBlocklist,
-    async getStoredUsernames() {
-      return ['saveduser'];
-    }
-  });
+  }, sharedFollowers, sharedSettings, sharedFollowerScanSessions);
+  await flushAsyncWork();
   await flushAsyncWork();
 
   assert.equal(elements['popup-shell'].dataset.view, POPUP_VIEWS.followers);
@@ -1133,26 +1164,316 @@ test('init restores persisted followers preview and username draft state', async
   assert.equal(elements['followers-scan-limit'].value, '80');
   assert.equal(elements['followers-preview'].textContent, '@alice');
   assert.equal(elements['followers-summary'].textContent.includes('Scanned 5 followers from @targetuser'), true);
+  assert.equal(elements['followers-summary'].textContent.includes('Blocked this session: 2'), true);
   assert.equal(elements.status.textContent, 'Save usernames for later, or block the whole list immediately through any open X tab.');
   assert.equal(elements['block-follower-candidates'].disabled, false);
+  assert.equal(elements['scan-followers-preview-label'].textContent, 'Resume scan');
+  assert.equal(elements['scan-followers-preview'].disabled, false);
 
   elements['username-blocklist'].value = '@changeduser';
   elements['username-blocklist'].dispatch('input');
   assert.equal(loadStoredPopupState(storage).usernameDrafts.blocklist.text, '@changeduser');
-  assert.equal(loadStoredPopupState(storage).followersPreviews.followers.savedAt, savedAt);
+  assert.equal(loadStoredPopupState(storage).followersPreviews, undefined);
+  assert.equal(loadStoredPopupState(storage).followersPreview, undefined);
 });
 
-test('init drops expired and legacy persisted followers previews during hydration', async (t) => {
+test('init disables scanning when the stored session has ready candidates but no continuation left', async () => {
+  const extensionApi = createStorageExtensionApi({
+    [sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY]: {
+      version: 1,
+      activeSession: createStoredFollowerScanSession({
+        hasMorePages: false,
+        pendingUsers: [],
+        readyCandidates: [{ restId: '101', username: 'alice', attempts: 0, lastError: null }]
+      })
+    }
+  });
+  const { documentRef, elements } = createPopupDocument();
+
+  init(documentRef, extensionApi, sharedBlocklist, sharedFollowers, sharedSettings, sharedFollowerScanSessions);
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  assert.equal(elements['scan-followers-preview-label'].textContent, 'Scan');
+  assert.equal(elements['scan-followers-preview'].disabled, true);
+});
+
+test('init resumes a stored follower scan session by sending the rebuilt resume state and merging the new batch', async () => {
+  const { documentRef, elements } = createPopupDocument();
+  const messages = [];
+  const blocklist = {
+    ...sharedBlocklist,
+    async getStoredUsernames() {
+      return [];
+    }
+  };
+  const extensionApi = createStorageExtensionApi({
+    [sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY]: {
+      version: 1,
+      activeSession: createStoredFollowerScanSession({
+        dedupe: {
+          alreadyBlockedKeys: ['id:301', 'username:carol']
+        },
+        hasMorePages: true,
+        nextCursor: 'cursor-resume',
+        pendingUsers: [{ restId: '202', username: 'bob', blocking: false }],
+        readyCandidates: [{ restId: '101', username: 'alice', attempts: 0, lastError: null }],
+        totals: {
+          scanned: 5,
+          alreadyBlocked: 1,
+          blockedSuccess: 2,
+          blockedFailed: 0,
+          abandonedFailed: 0
+        }
+      })
+    }
+  });
+
+  extensionApi.runtime = {};
+  extensionApi.tabs = {
+    async query(queryInfo) {
+      if (queryInfo.active) {
+        return [{ id: 51, url: 'https://x.com/targetuser/followers' }];
+      }
+
+      return [];
+    },
+    async sendMessage(tabId, message) {
+      messages.push({ message, tabId });
+
+      return {
+        ok: true,
+        preview: {
+          alreadyBlockedCount: 1,
+          blockLimit: 25,
+          candidates: [{ restId: '404', username: 'dave' }],
+          hasMorePages: true,
+          readyCount: 1,
+          resumeState: {
+            alreadyBlockedKeys: ['id:301', 'username:carol', 'id:505', 'username:eve'],
+            hasMorePages: true,
+            nextCursor: 'cursor-next',
+            pendingUsers: [{ restId: '505', username: 'eve', blocking: false }]
+          },
+          scanLimit: 80,
+          scannedCount: 2,
+          source: 'followers',
+          targetRestId: '999',
+          targetScreenName: 'targetuser'
+        }
+      };
+    }
+  };
+
+  init(documentRef, extensionApi, blocklist, sharedFollowers, sharedSettings, sharedFollowerScanSessions);
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  elements['open-followers'].click();
+  elements['followers-block-limit'].value = '25';
+  elements['followers-scan-limit'].value = '80';
+  elements['scan-followers-preview'].click();
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].tabId, 51);
+  assert.deepEqual(messages[0].message.options, {
+    blockLimit: 25,
+    resumeState: {
+      alreadyBlockedKeys: ['id:301', 'username:carol'],
+      existingReadyCount: 1,
+      existingReadyKeys: ['id:101', 'username:alice'],
+      hasMorePages: true,
+      nextCursor: 'cursor-resume',
+      pendingUsers: [{ restId: '202', username: 'bob', blocking: false }]
+    },
+    scanLimit: 80,
+    source: 'followers'
+  });
+  assert.equal(getToastText(elements), 'Preview ready: 2 followers can be blocked from @targetuser.');
+  assert.equal(elements['followers-preview'].textContent, '@alice\n@dave');
+  assert.equal(elements['followers-summary'].textContent, 'Scanned 7 followers from @targetuser. Already blocked: 2. Blocked this session: 2. Ready: 2. More followers remain beyond this preview.');
+  assert.equal(elements['scan-followers-preview-label'].textContent, 'Resume scan');
+  assert.deepEqual(extensionApi.store[sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY].activeSession.readyCandidates, [
+    { restId: '101', username: 'alice', attempts: 0, lastError: null },
+    { restId: '404', username: 'dave', attempts: 0, lastError: null }
+  ]);
+  assert.deepEqual(extensionApi.store[sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY].activeSession.totals, {
+    scanned: 7,
+    alreadyBlocked: 2,
+    blockedSuccess: 2,
+    blockedFailed: 0,
+    abandonedFailed: 0
+  });
+  assert.deepEqual(extensionApi.store[sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY].activeSession.pendingUsers, [
+    { restId: '505', username: 'eve', blocking: false }
+  ]);
+  assert.equal(extensionApi.store[sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY].activeSession.nextCursor, 'cursor-next');
+});
+
+test('init retries from the top when a saved follower scan continuation is invalid', async () => {
+  const { documentRef, elements } = createPopupDocument();
+  const messages = [];
+  const blocklist = {
+    ...sharedBlocklist,
+    async getStoredUsernames() {
+      return [];
+    }
+  };
+  const extensionApi = createStorageExtensionApi({
+    [sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY]: {
+      version: 1,
+      activeSession: createStoredFollowerScanSession({
+        dedupe: {
+          alreadyBlockedKeys: ['id:301']
+        },
+        hasMorePages: true,
+        nextCursor: 'cursor-stale',
+        pendingUsers: [{ restId: '202', username: 'bob', blocking: false }],
+        readyCandidates: [{ restId: '101', username: 'alice', attempts: 0, lastError: null }],
+        totals: {
+          scanned: 5,
+          alreadyBlocked: 1,
+          blockedSuccess: 0,
+          blockedFailed: 0,
+          abandonedFailed: 0
+        }
+      })
+    }
+  });
+  let scanAttempt = 0;
+
+  extensionApi.runtime = {};
+  extensionApi.tabs = {
+    async query(queryInfo) {
+      if (queryInfo.active) {
+        return [{ id: 52, url: 'https://x.com/targetuser/followers' }];
+      }
+
+      return [];
+    },
+    async sendMessage(tabId, message) {
+      messages.push({ message, tabId });
+      scanAttempt += 1;
+
+      if (scanAttempt === 1) {
+        return {
+          error: 'Saved cursor is invalid.',
+          ok: false
+        };
+      }
+
+      return {
+        ok: true,
+        preview: {
+          alreadyBlockedCount: 0,
+          blockLimit: 25,
+          candidates: [{ restId: '303', username: 'charlie' }],
+          hasMorePages: true,
+          readyCount: 1,
+          resumeState: {
+            alreadyBlockedKeys: ['id:301'],
+            hasMorePages: true,
+            nextCursor: 'cursor-fresh',
+            pendingUsers: [{ restId: '404', username: 'dave', blocking: false }]
+          },
+          scanLimit: 80,
+          scannedCount: 2,
+          source: 'followers',
+          targetRestId: '999',
+          targetScreenName: 'targetuser'
+        }
+      };
+    }
+  };
+
+  init(documentRef, extensionApi, blocklist, sharedFollowers, sharedSettings, sharedFollowerScanSessions);
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  elements['open-followers'].click();
+  elements['followers-block-limit'].value = '25';
+  elements['followers-scan-limit'].value = '80';
+  elements['scan-followers-preview'].click();
+  await flushAsyncWork();
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  assert.equal(messages.length, 2);
+  assert.equal(messages[0].tabId, 52);
+  assert.deepEqual(messages[0].message.options.resumeState, {
+    alreadyBlockedKeys: ['id:301'],
+    existingReadyCount: 1,
+    existingReadyKeys: ['id:101', 'username:alice'],
+    hasMorePages: true,
+    nextCursor: 'cursor-stale',
+    pendingUsers: [{ restId: '202', username: 'bob', blocking: false }]
+  });
+  assert.deepEqual(messages[1].message.options.resumeState, {
+    alreadyBlockedKeys: ['id:301'],
+    existingReadyCount: 1,
+    existingReadyKeys: ['id:101', 'username:alice'],
+    hasMorePages: true,
+    nextCursor: null,
+    pendingUsers: []
+  });
+  assert.equal(getToastText(elements), 'Saved scan position was invalid. Started a fresh scan from the top. Preview ready: 2 followers can be blocked from @targetuser.');
+  assert.equal(elements['followers-preview'].textContent, '@alice\n@charlie');
+  assert.deepEqual(extensionApi.store[sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY].activeSession.readyCandidates, [
+    { restId: '101', username: 'alice', attempts: 0, lastError: null },
+    { restId: '303', username: 'charlie', attempts: 0, lastError: null }
+  ]);
+  assert.deepEqual(extensionApi.store[sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY].activeSession.pendingUsers, [
+    { restId: '404', username: 'dave', blocking: false }
+  ]);
+  assert.equal(extensionApi.store[sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY].activeSession.nextCursor, 'cursor-fresh');
+});
+
+test('init clears the active follower scan session when the block limit changes', async () => {
+  const extensionApi = createStorageExtensionApi({
+    [sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY]: {
+      version: 1,
+      activeSession: createStoredFollowerScanSession({
+        hasMorePages: true,
+        readyCandidates: [{ restId: '101', username: 'alice', attempts: 0, lastError: null }],
+        totals: {
+          scanned: 5,
+          alreadyBlocked: 1,
+          blockedSuccess: 0,
+          blockedFailed: 0,
+          abandonedFailed: 0
+        }
+      })
+    }
+  });
+  const { documentRef, elements } = createPopupDocument();
+
+  init(documentRef, extensionApi, sharedBlocklist, sharedFollowers, sharedSettings, sharedFollowerScanSessions);
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  elements['open-followers'].click();
+  assert.equal(elements['followers-preview'].textContent, '@alice');
+
+  elements['followers-block-limit'].value = '30';
+  elements['followers-block-limit'].change();
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  assert.equal(extensionApi.store[sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY].activeSession, null);
+  assert.equal(elements['followers-summary'].textContent, 'Preview cleared. Run a new scan with the updated limits.');
+  assert.equal(elements['followers-preview'].textContent, '');
+  assert.equal(elements['block-follower-candidates'].disabled, true);
+});
+
+test('init ignores legacy popup preview persistence during hydration and evicts it on the next popup-state write', async (t) => {
   const originalLocalStorage = globalThis.localStorage;
-  const originalDateNow = Date.now;
   const storage = createLocalStorageStub();
-  const now = 1_783_496_400_000;
+  const extensionApi = createStorageExtensionApi();
 
   globalThis.localStorage = storage;
-  Date.now = () => now;
   t.after(() => {
-    Date.now = originalDateNow;
-
     if (originalLocalStorage === undefined) {
       delete globalThis.localStorage;
       return;
@@ -1181,7 +1502,7 @@ test('init drops expired and legacy persisted followers previews during hydratio
         candidates: [{ restId: '101', username: 'alice' }],
         hasMorePages: false,
         readyCount: 1,
-        savedAt: now - (10 * 60 * 1000) - 1,
+        savedAt: Date.now(),
         scanLimit: 80,
         scannedCount: 5,
         source: 'followers',
@@ -1196,22 +1517,19 @@ test('init drops expired and legacy persisted followers previews during hydratio
 
   const { documentRef, elements } = createPopupDocument();
 
-  init(documentRef, { runtime: {}, tabs: {} }, {
+  init(documentRef, extensionApi, {
     ...sharedBlocklist,
     async getStoredUsernames() {
       return [];
     }
-  });
+  }, sharedFollowers, sharedSettings, sharedFollowerScanSessions);
   await flushAsyncWork();
 
   assert.equal(elements['popup-shell'].dataset.view, POPUP_VIEWS.followers);
   assert.equal(elements['followers-preview'].textContent, '');
   assert.equal(elements['followers-summary'].textContent, 'Open a profile, followers, or following page in the active X tab, then run a preview scan.');
   assert.equal(elements['block-follower-candidates'].disabled, true);
-  assert.deepEqual(loadStoredPopupState(storage).followersPreviews, {
-    followers: null,
-    following: null
-  });
+  assert.equal(loadStoredPopupState(storage).followersPreviews, undefined);
   assert.equal(loadStoredPopupState(storage).followersPreview, undefined);
 });
 
@@ -1921,6 +2239,12 @@ test('init scans followers in the active tab and blocks only the ready preview c
               ],
               hasMorePages: true,
               readyCount: 2,
+              resumeState: {
+                alreadyBlockedKeys: ['id:301'],
+                hasMorePages: true,
+                nextCursor: 'cursor-bottom',
+                pendingUsers: []
+              },
               scanLimit: 80,
               scannedCount: 5,
               targetRestId: '999',
@@ -1962,7 +2286,7 @@ test('init scans followers in the active tab and blocks only the ready preview c
 
   assert.equal(elements.status.textContent, 'Save usernames for later, or block the whole list immediately through any open X tab.');
   assert.equal(getToastText(elements), 'Preview ready: 2 followers can be blocked from @targetuser.');
-  assert.equal(elements['followers-summary'].textContent, 'Scanned 5 followers from @targetuser. Already blocked: 2. Ready: 2. More followers remain beyond this preview.');
+  assert.equal(elements['followers-summary'].textContent, 'Scanned 5 followers from @targetuser. Already blocked: 2. Blocked this session: 0. Ready: 2. More followers remain beyond this preview.');
   assert.equal(elements['followers-preview'].textContent, '@alice\n@bob');
   assert.equal(elements['block-follower-candidates'].disabled, false);
 
@@ -1981,16 +2305,17 @@ test('init scans followers in the active tab and blocks only the ready preview c
   await flushAsyncWork();
 
   assert.equal(elements.status.textContent, 'Save usernames for later, or block the whole list immediately through any open X tab.');
-  assert.equal(getToastText(elements), '');
+  assert.equal(getToastText(elements), 'Batch blocked. Continue scanning for the next batch.');
   assert.equal(elements['followers-progress-label'].textContent, 'Block run complete');
   assert.equal(elements['followers-progress-count'].textContent, '2/2');
   assert.equal(elements['followers-progress-detail'].textContent, 'Blocked 2/2. Failed: 0. Delay used: 1100 ms between requests.');
-  assert.equal(elements['followers-summary'].textContent, 'Preview cleared. Run a new scan for another batch.');
-  assert.equal(elements['followers-preview'].textContent, '');
+  assert.equal(elements['followers-summary'].textContent, 'Scanned 5 followers from @targetuser. Already blocked: 2. Blocked this session: 2. Ready: 0. More followers remain beyond this preview.');
+  assert.equal(elements['followers-preview'].textContent, 'No block-ready followers are queued right now. Continue scanning for the next batch.');
   assert.equal(messages.length, 2);
   assert.equal(messages[0].tabId, 41);
   assert.deepEqual(messages[0].message.options, {
     blockLimit: 25,
+    resumeState: null,
     scanLimit: 80,
     source: 'followers'
   });
@@ -2004,6 +2329,132 @@ test('init scans followers in the active tab and blocks only the ready preview c
   assert.equal(messages[1].message.delayMs, 1100);
   assert.equal(typeof messages[1].message.runId, 'string');
   assert.equal(messages[1].message.type, FOLLOWERS_BLOCK_MESSAGE_TYPE);
+});
+
+test('init counts blockedFailed by retryable candidates and abandons them after the retry cap', async () => {
+  const { documentRef, elements } = createPopupDocument();
+  const extensionApi = createStorageExtensionApi({
+    [sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY]: {
+      version: 1,
+      activeSession: createStoredFollowerScanSession({
+        hasMorePages: false,
+        readyCandidates: [{ restId: '101', username: 'alice', attempts: 0, lastError: null }],
+        totals: {
+          scanned: 5,
+          alreadyBlocked: 0,
+          blockedSuccess: 0,
+          blockedFailed: 0,
+          abandonedFailed: 0
+        }
+      })
+    }
+  });
+
+  extensionApi.runtime = {};
+  extensionApi.tabs = {
+    async query(queryInfo) {
+      if (queryInfo.active) {
+        return [{ id: 44, url: 'https://x.com/targetuser/followers' }];
+      }
+
+      return [];
+    },
+    async sendMessage(_tabId, message) {
+      if (message.type === FOLLOWERS_BLOCK_MESSAGE_TYPE) {
+        return {
+          ok: true,
+          results: [{ ok: false, restId: '101', username: 'alice', error: 'rate limit' }]
+        };
+      }
+
+      throw new Error(`Unexpected message type: ${message.type}`);
+    }
+  };
+
+  init(documentRef, extensionApi, sharedBlocklist, sharedFollowers, sharedSettings, sharedFollowerScanSessions);
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  elements['open-followers'].click();
+  elements['block-follower-candidates'].click();
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  assert.equal(extensionApi.store[sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY].activeSession.readyCandidates[0].attempts, 1);
+  assert.equal(extensionApi.store[sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY].activeSession.totals.blockedFailed, 1);
+  assert.equal(extensionApi.store[sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY].activeSession.totals.abandonedFailed, 0);
+
+  elements['block-follower-candidates'].click();
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  assert.equal(extensionApi.store[sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY].activeSession.readyCandidates[0].attempts, 2);
+  assert.equal(extensionApi.store[sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY].activeSession.totals.blockedFailed, 1);
+  assert.equal(extensionApi.store[sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY].activeSession.totals.abandonedFailed, 0);
+
+  elements['block-follower-candidates'].click();
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  assert.deepEqual(extensionApi.store[sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY].activeSession.readyCandidates, []);
+  assert.equal(extensionApi.store[sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY].activeSession.totals.blockedFailed, 0);
+  assert.equal(extensionApi.store[sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY].activeSession.totals.abandonedFailed, 1);
+});
+
+test('init keeps the queued candidate when the block result does not match the queued identity', async () => {
+  const { documentRef, elements } = createPopupDocument();
+  const extensionApi = createStorageExtensionApi({
+    [sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY]: {
+      version: 1,
+      activeSession: createStoredFollowerScanSession({
+        hasMorePages: false,
+        readyCandidates: [{ restId: '101', username: 'alice', attempts: 0, lastError: null }],
+        totals: {
+          scanned: 5,
+          alreadyBlocked: 0,
+          blockedSuccess: 0,
+          blockedFailed: 0,
+          abandonedFailed: 0
+        }
+      })
+    }
+  });
+
+  extensionApi.runtime = {};
+  extensionApi.tabs = {
+    async query(queryInfo) {
+      if (queryInfo.active) {
+        return [{ id: 45, url: 'https://x.com/targetuser/followers' }];
+      }
+
+      return [];
+    },
+    async sendMessage(_tabId, message) {
+      if (message.type === FOLLOWERS_BLOCK_MESSAGE_TYPE) {
+        return {
+          ok: true,
+          results: [{ ok: true, restId: '999', username: 'mallory' }]
+        };
+      }
+
+      throw new Error(`Unexpected message type: ${message.type}`);
+    }
+  };
+
+  init(documentRef, extensionApi, sharedBlocklist, sharedFollowers, sharedSettings, sharedFollowerScanSessions);
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  elements['open-followers'].click();
+  elements['block-follower-candidates'].click();
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  assert.equal(extensionApi.store[sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY].activeSession.readyCandidates[0].username, 'alice');
+  assert.equal(extensionApi.store[sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY].activeSession.readyCandidates[0].attempts, 1);
+  assert.equal(extensionApi.store[sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY].activeSession.totals.blockedSuccess, 0);
+  assert.equal(extensionApi.store[sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY].activeSession.totals.blockedFailed, 1);
+  assert.equal(getToastText(elements).includes('Mismatched results: 1.'), true);
 });
 
 test('init can cancel an active follower block run', async () => {
@@ -2137,6 +2588,12 @@ test('init scans following when the following source is selected', async () => {
             candidates: [{ restId: '303', username: 'charlie' }],
             hasMorePages: false,
             readyCount: 1,
+            resumeState: {
+              alreadyBlockedKeys: [],
+              hasMorePages: false,
+              nextCursor: null,
+              pendingUsers: []
+            },
             scanLimit: 15,
             scannedCount: 1,
             source: 'following',
@@ -2153,7 +2610,8 @@ test('init scans following when the following source is selected', async () => {
 
   elements['open-followers'].click();
   elements['followers-source-following'].click();
-  assert.equal(elements['followers-summary'].textContent, 'Source changed to following. Run a new preview scan.');
+  await flushAsyncWork();
+  assert.equal(elements['followers-summary'].textContent, 'Source changed to following. Run a new scan.');
   elements['followers-block-limit'].value = '10';
   elements['followers-scan-limit'].value = '15';
   elements['scan-followers-preview'].click();
@@ -2163,17 +2621,18 @@ test('init scans following when the following source is selected', async () => {
   assert.equal(messages.length, 1);
   assert.deepEqual(messages[0].message.options, {
     blockLimit: 10,
+    resumeState: null,
     scanLimit: 15,
     source: 'following'
   });
   assert.equal(typeof messages[0].message.runId, 'string');
   assert.equal(elements.status.textContent, 'Save usernames for later, or block the whole list immediately through any open X tab.');
   assert.equal(getToastText(elements), 'Preview ready: 1 following account can be blocked from @targetuser.');
-  assert.equal(elements['followers-summary'].textContent, 'Scanned 1 following account from @targetuser. Already blocked: 0. Ready: 1.');
+  assert.equal(elements['followers-summary'].textContent, 'Scanned 1 following account from @targetuser. Already blocked: 0. Blocked this session: 0. Ready: 1.');
   assert.equal(elements['followers-progress-label'].textContent, 'Ready to block 1 following account');
 });
 
-test('init keeps separate previews for followers and following when switching sources', async (t) => {
+test('init resets the active scan session when switching sources and restores the current session after reopening', async (t) => {
   const originalLocalStorage = globalThis.localStorage;
   const storage = createLocalStorageStub();
 
@@ -2194,51 +2653,62 @@ test('init keeps separate previews for followers and following when switching so
       return [];
     }
   };
-  const extensionApi = {
-    runtime: {},
-    tabs: {
-      async query(queryInfo) {
-        if (queryInfo.active) {
-          return [{ id: 42, url: 'https://x.com/targetuser/followers' }];
-        }
+  const extensionApi = createStorageExtensionApi();
+  extensionApi.runtime = {};
+  extensionApi.tabs = {
+    async query(queryInfo) {
+      if (queryInfo.active) {
+        return [{ id: 42, url: 'https://x.com/targetuser/followers' }];
+      }
 
-        return [];
-      },
-      async sendMessage(_tabId, message) {
-        if (message.options?.source === 'following') {
-          return {
-            ok: true,
-            preview: {
-              alreadyBlockedCount: 0,
-              blockLimit: 10,
-              candidates: [{ restId: '303', username: 'charlie' }],
-              hasMorePages: false,
-              readyCount: 1,
-              scanLimit: 15,
-              scannedCount: 1,
-              source: 'following',
-              targetRestId: '999',
-              targetScreenName: 'targetuser'
-            }
-          };
-        }
-
+      return [];
+    },
+    async sendMessage(_tabId, message) {
+      if (message.options?.source === 'following') {
         return {
           ok: true,
           preview: {
             alreadyBlockedCount: 0,
             blockLimit: 10,
-            candidates: [{ restId: '101', username: 'alice' }],
+            candidates: [{ restId: '303', username: 'charlie' }],
             hasMorePages: false,
             readyCount: 1,
+            resumeState: {
+              alreadyBlockedKeys: [],
+              hasMorePages: false,
+              nextCursor: null,
+              pendingUsers: []
+            },
             scanLimit: 15,
             scannedCount: 1,
-            source: 'followers',
+            source: 'following',
             targetRestId: '999',
             targetScreenName: 'targetuser'
           }
         };
       }
+
+      return {
+        ok: true,
+        preview: {
+          alreadyBlockedCount: 0,
+          blockLimit: 10,
+          candidates: [{ restId: '101', username: 'alice' }],
+          hasMorePages: false,
+          readyCount: 1,
+          resumeState: {
+            alreadyBlockedKeys: [],
+            hasMorePages: false,
+            nextCursor: null,
+            pendingUsers: []
+          },
+          scanLimit: 15,
+          scannedCount: 1,
+          source: 'followers',
+          targetRestId: '999',
+          targetScreenName: 'targetuser'
+        }
+      };
     }
   };
 
@@ -2253,28 +2723,22 @@ test('init keeps separate previews for followers and following when switching so
   await flushAsyncWork();
 
   assert.equal(elements['followers-preview'].textContent, '@alice');
-  assert.equal(loadStoredPopupState(storage).followersPreviews.followers.candidates[0].username, 'alice');
+  assert.equal(extensionApi.store[sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY].activeSession.source, 'followers');
+  assert.equal(loadStoredPopupState(storage).followersPreviews, undefined);
 
   elements['followers-source-following'].click();
-  assert.equal(elements['followers-summary'].textContent, 'Source changed to following. Run a new preview scan.');
+  await flushAsyncWork();
+  assert.equal(elements['followers-summary'].textContent, 'Source changed to following. Run a new scan.');
   assert.equal(elements['block-follower-candidates'].disabled, true);
-  assert.equal(loadStoredPopupState(storage).followersPreviews.followers.candidates[0].username, 'alice');
+  assert.equal(extensionApi.store[sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY].activeSession, null);
 
   elements['scan-followers-preview'].click();
   await flushAsyncWork();
   await flushAsyncWork();
 
   assert.equal(elements['followers-preview'].textContent, '@charlie');
-  assert.equal(loadStoredPopupState(storage).followersPreviews.following.candidates[0].username, 'charlie');
-
-  elements['followers-source-followers'].click();
-  assert.equal(elements['followers-preview'].textContent, '@alice');
-  assert.equal(elements['followers-summary'].textContent, 'Scanned 1 follower from @targetuser. Already blocked: 0. Ready: 1.');
-  assert.equal(elements['block-follower-candidates'].disabled, false);
-
-  elements['followers-source-following'].click();
-  assert.equal(elements['followers-preview'].textContent, '@charlie');
-  assert.equal(elements['followers-summary'].textContent, 'Scanned 1 following account from @targetuser. Already blocked: 0. Ready: 1.');
+  assert.equal(extensionApi.store[sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY].activeSession.source, 'following');
+  assert.equal(elements['followers-summary'].textContent, 'Scanned 1 following account from @targetuser. Already blocked: 0. Blocked this session: 0. Ready: 1.');
 
   const reopenedPopup = createPopupDocument();
   init(reopenedPopup.documentRef, extensionApi, blocklist, sharedFollowers);

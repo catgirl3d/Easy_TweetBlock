@@ -22,8 +22,10 @@
   if (typeof module !== 'undefined' && module.exports) {
     require('../shared/storage.js');
     require('../shared/settings.js');
+    require('../shared/followers.js');
     require('./shared.js');
     require('../shared/blocklist.js');
+    require('../shared/follower-scan-session.js');
     require('./x-client-transaction.js');
     require('./api.js');
     require('./dom.js');

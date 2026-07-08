@@ -62,19 +62,21 @@
   const WAIT_INTERVAL_MS = 50;
   const WAIT_TIMEOUT_MS = 2500;
   const USERNAME_PATTERN = /^[A-Za-z0-9_]{1,15}$/;
-  const RESERVED_PATH_SEGMENTS = new Set([
+  const FALLBACK_RESERVED_PATH_SEGMENTS = new Set([
     'compose',
     'explore',
     'hashtag',
     'home',
     'i',
     'intent',
+    'login',
     'messages',
     'notifications',
     'search',
     'settings',
     'share'
   ]);
+  const RESERVED_PATH_SEGMENTS = getFollowersSharedApi()?.RESERVED_PATH_SEGMENTS || FALLBACK_RESERVED_PATH_SEGMENTS;
   const BLOCK_ICON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><g><path d="M12 3.75c-4.55 0-8.25 3.69-8.25 8.25 0 1.92.66 3.68 1.75 5.08L17.09 5.5C15.68 4.4 13.92 3.75 12 3.75zm6.5 3.17L6.92 18.5c1.4 1.1 3.16 1.75 5.08 1.75 4.56 0 8.25-3.69 8.25-8.25 0-1.92-.65-3.68-1.75-5.08zM1.75 12C1.75 6.34 6.34 1.75 12 1.75S22.25 6.34 22.25 12 17.66 22.25 12 22.25 1.75 17.66 1.75 12z"></path></g></svg>';
   const ADD_ICON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><g><path d="M11.25 4.75h1.5v6.5h6.5v1.5h-6.5v6.5h-1.5v-6.5h-6.5v-1.5h6.5z"></path></g></svg>';
   const CHECK_ICON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><g><path d="M9.55 16.94L5.3 12.7l1.41-1.41 2.84 2.83 7.84-7.84 1.41 1.41-9.25 9.25z"></path></g></svg>';
@@ -111,6 +113,16 @@
     };
   }
 
+  function isReservedPathSegment(value) {
+    const sharedIsReservedPathSegment = getFollowersSharedApi()?.isReservedPathSegment;
+
+    if (typeof sharedIsReservedPathSegment === 'function') {
+      return sharedIsReservedPathSegment(value);
+    }
+
+    return typeof value === 'string' && FALLBACK_RESERVED_PATH_SEGMENTS.has(value.trim().toLowerCase());
+  }
+
   function extractScreenNameFromHref(href, baseUrl = 'https://x.com') {
     if (typeof href !== 'string' || !href.trim()) {
       return null;
@@ -132,7 +144,7 @@
 
     const [firstSegment, secondSegment] = pathSegments;
 
-    if (!firstSegment || RESERVED_PATH_SEGMENTS.has(firstSegment.toLowerCase())) {
+    if (!firstSegment || isReservedPathSegment(firstSegment)) {
       return null;
     }
 
@@ -182,7 +194,7 @@
 
     const [firstPathSegment] = pathname.split('/').filter(Boolean);
 
-    if (!firstPathSegment || RESERVED_PATH_SEGMENTS.has(firstPathSegment.toLowerCase())) {
+    if (!firstPathSegment || isReservedPathSegment(firstPathSegment)) {
       return null;
     }
 
