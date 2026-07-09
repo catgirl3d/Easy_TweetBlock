@@ -44,7 +44,8 @@
     USER_BY_SCREEN_NAME_FEATURES
   } = contentFeaturesApi;
   const {
-    getFollowerScanCandidateIdentityKeys
+    getFollowerScanCandidateIdentityKeys,
+    normalizeIdentityKeyList
   } = followerScanSessionsApi;
 
   const X_WEB_BEARER_TOKEN = 'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
@@ -799,32 +800,6 @@
     };
   }
 
-  function normalizeResumeIdentityKeys(keys) {
-    const normalizedKeys = [];
-    const seenKeys = new Set();
-
-    if (!Array.isArray(keys)) {
-      return normalizedKeys;
-    }
-
-    for (const key of keys) {
-      if (typeof key !== 'string') {
-        continue;
-      }
-
-      const normalizedKey = key.trim();
-
-      if (!normalizedKey || seenKeys.has(normalizedKey)) {
-        continue;
-      }
-
-      seenKeys.add(normalizedKey);
-      normalizedKeys.push(normalizedKey);
-    }
-
-    return normalizedKeys;
-  }
-
   function normalizeResumePendingUser(user) {
     const normalizedCandidate = normalizeFollowerBlockCandidate(user);
 
@@ -872,9 +847,9 @@
       : null;
 
     return {
-      alreadyBlockedKeys: normalizeResumeIdentityKeys(normalizedResumeState?.alreadyBlockedKeys),
+      alreadyBlockedKeys: normalizeIdentityKeyList(normalizedResumeState?.alreadyBlockedKeys, Number.POSITIVE_INFINITY),
       existingReadyCount: normalizeResumeCount(normalizedResumeState?.existingReadyCount),
-      existingReadyKeys: normalizeResumeIdentityKeys(normalizedResumeState?.existingReadyKeys),
+      existingReadyKeys: normalizeIdentityKeyList(normalizedResumeState?.existingReadyKeys, Number.POSITIVE_INFINITY),
       hasExplicitResumeState: Boolean(normalizedResumeState),
       hasMorePages: typeof normalizedResumeState?.hasMorePages === 'boolean'
         ? normalizedResumeState.hasMorePages

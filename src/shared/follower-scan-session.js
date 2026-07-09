@@ -532,6 +532,7 @@
     getFollowerScanCandidateIdentityKeys,
     getFollowerScanCandidatePrimaryKey,
     mergeFollowerScanReadyCandidates,
+    normalizeIdentityKeyList,
     normalizeFollowerScanSession,
     normalizeFollowerScanSessionStore,
     loadFollowerScanSessionStore,

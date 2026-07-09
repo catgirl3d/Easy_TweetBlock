@@ -1084,6 +1084,7 @@
     let isBlocking = false;
     let isFollowersScanning = false;
     let isFollowersBlocking = false;
+    let isFollowersSessionResetting = false;
     let currentFollowerRunTabId = null;
     let currentDelayMs = settings?.DEFAULT_BATCH_BLOCK_DELAY_MS;
     let currentPageButtonStyles = normalizePageButtonStylesValue(
@@ -1228,6 +1229,10 @@
 
     function followerScanSessionHasReadyCandidates(session) {
       return Array.isArray(session?.readyCandidates) && session.readyCandidates.length > 0;
+    }
+
+    function isPopupBusy() {
+      return isSaving || isBlocking || isFollowersScanning || isFollowersBlocking || isFollowersSessionResetting;
     }
 
     function getFollowerScanSessionForCurrentSource() {
@@ -1441,7 +1446,7 @@
         );
 
       scanFollowersButtonLabelElement.textContent = hasRemainingWork ? 'Resume scan' : 'Scan';
-      scanFollowersButton.disabled = isSaving || isBlocking || isFollowersScanning || isFollowersBlocking || shouldDisableForSession;
+      scanFollowersButton.disabled = isPopupBusy() || shouldDisableForSession;
     }
 
     async function updateSessionFromScan(preview, activeFollowerScanSession, expectedSessionKey, targetScreenName) {
@@ -2334,7 +2339,7 @@
     }
 
     function setBusyState() {
-      const isAnyBusy = isSaving || isBlocking || isFollowersScanning || isFollowersBlocking;
+      const isAnyBusy = isPopupBusy();
 
       if (isAnyBusy) {
         closeUsernameListDropdown();
@@ -2355,6 +2360,8 @@
       backFromFollowersButton.disabled = isAnyBusy;
       followersSourceFollowersElement.disabled = isAnyBusy;
       followersSourceFollowingElement.disabled = isAnyBusy;
+      followersBlockLimitElement.disabled = isAnyBusy;
+      followersScanLimitElement.disabled = isAnyBusy;
       blockFollowerCandidatesButton.disabled = isAnyBusy || !currentFollowersPreview?.candidates?.length;
       cancelFollowersRunButton.disabled = !(isFollowersScanning || isFollowersBlocking);
       addFollowersToListButton.disabled = isAnyBusy || !currentFollowersPreview?.candidates?.length;
@@ -2377,13 +2384,24 @@
     }
 
     async function resetFollowerScanSession(summary = DEFAULT_FOLLOWERS_SUMMARY) {
-      await clearPersistedFollowerScanSession();
-      clearFollowersPreview(summary);
-      renderFollowerBlockProgress({ phase: 'idle' });
+      isFollowersSessionResetting = true;
       setBusyState();
+
+      try {
+        await clearPersistedFollowerScanSession();
+        clearFollowersPreview(summary);
+        renderFollowerBlockProgress({ phase: 'idle' });
+      } finally {
+        isFollowersSessionResetting = false;
+        setBusyState();
+      }
     }
 
     async function updateFollowersSource(source) {
+      if (isPopupBusy()) {
+        return;
+      }
+
       const nextSource = followers.normalizeFollowersSource(source);
 
       if (nextSource === currentFollowersSource) {
@@ -2493,7 +2511,7 @@
     }
 
     async function saveBlocklist() {
-      if (isSaving || isBlocking || isFollowersScanning || isFollowersBlocking) {
+      if (isPopupBusy()) {
         return;
       }
 
@@ -2527,7 +2545,7 @@
     }
 
     async function saveSettings() {
-      if (isSaving || isBlocking || isFollowersScanning || isFollowersBlocking) {
+      if (isPopupBusy()) {
         return;
       }
 
@@ -2567,7 +2585,7 @@
     }
 
     async function blockListedNow() {
-      if (isSaving || isBlocking || isFollowersScanning || isFollowersBlocking) {
+      if (isPopupBusy()) {
         return;
       }
 
@@ -2735,11 +2753,12 @@
       let scanRunId = null;
 
       try {
-        if (isSaving || isBlocking || isFollowersScanning || isFollowersBlocking) {
+        if (isPopupBusy()) {
           logPopupInfo('Followers preview scan ignored because popup is busy.', {
             isBlocking,
             isFollowersBlocking,
             isFollowersScanning,
+            isFollowersSessionResetting,
             isSaving
           });
           refreshPopupDebugLog();
@@ -2889,12 +2908,14 @@
         refreshPopupDebugLog();
 
         if (!currentFollowerScanSession?.readyCandidates?.length) {
+          const fallbackStatusPrefix = fallbackStatusMessage ? `${fallbackStatusMessage} ` : '';
+
           if (followerScanSessionHasRemainingWork(currentFollowerScanSession)) {
-            setStatus(`Scan complete. No block-ready ${sourceCopy.accountsLabel} found in this pass. Continue scanning for the next batch.`, { tone: fallbackStatusMessage ? 'warning' : 'info' });
+            setStatus(`${fallbackStatusPrefix}Scan complete. No block-ready ${sourceCopy.accountsLabel} found in this pass. Continue scanning for the next batch.`, { tone: fallbackStatusMessage ? 'warning' : 'info' });
             return;
           }
 
-          setStatus(`Scan complete. No block-ready ${sourceCopy.accountsLabel} found within ${currentFollowersScanLimit} scanned accounts.`, { tone: fallbackStatusMessage ? 'warning' : 'info' });
+          setStatus(`${fallbackStatusPrefix}Scan complete. No block-ready ${sourceCopy.accountsLabel} found within ${currentFollowersScanLimit} scanned accounts.`, { tone: fallbackStatusMessage ? 'warning' : 'info' });
           return;
         }
 
@@ -2946,11 +2967,12 @@
       let blockRunId = null;
 
       try {
-        if (isSaving || isBlocking || isFollowersScanning || isFollowersBlocking) {
+        if (isPopupBusy()) {
           logPopupInfo('Follower block run ignored because popup is busy.', {
             isBlocking,
             isFollowersBlocking,
             isFollowersScanning,
+            isFollowersSessionResetting,
             isSaving
           });
           refreshPopupDebugLog();
@@ -3115,7 +3137,7 @@
     }
 
     async function switchActiveUsernameList(listId = usernameListSelectElement.value) {
-      if (!listId || isSaving || isBlocking || isFollowersScanning || isFollowersBlocking) {
+      if (!listId || isPopupBusy()) {
         return;
       }
 
@@ -3128,7 +3150,7 @@
     }
 
     async function createNewUsernameList() {
-      if (isSaving || isBlocking || isFollowersScanning || isFollowersBlocking) {
+      if (isPopupBusy()) {
         return;
       }
 
@@ -3153,7 +3175,7 @@
     }
 
     async function renameActiveUsernameList() {
-      if (!currentActiveUsernameList || isSaving || isBlocking || isFollowersScanning || isFollowersBlocking) {
+      if (!currentActiveUsernameList || isPopupBusy()) {
         return;
       }
 
@@ -3175,7 +3197,7 @@
     }
 
     async function deleteActiveUsernameList() {
-      if (!currentActiveUsernameList || currentUsernameLists.length <= 1 || isSaving || isBlocking || isFollowersScanning || isFollowersBlocking) {
+      if (!currentActiveUsernameList || currentUsernameLists.length <= 1 || isPopupBusy()) {
         return;
       }
 
@@ -3220,7 +3242,7 @@
     }
 
     async function importUsernameText(text, fileName = '') {
-      if (isSaving || isBlocking || isFollowersScanning || isFollowersBlocking) {
+      if (isPopupBusy()) {
         return;
       }
 
@@ -3267,7 +3289,7 @@
     }
 
     async function addFollowersToActiveList() {
-      if (isSaving || isBlocking || isFollowersScanning || isFollowersBlocking) {
+      if (isPopupBusy()) {
         return;
       }
 
@@ -3499,6 +3521,11 @@
 
     followersBlockLimitElement.addEventListener('change', () => {
       handleAsyncPopupAction('updateFollowersBlockLimit', async () => {
+        if (isPopupBusy()) {
+          setBusyState();
+          return;
+        }
+
         const previousBlockLimit = currentFollowersBlockLimit;
 
         currentFollowersBlockLimit = readFollowersBlockLimit();
@@ -3517,6 +3544,11 @@
 
     followersScanLimitElement.addEventListener('change', () => {
       handleAsyncPopupAction('updateFollowersScanLimit', async () => {
+        if (isPopupBusy()) {
+          setBusyState();
+          return;
+        }
+
         const previousScanLimit = currentFollowersScanLimit;
 
         currentFollowersScanLimit = readFollowersScanLimit();
