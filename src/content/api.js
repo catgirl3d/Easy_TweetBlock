@@ -45,7 +45,7 @@
   } = contentFeaturesApi;
   const {
     getFollowerScanCandidateIdentityKeys,
-    normalizeIdentityKeyList
+    normalizeIdentityKeyListAll
   } = followerScanSessionsApi;
 
   const X_WEB_BEARER_TOKEN = 'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
@@ -847,9 +847,9 @@
       : null;
 
     return {
-      alreadyBlockedKeys: normalizeIdentityKeyList(normalizedResumeState?.alreadyBlockedKeys, Number.POSITIVE_INFINITY),
+      alreadyBlockedKeys: normalizeIdentityKeyListAll(normalizedResumeState?.alreadyBlockedKeys),
       existingReadyCount: normalizeResumeCount(normalizedResumeState?.existingReadyCount),
-      existingReadyKeys: normalizeIdentityKeyList(normalizedResumeState?.existingReadyKeys, Number.POSITIVE_INFINITY),
+      existingReadyKeys: normalizeIdentityKeyListAll(normalizedResumeState?.existingReadyKeys),
       hasExplicitResumeState: Boolean(normalizedResumeState),
       hasMorePages: typeof normalizedResumeState?.hasMorePages === 'boolean'
         ? normalizedResumeState.hasMorePages

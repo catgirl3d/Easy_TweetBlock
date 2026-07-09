@@ -15,6 +15,7 @@ const {
   getFollowerScanCandidatePrimaryKey,
   loadFollowerScanSessionStore,
   mergeFollowerScanReadyCandidates,
+  normalizeIdentityKeyListAll,
   normalizeFollowerScanSession,
   normalizeFollowerScanSessionStore,
   saveFollowerScanSessionStore,
@@ -122,6 +123,21 @@ test('normalizeFollowerScanSession prunes dedupe keys to the newest 500 entries'
   assert.equal(normalizedSession.dedupe.alreadyBlockedKeys.length, MAX_FOLLOWER_SCAN_DEDUPE_KEYS);
   assert.equal(normalizedSession.dedupe.alreadyBlockedKeys[0], 'id:21');
   assert.equal(normalizedSession.dedupe.alreadyBlockedKeys.at(-1), 'id:520');
+});
+
+test('normalizeIdentityKeyListAll preserves the full normalized key list', () => {
+  const dedupeKeys = Array.from({ length: MAX_FOLLOWER_SCAN_DEDUPE_KEYS + 20 }, (_, index) => ` id:${index + 1} `);
+  const normalizedKeys = normalizeIdentityKeyListAll([
+    null,
+    '',
+    'id:1',
+    ...dedupeKeys,
+    'id:520'
+  ]);
+
+  assert.equal(normalizedKeys.length, MAX_FOLLOWER_SCAN_DEDUPE_KEYS + 20);
+  assert.equal(normalizedKeys[0], 'id:1');
+  assert.equal(normalizedKeys.at(-1), 'id:520');
 });
 
 test('normalizeFollowerScanSession drops retry-capped candidates and increments abandoned totals', () => {

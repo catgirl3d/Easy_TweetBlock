@@ -79,7 +79,7 @@ function createLocalStorageStub(initialValues = {}) {
   };
 }
 
-function createStorageExtensionApi(initialStore = {}) {
+function createStorageExtensionApi(initialStore = {}, { onSet = null } = {}) {
   const store = { ...initialStore };
   const listeners = [];
 
@@ -109,6 +109,10 @@ function createStorageExtensionApi(initialStore = {}) {
 
           for (const listener of listeners) {
             listener(changes, 'local');
+          }
+
+          if (typeof onSet === 'function') {
+            return Promise.resolve(onSet({ changes, payload, store }));
           }
 
           return Promise.resolve();
@@ -144,6 +148,113 @@ function createStoredFollowerScanSession(overrides = {}) {
     ...session,
     ...overrides
   });
+}
+
+function createFollowerScanRetryPreview(overrides = {}) {
+  const resumeState = {
+    alreadyBlockedKeys: ['id:301'],
+    hasMorePages: false,
+    nextCursor: null,
+    pendingUsers: [],
+    ...(overrides.resumeState || {})
+  };
+
+  return {
+    alreadyBlockedCount: 0,
+    blockLimit: 25,
+    candidates: [],
+    hasMorePages: false,
+    readyCount: 0,
+    resumeState,
+    scanLimit: 80,
+    scannedCount: 2,
+    source: 'followers',
+    targetRestId: '999',
+    targetScreenName: 'targetuser',
+    ...overrides,
+    resumeState
+  };
+}
+
+async function runStaleContinuationRetryScan({
+  initialSessionOverrides = {},
+  retryPreview
+} = {}) {
+  const { documentRef, elements } = createPopupDocument();
+  const messages = [];
+  const blocklist = {
+    ...sharedBlocklist,
+    async getStoredUsernames() {
+      return [];
+    }
+  };
+  const extensionApi = createStorageExtensionApi({
+    [sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY]: {
+      version: 1,
+      activeSession: createStoredFollowerScanSession({
+        dedupe: {
+          alreadyBlockedKeys: ['id:301']
+        },
+        hasMorePages: true,
+        nextCursor: 'cursor-stale',
+        pendingUsers: [{ restId: '202', username: 'bob', blocking: false }],
+        readyCandidates: [],
+        totals: {
+          scanned: 5,
+          alreadyBlocked: 1,
+          blockedSuccess: 0,
+          blockedFailed: 0,
+          abandonedFailed: 0
+        },
+        ...initialSessionOverrides
+      })
+    }
+  });
+  let scanAttempt = 0;
+
+  extensionApi.tabs = {
+    async query(queryInfo) {
+      if (queryInfo.active) {
+        return [{ id: 52, url: 'https://x.com/targetuser/followers' }];
+      }
+
+      return [];
+    },
+    async sendMessage(tabId, message) {
+      messages.push({ message, tabId });
+      scanAttempt += 1;
+
+      if (scanAttempt === 1) {
+        return {
+          error: 'Saved cursor is invalid.',
+          ok: false
+        };
+      }
+
+      return {
+        ok: true,
+        preview: createFollowerScanRetryPreview(retryPreview)
+      };
+    }
+  };
+
+  init(documentRef, extensionApi, blocklist, sharedFollowers, sharedSettings, sharedFollowerScanSessions);
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  elements['open-followers'].click();
+  elements['followers-block-limit'].value = '25';
+  elements['followers-scan-limit'].value = '80';
+  elements['scan-followers-preview'].click();
+  await flushAsyncWork();
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  return {
+    elements,
+    extensionApi,
+    messages
+  };
 }
 
 function createPopupElement(overrides = {}) {
@@ -1313,92 +1424,21 @@ test('init resumes a stored follower scan session by sending the rebuilt resume 
 });
 
 test('init retries from the top when a saved follower scan continuation is invalid', async () => {
-  const { documentRef, elements } = createPopupDocument();
-  const messages = [];
-  const blocklist = {
-    ...sharedBlocklist,
-    async getStoredUsernames() {
-      return [];
-    }
-  };
-  const extensionApi = createStorageExtensionApi({
-    [sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY]: {
-      version: 1,
-      activeSession: createStoredFollowerScanSession({
-        dedupe: {
-          alreadyBlockedKeys: ['id:301']
-        },
+  const { elements, extensionApi, messages } = await runStaleContinuationRetryScan({
+    initialSessionOverrides: {
+      readyCandidates: [{ restId: '101', username: 'alice', attempts: 0, lastError: null }]
+    },
+    retryPreview: {
+      candidates: [{ restId: '303', username: 'charlie' }],
+      hasMorePages: true,
+      readyCount: 1,
+      resumeState: {
         hasMorePages: true,
-        nextCursor: 'cursor-stale',
-        pendingUsers: [{ restId: '202', username: 'bob', blocking: false }],
-        readyCandidates: [{ restId: '101', username: 'alice', attempts: 0, lastError: null }],
-        totals: {
-          scanned: 5,
-          alreadyBlocked: 1,
-          blockedSuccess: 0,
-          blockedFailed: 0,
-          abandonedFailed: 0
-        }
-      })
+        nextCursor: 'cursor-fresh',
+        pendingUsers: [{ restId: '404', username: 'dave', blocking: false }]
+      }
     }
   });
-  let scanAttempt = 0;
-
-  extensionApi.runtime = {};
-  extensionApi.tabs = {
-    async query(queryInfo) {
-      if (queryInfo.active) {
-        return [{ id: 52, url: 'https://x.com/targetuser/followers' }];
-      }
-
-      return [];
-    },
-    async sendMessage(tabId, message) {
-      messages.push({ message, tabId });
-      scanAttempt += 1;
-
-      if (scanAttempt === 1) {
-        return {
-          error: 'Saved cursor is invalid.',
-          ok: false
-        };
-      }
-
-      return {
-        ok: true,
-        preview: {
-          alreadyBlockedCount: 0,
-          blockLimit: 25,
-          candidates: [{ restId: '303', username: 'charlie' }],
-          hasMorePages: true,
-          readyCount: 1,
-          resumeState: {
-            alreadyBlockedKeys: ['id:301'],
-            hasMorePages: true,
-            nextCursor: 'cursor-fresh',
-            pendingUsers: [{ restId: '404', username: 'dave', blocking: false }]
-          },
-          scanLimit: 80,
-          scannedCount: 2,
-          source: 'followers',
-          targetRestId: '999',
-          targetScreenName: 'targetuser'
-        }
-      };
-    }
-  };
-
-  init(documentRef, extensionApi, blocklist, sharedFollowers, sharedSettings, sharedFollowerScanSessions);
-  await flushAsyncWork();
-  await flushAsyncWork();
-
-  elements['open-followers'].click();
-  elements['followers-block-limit'].value = '25';
-  elements['followers-scan-limit'].value = '80';
-  elements['scan-followers-preview'].click();
-  await flushAsyncWork();
-  await flushAsyncWork();
-  await flushAsyncWork();
 
   assert.equal(messages.length, 2);
   assert.equal(messages[0].tabId, 52);
@@ -1430,189 +1470,46 @@ test('init retries from the top when a saved follower scan continuation is inval
   assert.equal(extensionApi.store[sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY].activeSession.nextCursor, 'cursor-fresh');
 });
 
-test('init prefixes the stale continuation warning when a fresh retry finds no ready followers but more pages remain', async () => {
-  const { documentRef, elements } = createPopupDocument();
-  const messages = [];
-  const blocklist = {
-    ...sharedBlocklist,
-    async getStoredUsernames() {
-      return [];
-    }
-  };
-  const extensionApi = createStorageExtensionApi({
-    [sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY]: {
-      version: 1,
-      activeSession: createStoredFollowerScanSession({
-        dedupe: {
-          alreadyBlockedKeys: ['id:301']
-        },
+for (const {
+  expectedToast,
+  initialSessionOverrides,
+  retryPreview,
+  testName
+} of [
+  {
+    expectedToast: 'Saved scan position was invalid. Started a fresh scan from the top. Scan complete. No block-ready followers found in this pass. Continue scanning for the next batch.',
+    initialSessionOverrides: {},
+    retryPreview: {
+      hasMorePages: true,
+      resumeState: {
         hasMorePages: true,
-        nextCursor: 'cursor-stale',
-        pendingUsers: [{ restId: '202', username: 'bob', blocking: false }],
-        readyCandidates: [],
-        totals: {
-          scanned: 5,
-          alreadyBlocked: 1,
-          blockedSuccess: 0,
-          blockedFailed: 0,
-          abandonedFailed: 0
-        }
-      })
-    }
-  });
-  let scanAttempt = 0;
-
-  extensionApi.runtime = {};
-  extensionApi.tabs = {
-    async query(queryInfo) {
-      if (queryInfo.active) {
-        return [{ id: 52, url: 'https://x.com/targetuser/followers' }];
+        nextCursor: 'cursor-fresh',
+        pendingUsers: [{ restId: '404', username: 'dave', blocking: false }]
       }
-
-      return [];
     },
-    async sendMessage(tabId, message) {
-      messages.push({ message, tabId });
-      scanAttempt += 1;
-
-      if (scanAttempt === 1) {
-        return {
-          error: 'Saved cursor is invalid.',
-          ok: false
-        };
-      }
-
-      return {
-        ok: true,
-        preview: {
-          alreadyBlockedCount: 0,
-          blockLimit: 25,
-          candidates: [],
-          hasMorePages: true,
-          readyCount: 0,
-          resumeState: {
-            alreadyBlockedKeys: ['id:301'],
-            hasMorePages: true,
-            nextCursor: 'cursor-fresh',
-            pendingUsers: [{ restId: '404', username: 'dave', blocking: false }]
-          },
-          scanLimit: 80,
-          scannedCount: 2,
-          source: 'followers',
-          targetRestId: '999',
-          targetScreenName: 'targetuser'
-        }
-      };
-    }
-  };
-
-  init(documentRef, extensionApi, blocklist, sharedFollowers, sharedSettings, sharedFollowerScanSessions);
-  await flushAsyncWork();
-  await flushAsyncWork();
-
-  elements['open-followers'].click();
-  elements['followers-block-limit'].value = '25';
-  elements['followers-scan-limit'].value = '80';
-  elements['scan-followers-preview'].click();
-  await flushAsyncWork();
-  await flushAsyncWork();
-  await flushAsyncWork();
-
-  assert.equal(messages.length, 2);
-  assert.equal(getToastText(elements), 'Saved scan position was invalid. Started a fresh scan from the top. Scan complete. No block-ready followers found in this pass. Continue scanning for the next batch.');
-});
-
-test('init prefixes the stale continuation warning when a fresh retry finds no ready followers within the scan limit', async () => {
-  const { documentRef, elements } = createPopupDocument();
-  const messages = [];
-  const blocklist = {
-    ...sharedBlocklist,
-    async getStoredUsernames() {
-      return [];
-    }
-  };
-  const extensionApi = createStorageExtensionApi({
-    [sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY]: {
-      version: 1,
-      activeSession: createStoredFollowerScanSession({
-        dedupe: {
-          alreadyBlockedKeys: ['id:301']
-        },
-        hasMorePages: true,
-        nextCursor: 'cursor-stale',
-        pendingUsers: [],
-        readyCandidates: [],
-        totals: {
-          scanned: 5,
-          alreadyBlocked: 1,
-          blockedSuccess: 0,
-          blockedFailed: 0,
-          abandonedFailed: 0
-        }
-      })
-    }
-  });
-  let scanAttempt = 0;
-
-  extensionApi.runtime = {};
-  extensionApi.tabs = {
-    async query(queryInfo) {
-      if (queryInfo.active) {
-        return [{ id: 52, url: 'https://x.com/targetuser/followers' }];
-      }
-
-      return [];
+    testName: 'init prefixes the stale continuation warning when a fresh retry finds no ready followers but more pages remain'
+  },
+  {
+    expectedToast: 'Saved scan position was invalid. Started a fresh scan from the top. Scan complete. No block-ready followers found within 80 scanned accounts.',
+    initialSessionOverrides: {
+      pendingUsers: []
     },
-    async sendMessage(tabId, message) {
-      messages.push({ message, tabId });
-      scanAttempt += 1;
+    retryPreview: {
+      hasMorePages: false
+    },
+    testName: 'init prefixes the stale continuation warning when a fresh retry finds no ready followers within the scan limit'
+  }
+]) {
+  test(testName, async () => {
+    const { elements, messages } = await runStaleContinuationRetryScan({
+      initialSessionOverrides,
+      retryPreview
+    });
 
-      if (scanAttempt === 1) {
-        return {
-          error: 'Saved cursor is invalid.',
-          ok: false
-        };
-      }
-
-      return {
-        ok: true,
-        preview: {
-          alreadyBlockedCount: 0,
-          blockLimit: 25,
-          candidates: [],
-          hasMorePages: false,
-          readyCount: 0,
-          resumeState: {
-            alreadyBlockedKeys: ['id:301'],
-            hasMorePages: false,
-            nextCursor: null,
-            pendingUsers: []
-          },
-          scanLimit: 80,
-          scannedCount: 2,
-          source: 'followers',
-          targetRestId: '999',
-          targetScreenName: 'targetuser'
-        }
-      };
-    }
-  };
-
-  init(documentRef, extensionApi, blocklist, sharedFollowers, sharedSettings, sharedFollowerScanSessions);
-  await flushAsyncWork();
-  await flushAsyncWork();
-
-  elements['open-followers'].click();
-  elements['followers-block-limit'].value = '25';
-  elements['followers-scan-limit'].value = '80';
-  elements['scan-followers-preview'].click();
-  await flushAsyncWork();
-  await flushAsyncWork();
-  await flushAsyncWork();
-
-  assert.equal(messages.length, 2);
-  assert.equal(getToastText(elements), 'Saved scan position was invalid. Started a fresh scan from the top. Scan complete. No block-ready followers found within 80 scanned accounts.');
-});
+    assert.equal(messages.length, 2);
+    assert.equal(getToastText(elements), expectedToast);
+  });
+}
 
 test('init clears the active follower scan session when the block limit changes', async () => {
   const extensionApi = createStorageExtensionApi({
@@ -1653,10 +1550,10 @@ test('init clears the active follower scan session when the block limit changes'
 
 test('init keeps scan and block actions fenced while a follower session reset is still persisting', async () => {
   const { documentRef, elements } = createPopupDocument();
-  const listeners = [];
   const clearDeferred = createDeferred();
   const messages = [];
-  const store = {
+  let deferredClearConsumed = false;
+  const extensionApi = createStorageExtensionApi({
     [sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY]: {
       version: 1,
       activeSession: createStoredFollowerScanSession({
@@ -1671,93 +1568,51 @@ test('init keeps scan and block actions fenced while a follower session reset is
         }
       })
     }
-  };
-  let deferredClearConsumed = false;
-  const extensionApi = {
-    runtime: {},
-    storage: {
-      local: {
-        get(keys) {
-          const response = {};
+  }, {
+    onSet({ payload }) {
+      const nextSessionStore = payload[sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY];
 
-          for (const key of keys) {
-            response[key] = store[key];
-          }
-
-          return Promise.resolve(response);
-        },
-        set(payload) {
-          const changes = {};
-
-          for (const [key, value] of Object.entries(payload)) {
-            changes[key] = {
-              oldValue: store[key],
-              newValue: value
-            };
-            store[key] = value;
-          }
-
-          for (const listener of listeners) {
-            listener(changes, 'local');
-          }
-
-          const nextSessionStore = payload[sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY];
-
-          if (!deferredClearConsumed && nextSessionStore?.activeSession === null) {
-            deferredClearConsumed = true;
-            return clearDeferred.promise;
-          }
-
-          return Promise.resolve();
-        }
-      },
-      onChanged: {
-        addListener(listener) {
-          listeners.push(listener);
-        },
-        removeListener(listener) {
-          const index = listeners.indexOf(listener);
-
-          if (index !== -1) {
-            listeners.splice(index, 1);
-          }
-        }
+      if (!deferredClearConsumed && nextSessionStore?.activeSession === null) {
+        deferredClearConsumed = true;
+        return clearDeferred.promise;
       }
+
+      return null;
+    }
+  });
+
+  extensionApi.tabs = {
+    async query(queryInfo) {
+      if (queryInfo.active) {
+        return [{ id: 77, url: 'https://x.com/targetuser/followers' }];
+      }
+
+      return [];
     },
-    store,
-    tabs: {
-      async query(queryInfo) {
-        if (queryInfo.active) {
-          return [{ id: 77, url: 'https://x.com/targetuser/followers' }];
-        }
+    async sendMessage(tabId, message) {
+      messages.push({ message, tabId });
 
-        return [];
-      },
-      async sendMessage(tabId, message) {
-        messages.push({ message, tabId });
-
-        return {
-          ok: true,
-          preview: {
-            alreadyBlockedCount: 0,
-            blockLimit: 30,
-            candidates: [{ restId: '303', username: 'charlie' }],
+      return {
+        ok: true,
+        preview: {
+          alreadyBlockedCount: 0,
+          blockLimit: 30,
+          candidates: [{ restId: '303', username: 'charlie' }],
+          hasMorePages: false,
+          readyCount: 1,
+          resumeState: {
+            alreadyBlockedKeys: [],
             hasMorePages: false,
-            readyCount: 1,
-            resumeState: {
-              alreadyBlockedKeys: [],
-              hasMorePages: false,
-              nextCursor: null,
-              pendingUsers: []
-            },
-            scanLimit: 80,
-            scannedCount: 1,
-            source: 'followers',
-            targetRestId: '999',
-            targetScreenName: 'targetuser'
-          }
-        };
-      }
+            nextCursor: null,
+            pendingUsers: []
+          },
+          scanLimit: 80,
+          scannedCount: 1,
+          source: 'followers',
+          targetRestId: '999',
+          targetScreenName: 'targetuser'
+        }
+      };
     }
   };
 
@@ -1787,7 +1642,7 @@ test('init keeps scan and block actions fenced while a follower session reset is
   await flushAsyncWork();
   await flushAsyncWork();
 
-  assert.equal(store[sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY].activeSession, null);
+  assert.equal(extensionApi.store[sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY].activeSession, null);
   assert.equal(elements['followers-summary'].textContent, 'Preview cleared. Run a new scan with the updated limits.');
   assert.equal(elements['scan-followers-preview'].disabled, false);
 
@@ -1796,7 +1651,7 @@ test('init keeps scan and block actions fenced while a follower session reset is
   await flushAsyncWork();
 
   assert.equal(messages.length, 1);
-  assert.equal(store[sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY].activeSession.blockLimit, 30);
+  assert.equal(extensionApi.store[sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY].activeSession.blockLimit, 30);
   assert.equal(elements['followers-preview'].textContent, '@charlie');
 });
 

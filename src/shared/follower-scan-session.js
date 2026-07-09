@@ -153,7 +153,7 @@
       : values;
   }
 
-  function normalizeIdentityKeyList(keys, maximum = MAX_FOLLOWER_SCAN_DEDUPE_KEYS) {
+  function normalizeIdentityKeyListAll(keys) {
     const normalizedKeys = [];
     const seenKeys = new Set();
 
@@ -175,6 +175,12 @@
       seenKeys.add(normalizedKey);
       normalizedKeys.push(normalizedKey);
     }
+
+    return normalizedKeys;
+  }
+
+  function normalizeIdentityKeyList(keys, maximum = MAX_FOLLOWER_SCAN_DEDUPE_KEYS) {
+    const normalizedKeys = normalizeIdentityKeyListAll(keys);
 
     return normalizedKeys.length > maximum
       ? normalizedKeys.slice(normalizedKeys.length - maximum)
@@ -532,6 +538,7 @@
     getFollowerScanCandidateIdentityKeys,
     getFollowerScanCandidatePrimaryKey,
     mergeFollowerScanReadyCandidates,
+    normalizeIdentityKeyListAll,
     normalizeIdentityKeyList,
     normalizeFollowerScanSession,
     normalizeFollowerScanSessionStore,
