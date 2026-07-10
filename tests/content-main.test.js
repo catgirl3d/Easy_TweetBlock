@@ -2,10 +2,12 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const sharedBlocklist = require('../src/shared/blocklist.js');
+const sharedContent = require('../src/content/shared.js');
 const {
   createFollowerBlockCandidates,
   normalizeFollowerBlockCandidate
 } = require('../src/shared/follower-candidates.js');
+const sharedFollowers = require('../src/shared/followers.js');
 const sharedSettings = require('../src/shared/settings.js');
 const contentFeatures = require('../src/content/features.js');
 
@@ -711,6 +713,10 @@ test('extractScreenNameFromHref rejects reserved internal paths', () => {
   assert.equal(extractScreenNameFromHref('/home'), null);
   assert.equal(extractScreenNameFromHref('/login'), null);
   assert.equal(extractScreenNameFromHref('/search?q=test'), null);
+});
+
+test('content shared re-exports the shared reserved path set without copying it', () => {
+  assert.equal(sharedContent.RESERVED_PATH_SEGMENTS, sharedFollowers.RESERVED_PATH_SEGMENTS);
 });
 
 test('readScreenNameFromTweet prefers the tweet permalink', () => {

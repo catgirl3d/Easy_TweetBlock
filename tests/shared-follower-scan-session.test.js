@@ -8,6 +8,11 @@ const {
   normalizeIdentityKeyListAll
 } = require('../src/shared/follower-candidates.js');
 const {
+  normalizeFollowersBlockLimit,
+  normalizeFollowersScanLimit,
+  normalizeFollowersSource
+} = require('../src/shared/followers.js');
+const {
   FOLLOWER_SCAN_SESSION_STORAGE_KEY,
   FOLLOWER_SCAN_SESSION_TTL_MS,
   MAX_FOLLOWER_SCAN_CANDIDATE_ATTEMPTS,
@@ -200,6 +205,44 @@ test('createFollowerScanSessionKey is stable for normalized profile and limit in
       scanLimit: 120
     })
   );
+});
+
+test('createFollowerScanSessionKey stays aligned with shared followers normalization', () => {
+  const targetScreenName = ' @TargetUser ';
+  const source = 'unexpected-source';
+  const blockLimit = 9999;
+  const scanLimit = '0';
+
+  assert.equal(
+    createFollowerScanSessionKey({
+      targetScreenName,
+      source,
+      blockLimit,
+      scanLimit
+    }),
+    [
+      normalizeFollowersSource(source),
+      'targetuser',
+      normalizeFollowersBlockLimit(blockLimit),
+      normalizeFollowersScanLimit(scanLimit)
+    ].join(':')
+  );
+});
+
+test('normalizeFollowerScanSession rounds positive timestamps and zeroes invalid ones', () => {
+  const positiveTimestampSession = normalizeFollowerScanSession(createSession({
+    startedAt: 10.4,
+    updatedAt: 20.6
+  }));
+  const invalidTimestampSession = normalizeFollowerScanSession(createSession({
+    startedAt: -10,
+    updatedAt: 'not-a-number'
+  }));
+
+  assert.equal(positiveTimestampSession.startedAt, 10);
+  assert.equal(positiveTimestampSession.updatedAt, 21);
+  assert.equal(invalidTimestampSession.startedAt, 0);
+  assert.equal(invalidTimestampSession.updatedAt, 0);
 });
 
 test('normalizeFollowerScanSession preserves aggregates and omits lastBatch fields', () => {

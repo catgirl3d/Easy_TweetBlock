@@ -1,6 +1,8 @@
 (() => {
   const storageApi = globalThis.EasyTweetBlockStorage
     || (typeof module !== 'undefined' && module.exports ? require('./storage.js') : null);
+  const followersApi = globalThis.EasyTweetBlockFollowers
+    || (typeof module !== 'undefined' && module.exports ? require('./followers.js') : null);
   const usernamesApi = globalThis.EasyTweetBlockUsernames
     || (typeof module !== 'undefined' && module.exports ? require('./usernames.js') : null);
   const identityApi = globalThis.EasyTweetBlockIdentity
@@ -9,23 +11,18 @@
     || (typeof module !== 'undefined' && module.exports ? require('./follower-candidates.js') : null);
   const normalizationApi = globalThis.EasyTweetBlockNormalization
     || (typeof module !== 'undefined' && module.exports ? require('./normalization.js') : null);
-  const FALLBACK_FOLLOWERS_SOURCES = Object.freeze({
-    followers: 'followers',
-    following: 'following'
-  });
-  const FALLBACK_DEFAULT_FOLLOWERS_SOURCE = FALLBACK_FOLLOWERS_SOURCES.followers;
-  const FALLBACK_DEFAULT_FOLLOWERS_BLOCK_LIMIT = 50;
-  const FALLBACK_DEFAULT_FOLLOWERS_SCAN_LIMIT = 100;
-  const FALLBACK_MIN_FOLLOWERS_BLOCK_LIMIT = 1;
-  const FALLBACK_MAX_FOLLOWERS_BLOCK_LIMIT = 200;
-  const FALLBACK_MIN_FOLLOWERS_SCAN_LIMIT = 1;
-  const FALLBACK_MAX_FOLLOWERS_SCAN_LIMIT = 500;
 
-  if (!storageApi || !usernamesApi || !identityApi || !followerCandidatesApi || !normalizationApi) {
-    throw new Error('Missing Easy TweetBlock storage/usernames/identity/follower-candidate API.');
+  if (!storageApi || !followersApi || !usernamesApi || !identityApi || !followerCandidatesApi || !normalizationApi) {
+    throw new Error('Missing Easy TweetBlock storage/followers/usernames/identity/follower-candidate API.');
   }
 
   const { callStorageGet, callStorageSet, getExtensionApi } = storageApi;
+  const {
+    FOLLOWERS_SOURCES,
+    normalizeFollowersBlockLimit,
+    normalizeFollowersScanLimit,
+    normalizeFollowersSource
+  } = followersApi;
   const { normalizeUsername } = usernamesApi;
   const { normalizeRestId } = identityApi;
   const { normalizeNonNegativeInteger, normalizeOptionalString } = normalizationApi;
@@ -50,72 +47,8 @@
     'error'
   ]);
 
-  function getFollowersSharedApi() {
-    return globalThis.EasyTweetBlockFollowers
-      || (typeof module !== 'undefined' && module.exports ? require('./followers.js') : null);
-  }
-
-  function clampRoundedNumber(value, fallback, minimum, maximum) {
-    const numericValue = Number(value);
-
-    if (!Number.isFinite(numericValue)) {
-      return fallback;
-    }
-
-    const roundedValue = Math.round(numericValue);
-    return Math.min(maximum, Math.max(minimum, roundedValue));
-  }
-
-  function normalizeFollowersBlockLimit(value) {
-    const sharedNormalizeFollowersBlockLimit = getFollowersSharedApi()?.normalizeFollowersBlockLimit;
-
-    if (typeof sharedNormalizeFollowersBlockLimit === 'function') {
-      return sharedNormalizeFollowersBlockLimit(value);
-    }
-
-    return clampRoundedNumber(
-      value,
-      FALLBACK_DEFAULT_FOLLOWERS_BLOCK_LIMIT,
-      FALLBACK_MIN_FOLLOWERS_BLOCK_LIMIT,
-      FALLBACK_MAX_FOLLOWERS_BLOCK_LIMIT
-    );
-  }
-
-  function normalizeFollowersScanLimit(value) {
-    const sharedNormalizeFollowersScanLimit = getFollowersSharedApi()?.normalizeFollowersScanLimit;
-
-    if (typeof sharedNormalizeFollowersScanLimit === 'function') {
-      return sharedNormalizeFollowersScanLimit(value);
-    }
-
-    return clampRoundedNumber(
-      value,
-      FALLBACK_DEFAULT_FOLLOWERS_SCAN_LIMIT,
-      FALLBACK_MIN_FOLLOWERS_SCAN_LIMIT,
-      FALLBACK_MAX_FOLLOWERS_SCAN_LIMIT
-    );
-  }
-
-  function normalizeFollowersSource(value) {
-    const sharedNormalizeFollowersSource = getFollowersSharedApi()?.normalizeFollowersSource;
-
-    if (typeof sharedNormalizeFollowersSource === 'function') {
-      return sharedNormalizeFollowersSource(value);
-    }
-
-    return value === FALLBACK_FOLLOWERS_SOURCES.following
-      ? FALLBACK_FOLLOWERS_SOURCES.following
-      : FALLBACK_DEFAULT_FOLLOWERS_SOURCE;
-  }
-
   function normalizeTimestamp(value) {
-    const normalizedValue = Math.round(Number(value));
-
-    if (!Number.isFinite(normalizedValue) || normalizedValue <= 0) {
-      return 0;
-    }
-
-    return normalizedValue;
+    return normalizeNonNegativeInteger(value);
   }
 
   function normalizeSessionStatus(value) {
@@ -258,7 +191,7 @@
     const storedSessions = value?.sessions;
 
     if (storedSessions && typeof storedSessions === 'object' && !Array.isArray(storedSessions)) {
-      for (const source of Object.values(FALLBACK_FOLLOWERS_SOURCES)) {
+      for (const source of Object.values(FOLLOWERS_SOURCES)) {
         const normalizedSession = normalizeFollowerScanSession(storedSessions[source]);
 
         if (normalizedSession?.source === source) {

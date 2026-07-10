@@ -50,7 +50,6 @@
     const cacheKey = getPopupDebugCacheKey(storageRef);
 
     popupDebugEntriesCache.set(cacheKey, normalizedEntries);
-    globalThis.__easyTweetBlockPopupDebugEntries__ = normalizedEntries;
     return normalizedEntries;
   }
 
@@ -86,7 +85,6 @@
       entries.splice(0, entries.length - MAX_POPUP_DEBUG_ENTRIES);
     }
 
-    globalThis.__easyTweetBlockPopupDebugEntries__ = entries;
     return composedEntry;
   }
 

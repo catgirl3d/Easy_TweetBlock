@@ -486,6 +486,30 @@ test('saveStoredPopupDebugEntries and clearStoredPopupDebugEntries stay in memor
   assert.equal(storedValue, null);
 });
 
+test('popup debug helpers do not mirror entries onto globalThis', (t) => {
+  const globalKey = '__easyTweetBlockPopupDebugEntries__';
+  const hadOriginalValue = Object.prototype.hasOwnProperty.call(globalThis, globalKey);
+  const originalValue = globalThis[globalKey];
+  const storage = createLocalStorageStub();
+
+  globalThis[globalKey] = 'sentinel';
+
+  t.after(() => {
+    if (hadOriginalValue) {
+      globalThis[globalKey] = originalValue;
+      return;
+    }
+
+    delete globalThis[globalKey];
+  });
+
+  saveStoredPopupDebugEntries(['first event'], storage);
+  appendPopupDebugEntry('INFO', 'second event', null, storage);
+  clearStoredPopupDebugEntries(storage);
+
+  assert.equal(globalThis[globalKey], 'sentinel');
+});
+
 test('formatPopupError and renderFatalPopupError expose the real popup failure text', () => {
   const body = { textContent: '' };
   const error = new Error('popup exploded');
