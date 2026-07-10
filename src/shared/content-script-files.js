@@ -6,6 +6,8 @@
     'src/shared/storage.js',
     'src/shared/settings.js',
     'src/shared/followers.js',
+    'src/shared/usernames.js',
+    'src/shared/username-lists.js',
     'src/content/shared.js',
     'src/shared/blocklist.js',
     'src/shared/follower-scan-session.js',

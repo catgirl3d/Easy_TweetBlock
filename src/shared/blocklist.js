@@ -1,204 +1,49 @@
 (() => {
-  const USERNAME_LISTS_STORAGE_KEY = 'usernameLists';
-  const ACTIVE_USERNAME_LIST_ID_STORAGE_KEY = 'activeUsernameListId';
-  const DEFAULT_USERNAME_LIST_ID = 'blocklist';
-  const DEFAULT_USERNAME_LIST_NAME = 'Blocklist';
-  const USERNAME_PATTERN = /^[A-Za-z0-9_]{1,15}$/;
-  const USERNAME_LIST_ID_PATTERN = /^[A-Za-z0-9_-]{1,80}$/;
   const storageApi = globalThis.EasyTweetBlockStorage
     || (typeof module !== 'undefined' && module.exports ? require('./storage.js') : null);
+  const usernamesApi = globalThis.EasyTweetBlockUsernames
+    || (typeof module !== 'undefined' && module.exports ? require('./usernames.js') : null);
+  const usernameListsApi = globalThis.EasyTweetBlockUsernameLists
+    || (typeof module !== 'undefined' && module.exports ? require('./username-lists.js') : null);
 
-  if (!storageApi) {
-    throw new Error('Missing Easy TweetBlock storage API.');
+  if (!storageApi || !usernamesApi || !usernameListsApi) {
+    throw new Error('Missing Easy TweetBlock shared blocklist dependencies.');
   }
 
   const { callStorageGet, callStorageSet, getExtensionApi } = storageApi;
+  const { normalizeUsername } = usernamesApi;
+  const {
+    ACTIVE_USERNAME_LIST_ID_STORAGE_KEY,
+    createUsernameList,
+    ensureUsernameLists,
+    getActiveListId,
+    mergeUsernameLists,
+    normalizeStoredUsernames,
+    normalizeUsernameListId,
+    normalizeUsernameListName,
+    USERNAME_LISTS_STORAGE_KEY
+  } = usernameListsApi;
 
-  function normalizeUsername(value) {
-    if (typeof value !== 'string') {
-      return null;
-    }
+  async function writeUsernameListState(lists, activeListId, extensionApi = getExtensionApi()) {
+    const storageArea = extensionApi?.storage?.local;
+    const normalizedLists = ensureUsernameLists(lists);
+    const nextActiveListId = getActiveListId(normalizedLists, activeListId);
 
-    const normalizedValue = value.trim().replace(/^[@/]+/, '').toLowerCase();
+    await callStorageSet(storageArea, {
+      [ACTIVE_USERNAME_LIST_ID_STORAGE_KEY]: nextActiveListId,
+      [USERNAME_LISTS_STORAGE_KEY]: normalizedLists
+    }, extensionApi);
 
-    if (!normalizedValue || !USERNAME_PATTERN.test(normalizedValue)) {
-      return null;
-    }
-
-    return normalizedValue;
-  }
-
-  function normalizeStoredUsernames(usernames) {
-    if (!Array.isArray(usernames)) {
-      return [];
-    }
-
-    const normalizedUsernames = [];
-    const seenUsernames = new Set();
-
-    for (const username of usernames) {
-      const normalizedUsername = normalizeUsername(username);
-
-      if (!normalizedUsername || seenUsernames.has(normalizedUsername)) {
-        continue;
-      }
-
-      seenUsernames.add(normalizedUsername);
-      normalizedUsernames.push(normalizedUsername);
-    }
-
-    return normalizedUsernames;
-  }
-
-  function parseUsernameEntries(entries) {
-    const usernames = [];
-    const invalidEntries = [];
-    const seenUsernames = new Set();
-
-    for (const value of entries) {
-      const rawEntry = typeof value === 'string' ? value : String(value ?? '');
-      const entry = rawEntry.trim();
-
-      if (!entry) {
-        continue;
-      }
-
-      const normalizedUsername = normalizeUsername(entry);
-
-      if (!normalizedUsername) {
-        invalidEntries.push(entry);
-        continue;
-      }
-
-      if (seenUsernames.has(normalizedUsername)) {
-        continue;
-      }
-
-      seenUsernames.add(normalizedUsername);
-      usernames.push(normalizedUsername);
-    }
+    const activeList = normalizedLists.find((list) => list.id === nextActiveListId) || normalizedLists[0];
 
     return {
-      usernames,
-      invalidEntries
+      activeList,
+      activeListId: nextActiveListId,
+      lists: normalizedLists
     };
   }
 
-  function parseUsernameText(text) {
-    if (typeof text !== 'string' || !text.trim()) {
-      return {
-        usernames: [],
-        invalidEntries: []
-      };
-    }
-
-    return parseUsernameEntries(text.split(/[\s,]+/));
-  }
-
-  function serializeUsernameText(usernames) {
-    return normalizeStoredUsernames(usernames).map((username) => `@${username}`).join('\n');
-  }
-
-  function normalizeUsernameListName(value, fallbackName = DEFAULT_USERNAME_LIST_NAME) {
-    const normalizedName = typeof value === 'string'
-      ? value.trim().replace(/\s+/g, ' ')
-      : '';
-    const fallback = typeof fallbackName === 'string' && fallbackName.trim()
-      ? fallbackName.trim().replace(/\s+/g, ' ')
-      : DEFAULT_USERNAME_LIST_NAME;
-
-    return (normalizedName || fallback).slice(0, 80);
-  }
-
-  function normalizeUsernameListId(value) {
-    if (typeof value !== 'string') {
-      return null;
-    }
-
-    const normalizedId = value.trim();
-    return USERNAME_LIST_ID_PATTERN.test(normalizedId) ? normalizedId : null;
-  }
-
-  function createUsernameListId(name = DEFAULT_USERNAME_LIST_NAME, existingIds = []) {
-    const usedIds = new Set(Array.isArray(existingIds) ? existingIds.filter(Boolean) : []);
-    const normalizedName = normalizeUsernameListName(name);
-    const baseId = normalizedName
-      .toLowerCase()
-      .replace(/[^a-z0-9_]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 48) || DEFAULT_USERNAME_LIST_ID;
-    let candidateId = baseId;
-    let suffix = 2;
-
-    while (usedIds.has(candidateId)) {
-      candidateId = `${baseId}-${suffix}`;
-      suffix += 1;
-    }
-
-    return candidateId;
-  }
-
-  function createUsernameList(name = DEFAULT_USERNAME_LIST_NAME, usernames = [], existingIds = []) {
-    const normalizedName = normalizeUsernameListName(name);
-    const id = normalizedName === DEFAULT_USERNAME_LIST_NAME && !existingIds.length
-      ? DEFAULT_USERNAME_LIST_ID
-      : createUsernameListId(normalizedName, existingIds);
-
-    return {
-      id,
-      name: normalizedName,
-      usernames: normalizeStoredUsernames(usernames)
-    };
-  }
-
-  function normalizeUsernameLists(lists) {
-    if (!Array.isArray(lists)) {
-      return [];
-    }
-
-    const normalizedLists = [];
-    const seenListIds = new Set();
-
-    for (const [index, list] of lists.entries()) {
-      if (!list || typeof list !== 'object') {
-        continue;
-      }
-
-      const name = normalizeUsernameListName(list.name, `${DEFAULT_USERNAME_LIST_NAME} ${index + 1}`);
-      const storedId = normalizeUsernameListId(list.id);
-      const id = storedId && !seenListIds.has(storedId)
-        ? storedId
-        : createUsernameListId(name, [...seenListIds]);
-
-      seenListIds.add(id);
-      normalizedLists.push({
-        id,
-        name,
-        usernames: normalizeStoredUsernames(list.usernames)
-      });
-    }
-
-    return normalizedLists;
-  }
-
-  function ensureUsernameLists(lists) {
-    const normalizedLists = normalizeUsernameLists(lists);
-    return normalizedLists.length
-      ? normalizedLists
-      : [createUsernameList(DEFAULT_USERNAME_LIST_NAME, [])];
-  }
-
-  function getActiveListId(lists, activeListId) {
-    const normalizedActiveListId = normalizeUsernameListId(activeListId);
-
-    if (normalizedActiveListId && lists.some((list) => list.id === normalizedActiveListId)) {
-      return normalizedActiveListId;
-    }
-
-    return lists[0]?.id || DEFAULT_USERNAME_LIST_ID;
-  }
-
-  async function readUsernameListState(extensionApi = getExtensionApi()) {
+  async function getStoredUsernameListState(extensionApi = getExtensionApi()) {
     const storageArea = extensionApi?.storage?.local;
     const storedValues = await callStorageGet(storageArea, [
       USERNAME_LISTS_STORAGE_KEY,
@@ -216,42 +61,30 @@
   }
 
   async function getStoredUsernameLists(extensionApi = getExtensionApi()) {
-    const { lists } = await readUsernameListState(extensionApi);
+    const { lists } = await getStoredUsernameListState(extensionApi);
     return lists;
-  }
-
-  async function getStoredUsernameListState(extensionApi = getExtensionApi()) {
-    const { activeList, activeListId, lists } = await readUsernameListState(extensionApi);
-
-    return {
-      activeList,
-      activeListId,
-      lists
-    };
   }
 
   async function setStoredUsernameLists(lists, extensionApi = getExtensionApi()) {
     const storageArea = extensionApi?.storage?.local;
-    const normalizedLists = ensureUsernameLists(lists);
     const storedValues = await callStorageGet(storageArea, [ACTIVE_USERNAME_LIST_ID_STORAGE_KEY], extensionApi);
-    const activeListId = getActiveListId(normalizedLists, storedValues?.[ACTIVE_USERNAME_LIST_ID_STORAGE_KEY]);
-
-    await callStorageSet(storageArea, {
-      [ACTIVE_USERNAME_LIST_ID_STORAGE_KEY]: activeListId,
-      [USERNAME_LISTS_STORAGE_KEY]: normalizedLists
-    }, extensionApi);
+    const { lists: normalizedLists } = await writeUsernameListState(
+      lists,
+      storedValues?.[ACTIVE_USERNAME_LIST_ID_STORAGE_KEY],
+      extensionApi
+    );
 
     return normalizedLists;
   }
 
   async function getActiveUsernameList(extensionApi = getExtensionApi()) {
-    const { activeList } = await readUsernameListState(extensionApi);
+    const { activeList } = await getStoredUsernameListState(extensionApi);
     return activeList;
   }
 
   async function setActiveUsernameListId(listId, extensionApi = getExtensionApi()) {
     const normalizedListId = normalizeUsernameListId(listId);
-    const { lists } = await readUsernameListState(extensionApi);
+    const { lists } = await getStoredUsernameListState(extensionApi);
     const activeList = lists.find((list) => list.id === normalizedListId);
 
     if (!activeList) {
@@ -266,43 +99,63 @@
     return activeList;
   }
 
-  async function updateActiveListUsernames(createNextUsernames, extensionApi = getExtensionApi()) {
-    const { activeList, activeListId, lists } = await readUsernameListState(extensionApi);
-    const nextUsernamesValue = createNextUsernames(activeList);
+  async function applyUsernameListUsernamesUpdate(listId, createNextUsernames, extensionApi = getExtensionApi(), currentState = null) {
+    const normalizedListId = normalizeUsernameListId(listId);
+    const { activeListId, lists } = currentState || await getStoredUsernameListState(extensionApi);
+    const targetList = lists.find((list) => list.id === normalizedListId);
+    const activeList = lists.find((list) => list.id === activeListId) || lists[0];
+
+    if (typeof createNextUsernames !== 'function') {
+      throw new Error('Missing username list update callback.');
+    }
+
+    if (!targetList) {
+      throw new Error('Unknown username list.');
+    }
+
+    const nextUsernamesValue = createNextUsernames(targetList);
 
     if (nextUsernamesValue === null) {
       return {
         activeList,
         activeListId,
-        list: activeList,
+        list: targetList,
         lists,
         updated: false,
-        usernames: activeList.usernames
+        usernames: targetList.usernames
       };
     }
 
     const nextUsernames = normalizeStoredUsernames(nextUsernamesValue);
-    const nextList = { ...activeList, usernames: nextUsernames };
-    const nextLists = lists.map((list) => list.id === activeListId ? nextList : list);
-    const storageArea = extensionApi?.storage?.local;
-
-    await callStorageSet(storageArea, {
-      [ACTIVE_USERNAME_LIST_ID_STORAGE_KEY]: activeListId,
-      [USERNAME_LISTS_STORAGE_KEY]: nextLists
-    }, extensionApi);
+    const nextList = { ...targetList, usernames: nextUsernames };
+    const nextLists = lists.map((list) => list.id === targetList.id ? nextList : list);
+    const nextState = await writeUsernameListState(nextLists, activeListId, extensionApi);
 
     return {
-      activeList,
-      activeListId,
+      ...nextState,
       list: nextList,
-      lists: nextLists,
       updated: true,
       usernames: nextUsernames
     };
   }
 
+  async function updateUsernameListUsernames(listId, createNextUsernames, extensionApi = getExtensionApi()) {
+    return applyUsernameListUsernamesUpdate(listId, createNextUsernames, extensionApi);
+  }
+
+  async function updateActiveUsernameListUsernames(createNextUsernames, extensionApi = getExtensionApi()) {
+    const currentState = await getStoredUsernameListState(extensionApi);
+
+    return applyUsernameListUsernamesUpdate(
+      currentState.activeListId,
+      createNextUsernames,
+      extensionApi,
+      currentState
+    );
+  }
+
   async function setActiveStoredUsernames(usernames, extensionApi = getExtensionApi()) {
-    const result = await updateActiveListUsernames(() => usernames, extensionApi);
+    const result = await updateActiveUsernameListUsernames(() => usernames, extensionApi);
     return result.usernames;
   }
 
@@ -313,7 +166,7 @@
       throw new Error('Invalid username.');
     }
 
-    const result = await updateActiveListUsernames((activeList) => {
+    const result = await updateActiveUsernameListUsernames((activeList) => {
       if (activeList.usernames.includes(normalizedUsername)) {
         return null;
       }
@@ -321,17 +174,8 @@
       return [...activeList.usernames, normalizedUsername];
     }, extensionApi);
 
-    if (!result.updated) {
-      return {
-        added: false,
-        list: result.list,
-        username: normalizedUsername,
-        usernames: result.usernames
-      };
-    }
-
     return {
-      added: true,
+      added: result.updated,
       list: result.list,
       username: normalizedUsername,
       usernames: result.usernames
@@ -346,7 +190,7 @@
     }
 
     let wasListed = false;
-    const result = await updateActiveListUsernames((activeList) => {
+    const result = await updateActiveUsernameListUsernames((activeList) => {
       wasListed = activeList.usernames.includes(normalizedUsername);
       return wasListed
         ? activeList.usernames.filter((storedUsername) => storedUsername !== normalizedUsername)
@@ -373,13 +217,71 @@
     return activeList.usernames.includes(normalizedUsername);
   }
 
-  async function getStoredUsernames(extensionApi = getExtensionApi()) {
-    const activeList = await getActiveUsernameList(extensionApi);
-    return activeList.usernames;
+  async function createAndActivateUsernameList(name, extensionApi = getExtensionApi()) {
+    const { lists } = await getStoredUsernameListState(extensionApi);
+    const nextList = createUsernameList(name, [], lists.map((list) => list.id));
+    const nextState = await writeUsernameListState([...lists, nextList], nextList.id, extensionApi);
+
+    return {
+      ...nextState,
+      list: nextState.activeList
+    };
   }
 
-  async function setStoredUsernames(usernames, extensionApi = getExtensionApi()) {
-    return setActiveStoredUsernames(usernames, extensionApi);
+  async function renameUsernameList(listId, name, extensionApi = getExtensionApi()) {
+    const normalizedListId = normalizeUsernameListId(listId);
+    const currentState = await getStoredUsernameListState(extensionApi);
+    const targetList = currentState.lists.find((list) => list.id === normalizedListId);
+
+    if (!targetList) {
+      throw new Error('Unknown username list.');
+    }
+
+    const normalizedName = normalizeUsernameListName(name, targetList.name);
+    const nextLists = currentState.lists.map((list) => list.id === targetList.id
+      ? { ...list, name: normalizedName }
+      : list);
+    const nextState = await writeUsernameListState(nextLists, currentState.activeListId, extensionApi);
+
+    return {
+      ...nextState,
+      list: nextState.lists.find((list) => list.id === targetList.id) || nextState.activeList
+    };
+  }
+
+  async function deleteUsernameList(listId, extensionApi = getExtensionApi()) {
+    const normalizedListId = normalizeUsernameListId(listId);
+    const currentState = await getStoredUsernameListState(extensionApi);
+    const deletedListIndex = currentState.lists.findIndex((list) => list.id === normalizedListId);
+
+    if (deletedListIndex < 0) {
+      throw new Error('Unknown username list.');
+    }
+
+    if (currentState.lists.length <= 1) {
+      throw new Error('Cannot delete the last username list.');
+    }
+
+    const deletedList = currentState.lists[deletedListIndex];
+    const nextLists = currentState.lists.filter((list) => list.id !== deletedList.id);
+    const nextActiveListId = currentState.activeListId === deletedList.id
+      ? (nextLists[Math.max(0, Math.min(deletedListIndex, nextLists.length - 1))] || nextLists[0])?.id
+      : currentState.activeListId;
+    const nextState = await writeUsernameListState(nextLists, nextActiveListId, extensionApi);
+
+    return {
+      ...nextState,
+      deletedList
+    };
+  }
+
+  async function importUsernameLists(lists, extensionApi = getExtensionApi()) {
+    const currentState = await getStoredUsernameListState(extensionApi);
+    return writeUsernameListState(
+      mergeUsernameLists(currentState.lists, lists),
+      currentState.activeListId,
+      extensionApi
+    );
   }
 
   function hasUsernameListStorageChange(changes) {
@@ -415,154 +317,25 @@
     };
   }
 
-  function observeStoredUsernames(listener, extensionApi = getExtensionApi()) {
-    return observeActiveUsernameList((activeList) => {
-      listener(activeList.usernames);
-    }, extensionApi);
-  }
-
-  function parseUsernameValues(values) {
-    if (!Array.isArray(values)) {
-      return {
-        usernames: [],
-        invalidEntries: []
-      };
-    }
-
-    return parseUsernameEntries(values);
-  }
-
-  function parseJsonUsernameImport(payload) {
-    if (Array.isArray(payload)) {
-      return {
-        ...parseUsernameValues(payload),
-        lists: []
-      };
-    }
-
-    if (!payload || typeof payload !== 'object') {
-      return {
-        invalidEntries: ['Unsupported JSON import shape'],
-        lists: [],
-        usernames: []
-      };
-    }
-
-    if (Array.isArray(payload.lists)) {
-      const invalidEntries = [];
-      const importedLists = [];
-
-      for (const [index, list] of payload.lists.entries()) {
-        if (!list || typeof list !== 'object') {
-          invalidEntries.push(`lists[${index}]`);
-          continue;
-        }
-
-        const parsedListUsernames = parseUsernameValues(list.usernames);
-        invalidEntries.push(...parsedListUsernames.invalidEntries);
-        importedLists.push({
-          name: normalizeUsernameListName(list.name, `Imported list ${index + 1}`),
-          usernames: parsedListUsernames.usernames
-        });
-      }
-
-      return {
-        invalidEntries,
-        lists: normalizeUsernameLists(importedLists),
-        usernames: []
-      };
-    }
-
-    if (Array.isArray(payload.usernames)) {
-      return {
-        ...parseUsernameValues(payload.usernames),
-        lists: []
-      };
-    }
-
-    return {
-      invalidEntries: ['Unsupported JSON import shape'],
-      lists: [],
-      usernames: []
-    };
-  }
-
-  function parseUsernameImport(text, fileName = '') {
-    const importText = typeof text === 'string' ? text : '';
-    const shouldParseJson = /\.json$/i.test(fileName) || /^[\s]*[\[{]/.test(importText);
-
-    if (!shouldParseJson) {
-      return {
-        ...parseUsernameText(importText),
-        lists: []
-      };
-    }
-
-    try {
-      return parseJsonUsernameImport(JSON.parse(importText));
-    } catch {
-      return {
-        invalidEntries: ['Invalid JSON import'],
-        lists: [],
-        usernames: []
-      };
-    }
-  }
-
-  function mergeUsernameLists(baseLists, incomingLists) {
-    const mergedLists = ensureUsernameLists(baseLists).map((list) => ({
-      ...list,
-      usernames: [...list.usernames]
-    }));
-    const normalizedIncomingLists = normalizeUsernameLists(incomingLists);
-
-    for (const incomingList of normalizedIncomingLists) {
-      const existingList = mergedLists.find((list) => list.name.toLowerCase() === incomingList.name.toLowerCase());
-
-      if (existingList) {
-        existingList.usernames = normalizeStoredUsernames([...existingList.usernames, ...incomingList.usernames]);
-        continue;
-      }
-
-      mergedLists.push(createUsernameList(
-        incomingList.name,
-        incomingList.usernames,
-        mergedLists.map((list) => list.id)
-      ));
-    }
-
-    return normalizeUsernameLists(mergedLists);
-  }
-
   const blocklistApi = {
     ACTIVE_USERNAME_LIST_ID_STORAGE_KEY,
-    DEFAULT_USERNAME_LIST_ID,
-    DEFAULT_USERNAME_LIST_NAME,
     USERNAME_LISTS_STORAGE_KEY,
-    USERNAME_PATTERN,
     addUsernameToActiveList,
-    createUsernameList,
-    createUsernameListId,
+    createAndActivateUsernameList,
+    deleteUsernameList,
     getActiveUsernameList,
     getStoredUsernameListState,
     getStoredUsernameLists,
-    getStoredUsernames,
+    importUsernameLists,
     isUsernameInActiveList,
-    mergeUsernameLists,
-    normalizeStoredUsernames,
-    normalizeUsername,
-    normalizeUsernameListName,
-    normalizeUsernameLists,
     observeActiveUsernameList,
-    observeStoredUsernames,
-    parseUsernameImport,
-    parseUsernameText,
-    serializeUsernameText,
+    renameUsernameList,
     setActiveStoredUsernames,
     setActiveUsernameListId,
     setStoredUsernameLists,
-    setStoredUsernames,
-    toggleUsernameInActiveList
+    toggleUsernameInActiveList,
+    updateActiveUsernameListUsernames,
+    updateUsernameListUsernames
   };
 
   if (typeof module !== 'undefined') {

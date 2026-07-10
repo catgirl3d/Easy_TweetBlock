@@ -33,9 +33,11 @@ test("buildManifest merges the Chrome overlay into the base manifest", () => {
   assert.deepEqual(manifest.content_scripts[0].js, CONTENT_SCRIPT_FILES);
 });
 
-test("content script files load storage, settings, and shared modules before content main", () => {
+test("content script files load storage, shared domain modules, and content dependencies before content main", () => {
   assert.equal(CONTENT_SCRIPT_FILES.includes("src/shared/storage.js"), true);
   assert.equal(CONTENT_SCRIPT_FILES.includes("src/shared/settings.js"), true);
+  assert.equal(CONTENT_SCRIPT_FILES.includes("src/shared/usernames.js"), true);
+  assert.equal(CONTENT_SCRIPT_FILES.includes("src/shared/username-lists.js"), true);
   assert.equal(CONTENT_SCRIPT_FILES.includes("src/content/shared.js"), true);
   assert.equal(CONTENT_SCRIPT_FILES.includes("src/shared/blocklist.js"), true);
   assert.equal(CONTENT_SCRIPT_FILES.includes("src/shared/follower-scan-session.js"), true);
@@ -50,6 +52,22 @@ test("content script files load storage, settings, and shared modules before con
   );
   assert.equal(
     CONTENT_SCRIPT_FILES.indexOf("src/shared/followers.js") < CONTENT_SCRIPT_FILES.indexOf("src/content/shared.js"),
+    true
+  );
+  assert.equal(
+    CONTENT_SCRIPT_FILES.indexOf("src/shared/usernames.js") < CONTENT_SCRIPT_FILES.indexOf("src/shared/username-lists.js"),
+    true
+  );
+  assert.equal(
+    CONTENT_SCRIPT_FILES.indexOf("src/shared/usernames.js") < CONTENT_SCRIPT_FILES.indexOf("src/content/shared.js"),
+    true
+  );
+  assert.equal(
+    CONTENT_SCRIPT_FILES.indexOf("src/shared/usernames.js") < CONTENT_SCRIPT_FILES.indexOf("src/shared/follower-scan-session.js"),
+    true
+  );
+  assert.equal(
+    CONTENT_SCRIPT_FILES.indexOf("src/shared/username-lists.js") < CONTENT_SCRIPT_FILES.indexOf("src/shared/blocklist.js"),
     true
   );
   assert.equal(

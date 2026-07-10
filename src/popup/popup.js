@@ -226,6 +226,8 @@
     || (typeof module !== 'undefined' && module.exports ? require('../shared/follower-scan-session.js') : null);
   const settingsApi = globalThis.EasyTweetBlockSettings
     || (typeof module !== 'undefined' && module.exports ? require('../shared/settings.js') : null);
+  const usernameListsApi = globalThis.EasyTweetBlockUsernameLists
+    || (typeof module !== 'undefined' && module.exports ? require('../shared/username-lists.js') : null);
 
   if (!contentScriptFilesApi) {
     renderFatalPopupError(new Error('Missing Easy TweetBlock content script file config.'));
@@ -244,6 +246,11 @@
 
   if (!settingsApi) {
     renderFatalPopupError(new Error('Missing Easy TweetBlock settings shared API.'));
+    return;
+  }
+
+  if (!usernameListsApi) {
+    renderFatalPopupError(new Error('Missing Easy TweetBlock username list API.'));
     return;
   }
 
@@ -1567,7 +1574,7 @@
     }
 
     function getActiveListStorageText(list = currentActiveUsernameList) {
-      return blocklist.serializeUsernameText(list?.usernames || []);
+        return usernameListsApi.serializeUsernameText(list?.usernames || []);
     }
 
     function getUsernameDraft(listId) {
@@ -1610,7 +1617,7 @@
         }
       }
 
-      renderCount(blocklist.parseUsernameText(text).usernames);
+      renderCount(usernameListsApi.parseUsernameText(text).usernames);
       persistCurrentPopupState();
     }
 
@@ -1784,7 +1791,7 @@
     function renderUsernameListSelect() {
       const activeList = currentUsernameLists.find((list) => list.id === currentActiveUsernameListId) || currentUsernameLists[0] || null;
       const activeListId = activeList?.id || '';
-      const activeListName = activeList?.name || blocklist.DEFAULT_USERNAME_LIST_NAME || 'Blocklist';
+      const activeListName = activeList?.name || usernameListsApi.DEFAULT_USERNAME_LIST_NAME || 'Blocklist';
       const optionButtons = currentUsernameLists.map((list, index) => {
         const option = typeof documentRef.createElement === 'function'
           ? documentRef.createElement('button')
@@ -1855,63 +1862,25 @@
       textareaElement.value = nextText;
       isUsernameDraftDirty = nextText !== storageText;
       draftListId = isUsernameDraftDirty ? currentActiveUsernameListId : null;
-      renderCount(blocklist.parseUsernameText(nextText).usernames);
+      renderCount(usernameListsApi.parseUsernameText(nextText).usernames);
       renderUsernameListSelect();
       return draftStatus;
     }
 
     async function readUsernameListState() {
-      if (extensionApi?.storage?.local && typeof blocklist.getStoredUsernameListState === 'function') {
-        const { activeList, lists } = await blocklist.getStoredUsernameListState(extensionApi);
-        const normalizedLists = blocklist.normalizeUsernameLists(lists);
-        const normalizedActiveList = activeList || normalizedLists[0] || blocklist.createUsernameList(blocklist.DEFAULT_USERNAME_LIST_NAME, []);
-
-        return {
-          activeList: normalizedActiveList,
-          lists: normalizedLists.length ? normalizedLists : [normalizedActiveList]
-        };
-      }
-
-      if (extensionApi?.storage?.local && typeof blocklist.getStoredUsernameLists === 'function' && typeof blocklist.getActiveUsernameList === 'function') {
-        const [lists, activeList] = await Promise.all([
-          blocklist.getStoredUsernameLists(extensionApi),
-          blocklist.getActiveUsernameList(extensionApi)
-        ]);
-        const normalizedLists = blocklist.normalizeUsernameLists(lists);
-        const normalizedActiveList = activeList || normalizedLists[0] || blocklist.createUsernameList(blocklist.DEFAULT_USERNAME_LIST_NAME, []);
-
-        return {
-          activeList: normalizedActiveList,
-          lists: normalizedLists.length ? normalizedLists : [normalizedActiveList]
-        };
-      }
-
-      const usernames = await blocklist.getStoredUsernames(extensionApi);
-      const fallbackList = {
-        id: blocklist.DEFAULT_USERNAME_LIST_ID || 'blocklist',
-        name: blocklist.DEFAULT_USERNAME_LIST_NAME || 'Blocklist',
-        usernames
-      };
-
-      return {
-        activeList: fallbackList,
-        lists: [fallbackList]
-      };
+      return blocklist.getStoredUsernameListState(extensionApi);
     }
 
-    function setCurrentUsernameListState(lists, activeList) {
-      currentUsernameLists = blocklist.normalizeUsernameLists(lists);
-      currentActiveUsernameList = currentUsernameLists.find((list) => list.id === activeList?.id)
-        || activeList
-        || currentUsernameLists[0]
-        || null;
-      currentActiveUsernameListId = currentActiveUsernameList?.id || null;
+    function setCurrentUsernameListState(usernameListState) {
+      currentUsernameLists = usernameListState.lists;
+      currentActiveUsernameList = usernameListState.activeList;
+      currentActiveUsernameListId = usernameListState.activeListId || usernameListState.activeList?.id || null;
     }
 
     async function refreshUsernameListStateFromStorage({ applyDraft = true } = {}) {
-      const { activeList, lists } = await readUsernameListState();
+      const usernameListState = await readUsernameListState();
 
-      setCurrentUsernameListState(lists, activeList);
+      setCurrentUsernameListState(usernameListState);
       return renderActiveUsernameList({ applyDraft });
     }
 
@@ -1920,7 +1889,7 @@
         return;
       }
 
-      const normalizedUsernames = blocklist.normalizeStoredUsernames(usernames);
+      const normalizedUsernames = usernameListsApi.normalizeStoredUsernames(usernames);
       currentUsernameLists = currentUsernameLists.map((list) => list.id === currentActiveUsernameListId
         ? { ...list, usernames: normalizedUsernames }
         : list);
@@ -1929,82 +1898,37 @@
 
     function applySavedUsernamesToDraft(savedUsernames) {
       updateCurrentActiveListUsernames(savedUsernames);
-      textareaElement.value = blocklist.serializeUsernameText(savedUsernames);
+      textareaElement.value = usernameListsApi.serializeUsernameText(savedUsernames);
       isUsernameDraftDirty = false;
       clearUsernameDraft(currentActiveUsernameListId);
       renderCount(savedUsernames);
     }
 
-    function getSetActiveUsernames() {
-      return extensionApi?.storage?.local && typeof blocklist.setActiveStoredUsernames === 'function'
-        ? blocklist.setActiveStoredUsernames
-        : blocklist.setStoredUsernames;
-    }
-
-    function hasUsernameListStorageApi() {
-      return Boolean(extensionApi?.storage?.local
-        && typeof blocklist.getStoredUsernameLists === 'function'
-        && typeof blocklist.setStoredUsernameLists === 'function');
-    }
-
-    function areUsernameListsEqual(leftUsernames, rightUsernames) {
-      if (leftUsernames.length !== rightUsernames.length) {
-        return false;
-      }
-
-      return leftUsernames.every((username, index) => username === rightUsernames[index]);
-    }
-
-    function mergeEditedUsernamesWithLatest(baseUsernames, editedUsernames, latestUsernames) {
-      const normalizedBaseUsernames = blocklist.normalizeStoredUsernames(baseUsernames);
-      const normalizedEditedUsernames = blocklist.normalizeStoredUsernames(editedUsernames);
-      const normalizedLatestUsernames = blocklist.normalizeStoredUsernames(latestUsernames);
-
-      if (areUsernameListsEqual(normalizedLatestUsernames, normalizedBaseUsernames)) {
-        return normalizedEditedUsernames;
-      }
-
-      const editedUsernameSet = new Set(normalizedEditedUsernames);
-      const removedBaseUsernames = new Set(
-        normalizedBaseUsernames.filter((username) => !editedUsernameSet.has(username))
-      );
-
-      return blocklist.normalizeStoredUsernames([
-        ...normalizedLatestUsernames.filter((username) => !removedBaseUsernames.has(username)),
-        ...normalizedEditedUsernames
-      ]);
+    function getCurrentUsernameListId() {
+      return currentActiveUsernameListId || currentActiveUsernameList?.id || usernameListsApi.DEFAULT_USERNAME_LIST_ID;
     }
 
     function getCurrentDraftBaseUsernames() {
       const draft = currentActiveUsernameListId ? getUsernameDraft(currentActiveUsernameListId) : null;
-      return blocklist.parseUsernameText(draft?.baseText ?? getActiveListStorageText()).usernames;
+      return usernameListsApi.parseUsernameText(draft?.baseText ?? getActiveListStorageText()).usernames;
+    }
+
+    async function saveEditedUsernamesToActiveList(editedUsernames) {
+      const baseUsernames = getCurrentDraftBaseUsernames();
+
+      return mutateCurrentActiveUsernameListUsernames((latestUsernames) => (
+        usernameListsApi.mergeEditedUsernamesWithLatest(baseUsernames, editedUsernames, latestUsernames)
+      ));
     }
 
     async function mutateCurrentActiveUsernameListUsernames(createNextUsernames) {
-      if (hasUsernameListStorageApi()) {
-        const latestLists = blocklist.normalizeUsernameLists(await blocklist.getStoredUsernameLists(extensionApi));
-        const targetListId = currentActiveUsernameListId || currentActiveUsernameList?.id || latestLists[0]?.id;
-        const targetList = targetListId
-          ? latestLists.find((list) => list.id === targetListId)
-          : latestLists[0];
+      const result = await blocklist.updateUsernameListUsernames(
+        getCurrentUsernameListId(),
+        (targetList) => createNextUsernames(targetList.usernames),
+        extensionApi
+      );
 
-        if (!targetList) {
-          throw new Error('The active username list changed elsewhere. Reload the popup and try again.');
-        }
-
-        const savedUsernames = blocklist.normalizeStoredUsernames(createNextUsernames(targetList.usernames));
-        const nextLists = latestLists.map((list) => list.id === targetList.id
-          ? { ...list, usernames: savedUsernames }
-          : list);
-
-        await blocklist.setStoredUsernameLists(nextLists, extensionApi);
-        return savedUsernames;
-      }
-
-      const currentUsernames = currentActiveUsernameList?.usernames || [];
-      const nextUsernames = blocklist.normalizeStoredUsernames(createNextUsernames(currentUsernames));
-      const setActiveUsernames = getSetActiveUsernames();
-      return setActiveUsernames(nextUsernames, extensionApi);
+      return result.usernames;
     }
 
     function readDelayMs() {
@@ -2461,7 +2385,7 @@
       ]);
       let activeFollowerScanSession = followerScanSessions.getActiveFollowerScanSession(followerScanSessionStore);
 
-      setCurrentUsernameListState(usernameListState.lists, usernameListState.activeList);
+      setCurrentUsernameListState(usernameListState);
       const usernameDraftStatus = renderActiveUsernameList();
       renderDelay(delayMs);
       currentDelayMs = delayMs;
@@ -2515,17 +2439,14 @@
         return;
       }
 
-      const { usernames, invalidEntries } = blocklist.parseUsernameText(textareaElement.value);
+      const { usernames, invalidEntries } = usernameListsApi.parseUsernameText(textareaElement.value);
 
       isSaving = true;
       setBusyState();
       setStatus('Saving blocklist...', { tone: 'info' });
 
       try {
-        const baseUsernames = getCurrentDraftBaseUsernames();
-        const savedUsernames = await mutateCurrentActiveUsernameListUsernames((latestUsernames) => (
-          mergeEditedUsernamesWithLatest(baseUsernames, usernames, latestUsernames)
-        ));
+        const savedUsernames = await saveEditedUsernamesToActiveList(usernames);
 
         applySavedUsernamesToDraft(savedUsernames);
         persistCurrentPopupState();
@@ -2589,7 +2510,7 @@
         return;
       }
 
-      const { usernames, invalidEntries } = blocklist.parseUsernameText(textareaElement.value);
+      const { usernames, invalidEntries } = usernameListsApi.parseUsernameText(textareaElement.value);
 
       if (!usernames.length) {
         setStatus('Add at least one valid username before blocking.', { tone: 'warning' });
@@ -2605,10 +2526,7 @@
       });
 
       try {
-        const baseUsernames = getCurrentDraftBaseUsernames();
-        const savedUsernames = await mutateCurrentActiveUsernameListUsernames((latestUsernames) => (
-          mergeEditedUsernamesWithLatest(baseUsernames, usernames, latestUsernames)
-        ));
+        const savedUsernames = await saveEditedUsernamesToActiveList(usernames);
         const targetTab = await findUsableXTab(extensionApi);
 
         applySavedUsernamesToDraft(savedUsernames);
@@ -3133,7 +3051,7 @@
         return null;
       }
 
-      return blocklist.normalizeUsernameListName(rawName, defaultName || blocklist.DEFAULT_USERNAME_LIST_NAME);
+      return usernameListsApi.normalizeUsernameListName(rawName, defaultName || usernameListsApi.DEFAULT_USERNAME_LIST_NAME);
     }
 
     async function switchActiveUsernameList(listId = usernameListSelectElement.value) {
@@ -3161,15 +3079,9 @@
         return;
       }
 
-      const nextList = blocklist.createUsernameList(
-        listName,
-        [],
-        currentUsernameLists.map((list) => list.id)
-      );
-      await blocklist.setStoredUsernameLists([...currentUsernameLists, nextList], extensionApi);
-      await blocklist.setActiveUsernameListId(nextList.id, extensionApi);
+      const { list } = await blocklist.createAndActivateUsernameList(listName, extensionApi);
       await refreshUsernameListStateFromStorage();
-      setStatus(`Created list: ${nextList.name}.`, { tone: 'success' });
+      setStatus(`Created list: ${list.name}.`, { tone: 'success' });
       setBusyState();
       persistCurrentPopupState();
     }
@@ -3185,11 +3097,7 @@
         return;
       }
 
-      const nextLists = currentUsernameLists.map((list) => list.id === currentActiveUsernameListId
-        ? { ...list, name: listName }
-        : list);
-
-      await blocklist.setStoredUsernameLists(nextLists, extensionApi);
+      await blocklist.renameUsernameList(getCurrentUsernameListId(), listName, extensionApi);
       await refreshUsernameListStateFromStorage();
       setStatus(`Renamed list to ${listName}.`, { tone: 'success' });
       setBusyState();
@@ -3205,16 +3113,12 @@
         return;
       }
 
-      const deletedListId = currentActiveUsernameListId;
-      const deletedListIndex = currentUsernameLists.findIndex((list) => list.id === deletedListId);
-      const nextLists = currentUsernameLists.filter((list) => list.id !== deletedListId);
-      const nextActiveList = nextLists[Math.max(0, Math.min(deletedListIndex, nextLists.length - 1))] || nextLists[0];
+      const deletedListId = getCurrentUsernameListId();
 
       clearUsernameDraft(deletedListId);
-      await blocklist.setStoredUsernameLists(nextLists, extensionApi);
-      await blocklist.setActiveUsernameListId(nextActiveList.id, extensionApi);
+      const { activeList } = await blocklist.deleteUsernameList(deletedListId, extensionApi);
       await refreshUsernameListStateFromStorage();
-      setStatus(`Deleted list. Active list: ${currentActiveUsernameList?.name || nextActiveList.name}.`, { tone: 'success' });
+      setStatus(`Deleted list. Active list: ${currentActiveUsernameList?.name || activeList.name}.`, { tone: 'success' });
       setBusyState();
       persistCurrentPopupState();
     }
@@ -3246,18 +3150,13 @@
         return;
       }
 
-      const parsedImport = blocklist.parseUsernameImport(text, fileName);
+      const parsedImport = usernameListsApi.parseUsernameImport(text, fileName);
       const invalidSuffix = parsedImport.invalidEntries.length
         ? ` Skipped invalid values: ${parsedImport.invalidEntries.slice(0, 3).join(', ')}.`
         : '';
 
       if (parsedImport.lists.length) {
-        const latestLists = hasUsernameListStorageApi()
-          ? blocklist.normalizeUsernameLists(await blocklist.getStoredUsernameLists(extensionApi))
-          : currentUsernameLists;
-        const nextLists = blocklist.mergeUsernameLists(latestLists, parsedImport.lists);
-
-        await blocklist.setStoredUsernameLists(nextLists, extensionApi);
+        await blocklist.importUsernameLists(parsedImport.lists, extensionApi);
         await refreshUsernameListStateFromStorage();
         setStatus(`Imported ${parsedImport.lists.length} list${parsedImport.lists.length === 1 ? '' : 's'}.${invalidSuffix}`, { tone: invalidSuffix ? 'warning' : 'success' });
         setBusyState();
@@ -3270,12 +3169,11 @@
         return;
       }
 
-      const visibleUsernames = blocklist.parseUsernameText(textareaElement.value).usernames;
-      const savedUsernames = await mutateCurrentActiveUsernameListUsernames((latestUsernames) => ([
-        ...latestUsernames,
+      const visibleUsernames = usernameListsApi.parseUsernameText(textareaElement.value).usernames;
+      const savedUsernames = await saveEditedUsernamesToActiveList([
         ...visibleUsernames,
         ...parsedImport.usernames
-      ]));
+      ]);
 
       applySavedUsernamesToDraft(savedUsernames);
       setStatus(`Imported ${parsedImport.usernames.length} username${parsedImport.usernames.length === 1 ? '' : 's'} into ${currentActiveUsernameList?.name || 'the active list'}.${invalidSuffix}`, { tone: invalidSuffix ? 'warning' : 'success' });
@@ -3312,12 +3210,11 @@
       setStatus('Adding scanned users to active list...', { tone: 'info' });
 
       try {
-        const visibleUsernames = blocklist.parseUsernameText(textareaElement.value).usernames;
-        const savedUsernames = await mutateCurrentActiveUsernameListUsernames((latestUsernames) => ([
-          ...latestUsernames,
+        const visibleUsernames = usernameListsApi.parseUsernameText(textareaElement.value).usernames;
+        const savedUsernames = await saveEditedUsernamesToActiveList([
           ...visibleUsernames,
           ...scannedUsernames
-        ]));
+        ]);
 
         applySavedUsernamesToDraft(savedUsernames);
         persistCurrentPopupState();

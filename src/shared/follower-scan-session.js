@@ -1,6 +1,8 @@
 (() => {
   const storageApi = globalThis.EasyTweetBlockStorage
     || (typeof module !== 'undefined' && module.exports ? require('./storage.js') : null);
+  const usernamesApi = globalThis.EasyTweetBlockUsernames
+    || (typeof module !== 'undefined' && module.exports ? require('./usernames.js') : null);
   const FALLBACK_FOLLOWERS_SOURCES = Object.freeze({
     followers: 'followers',
     following: 'following'
@@ -13,11 +15,12 @@
   const FALLBACK_MIN_FOLLOWERS_SCAN_LIMIT = 1;
   const FALLBACK_MAX_FOLLOWERS_SCAN_LIMIT = 500;
 
-  if (!storageApi) {
-    throw new Error('Missing Easy TweetBlock storage API.');
+  if (!storageApi || !usernamesApi) {
+    throw new Error('Missing Easy TweetBlock storage/usernames API.');
   }
 
   const { callStorageGet, callStorageSet, getExtensionApi } = storageApi;
+  const { normalizeUsername } = usernamesApi;
 
   const FOLLOWER_SCAN_SESSION_STORAGE_KEY = 'followerScanSession';
   const FOLLOWER_SCAN_SESSION_VERSION = 1;
@@ -25,7 +28,6 @@
   const MAX_FOLLOWER_SCAN_DEDUPE_KEYS = 500;
   const FOLLOWER_SCAN_SESSION_TTL_MS = 10 * 60 * 1000;
   const MAX_FOLLOWER_SCAN_CANDIDATE_ATTEMPTS = 3;
-  const USERNAME_PATTERN = /^[A-Za-z0-9_]{1,15}$/;
   const USER_ID_PATTERN = /^\d+$/;
   const FOLLOWER_SCAN_SESSION_STATUSES = new Set([
     'idle',
@@ -95,12 +97,7 @@
   }
 
   function normalizeUsernameForMatching(value) {
-    if (typeof value !== 'string') {
-      return null;
-    }
-
-    const normalizedValue = value.trim().replace(/^[@/]+/, '').toLowerCase();
-    return normalizedValue && USERNAME_PATTERN.test(normalizedValue) ? normalizedValue : null;
+    return normalizeUsername(value);
   }
 
   function normalizeRestId(value) {

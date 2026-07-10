@@ -23,6 +23,8 @@
     require('../shared/storage.js');
     require('../shared/settings.js');
     require('../shared/followers.js');
+    require('../shared/usernames.js');
+    require('../shared/username-lists.js');
     require('./shared.js');
     require('../shared/blocklist.js');
     require('../shared/follower-scan-session.js');

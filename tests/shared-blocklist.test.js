@@ -5,29 +5,24 @@ const {
   ACTIVE_USERNAME_LIST_ID_STORAGE_KEY,
   DEFAULT_USERNAME_LIST_ID,
   DEFAULT_USERNAME_LIST_NAME,
-  USERNAME_LISTS_STORAGE_KEY,
+  USERNAME_LISTS_STORAGE_KEY
+} = require('../src/shared/username-lists.js');
+const {
   addUsernameToActiveList,
-  createUsernameList,
-  getStoredUsernameListState,
+  createAndActivateUsernameList,
+  deleteUsernameList,
   getActiveUsernameList,
+  getStoredUsernameListState,
   getStoredUsernameLists,
-  getStoredUsernames,
+  importUsernameLists,
   isUsernameInActiveList,
-  mergeUsernameLists,
-  normalizeStoredUsernames,
-  normalizeUsername,
-  normalizeUsernameListName,
-  normalizeUsernameLists,
   observeActiveUsernameList,
-  observeStoredUsernames,
-  toggleUsernameInActiveList,
-  parseUsernameImport,
-  parseUsernameText,
-  serializeUsernameText,
+  renameUsernameList,
   setActiveStoredUsernames,
   setActiveUsernameListId,
   setStoredUsernameLists,
-  setStoredUsernames
+  toggleUsernameInActiveList,
+  updateUsernameListUsernames
 } = require('../src/shared/blocklist.js');
 
 function createExtensionApi(initialStore = {}) {
@@ -134,38 +129,6 @@ function flushAsyncWork() {
   return new Promise((resolve) => setImmediate(resolve));
 }
 
-test('normalizeUsername lowercases handles and validates username shape', () => {
-  assert.equal(normalizeUsername('@Felixmfdo'), 'felixmfdo');
-  assert.equal(normalizeUsername('/Felixmfdo'), 'felixmfdo');
-  assert.equal(normalizeUsername('bad-name'), null);
-  assert.equal(normalizeUsername(''), null);
-});
-
-test('parseUsernameText deduplicates usernames and reports invalid entries', () => {
-  const { usernames, invalidEntries } = parseUsernameText('@Felixmfdo\nspam_account\ninvalid-name\nFelixmfdo');
-
-  assert.deepEqual(usernames, ['felixmfdo', 'spam_account']);
-  assert.deepEqual(invalidEntries, ['invalid-name']);
-});
-
-test('normalizeStoredUsernames cleans invalid and duplicate stored values', () => {
-  assert.deepEqual(normalizeStoredUsernames(['Felixmfdo', '@felixmfdo', 'ok_name', 'bad-name']), ['felixmfdo', 'ok_name']);
-});
-
-test('serializeUsernameText formats usernames one per line with @ prefix', () => {
-  assert.equal(serializeUsernameText(['felixmfdo', 'spam_account']), '@felixmfdo\n@spam_account');
-});
-
-test('setStoredUsernames and getStoredUsernames round-trip through extension storage', async () => {
-  const extensionApi = createExtensionApi();
-
-  const savedUsernames = await setStoredUsernames(['Felixmfdo', 'spam_account', '@Felixmfdo'], extensionApi);
-  const loadedUsernames = await getStoredUsernames(extensionApi);
-
-  assert.deepEqual(savedUsernames, ['felixmfdo', 'spam_account']);
-  assert.deepEqual(loadedUsernames, ['felixmfdo', 'spam_account']);
-});
-
 test('missing username lists read as an empty default list without writing storage', async () => {
   const extensionApi = createPromiseExtensionApi();
 
@@ -192,6 +155,7 @@ test('getStoredUsernameListState returns lists and active list with one storage 
   });
   const getFromStorage = extensionApi.storage.local.get.bind(extensionApi.storage.local);
   let storageGetCount = 0;
+
   extensionApi.storage.local.get = (keys) => {
     storageGetCount += 1;
     return getFromStorage(keys);
@@ -218,8 +182,8 @@ test('active list wrappers read, write, switch, add usernames without duplicates
   await setStoredUsernameLists(lists, extensionApi);
   await setActiveUsernameListId('watchlist', extensionApi);
 
-  assert.deepEqual(await getStoredUsernames(extensionApi), ['bob']);
-  assert.deepEqual(await setStoredUsernames(['Charlie', 'bob'], extensionApi), ['charlie', 'bob']);
+  assert.deepEqual((await getActiveUsernameList(extensionApi)).usernames, ['bob']);
+  assert.deepEqual(await setActiveStoredUsernames(['Charlie', 'bob'], extensionApi), ['charlie', 'bob']);
   assert.equal(await isUsernameInActiveList('@charlie', extensionApi), true);
 
   assert.deepEqual(await addUsernameToActiveList('Dana', extensionApi), {
@@ -251,6 +215,20 @@ test('active list wrappers read, write, switch, add usernames without duplicates
   });
 });
 
+test('active list helpers round-trip through callback-style storage APIs', async () => {
+  const extensionApi = createExtensionApi();
+
+  const savedUsernames = await setActiveStoredUsernames(['Felixmfdo', 'spam_account', '@Felixmfdo'], extensionApi);
+  const activeList = await getActiveUsernameList(extensionApi);
+
+  assert.deepEqual(savedUsernames, ['felixmfdo', 'spam_account']);
+  assert.deepEqual(activeList, {
+    id: DEFAULT_USERNAME_LIST_ID,
+    name: DEFAULT_USERNAME_LIST_NAME,
+    usernames: ['felixmfdo', 'spam_account']
+  });
+});
+
 test('active list username mutations persist active id and only update the active list', async () => {
   const extensionApi = createPromiseExtensionApi({
     [ACTIVE_USERNAME_LIST_ID_STORAGE_KEY]: 'watchlist',
@@ -261,6 +239,7 @@ test('active list username mutations persist active id and only update the activ
   });
   const storedPayloads = [];
   const storageSet = extensionApi.storage.local.set.bind(extensionApi.storage.local);
+
   extensionApi.storage.local.set = (payload) => {
     storedPayloads.push(payload);
     return storageSet(payload);
@@ -307,73 +286,69 @@ test('active list username mutations persist active id and only update the activ
   assert.equal(extensionApi.store[ACTIVE_USERNAME_LIST_ID_STORAGE_KEY], 'watchlist');
 });
 
-test('username list normalization keeps ids unique and cleans names', () => {
-  assert.equal(normalizeUsernameListName('  Spam   Team  '), 'Spam Team');
-  assert.deepEqual(normalizeUsernameLists([
-    { id: 'same', name: 'One', usernames: ['Alice'] },
-    { id: 'same', name: 'One', usernames: ['Alice', 'Bob'] },
-    { id: 'bad id', name: '', usernames: ['bad-name'] }
-  ]), [
-    { id: 'same', name: 'One', usernames: ['alice'] },
-    { id: 'one', name: 'One', usernames: ['alice', 'bob'] },
-    { id: 'blocklist-3', name: 'Blocklist 3', usernames: [] }
+test('updateUsernameListUsernames merges against the targeted list without changing the active list id', async () => {
+  const extensionApi = createPromiseExtensionApi({
+    [ACTIVE_USERNAME_LIST_ID_STORAGE_KEY]: 'second',
+    [USERNAME_LISTS_STORAGE_KEY]: [
+      { id: 'first', name: 'First', usernames: ['alice'] },
+      { id: 'second', name: 'Second', usernames: ['bob'] }
+    ]
+  });
+
+  const result = await updateUsernameListUsernames('first', (list) => ([
+    ...list.usernames,
+    'Carol'
+  ]), extensionApi);
+
+  assert.equal(result.activeListId, 'second');
+  assert.deepEqual(result.list, { id: 'first', name: 'First', usernames: ['alice', 'carol'] });
+  assert.deepEqual(extensionApi.store[USERNAME_LISTS_STORAGE_KEY], [
+    { id: 'first', name: 'First', usernames: ['alice', 'carol'] },
+    { id: 'second', name: 'Second', usernames: ['bob'] }
   ]);
-  assert.deepEqual(createUsernameList('My List', ['Alice'], ['my-list']), {
-    id: 'my-list-2',
-    name: 'My List',
-    usernames: ['alice']
-  });
+  assert.equal(extensionApi.store[ACTIVE_USERNAME_LIST_ID_STORAGE_KEY], 'second');
 });
 
-test('parseUsernameImport supports text, json usernames, and json lists', () => {
-  assert.deepEqual(parseUsernameImport('@Alice,bad-name Bob', 'names.csv'), {
-    invalidEntries: ['bad-name'],
-    lists: [],
-    usernames: ['alice', 'bob']
+test('list intent helpers create, rename, delete, and import lists through shared state APIs', async () => {
+  const extensionApi = createPromiseExtensionApi({
+    [ACTIVE_USERNAME_LIST_ID_STORAGE_KEY]: 'blocklist',
+    [USERNAME_LISTS_STORAGE_KEY]: [
+      { id: 'blocklist', name: 'Blocklist', usernames: ['alice'] },
+      { id: 'watchlist', name: 'Watchlist', usernames: ['bob'] }
+    ]
   });
-  assert.deepEqual(parseUsernameImport('{"usernames":["Alice","bad-name","Bob"]}', 'names.json'), {
-    invalidEntries: ['bad-name'],
-    lists: [],
-    usernames: ['alice', 'bob']
-  });
-  assert.deepEqual(parseUsernameImport('{"lists":[{"name":"Spam","usernames":["Alice","bad-name"]}]}', 'lists.json'), {
-    invalidEntries: ['bad-name'],
-    lists: [{ id: 'spam', name: 'Spam', usernames: ['alice'] }],
-    usernames: []
-  });
-});
 
-test('parseUsernameImport preserves JSON username values before validation', () => {
-  assert.deepEqual(parseUsernameImport('{"usernames":["Alice","bad name","bad,name","Alice",null,""]}', 'names.json'), {
-    invalidEntries: ['bad name', 'bad,name'],
-    lists: [],
-    usernames: ['alice']
-  });
-});
+  const created = await createAndActivateUsernameList('VIP', extensionApi);
+  assert.equal(created.activeListId, 'vip');
+  assert.deepEqual(created.list, { id: 'vip', name: 'VIP', usernames: [] });
 
-test('mergeUsernameLists merges imported lists by name and deduplicates usernames', () => {
-  assert.deepEqual(mergeUsernameLists([
-    { id: 'spam', name: 'Spam', usernames: ['alice'] }
-  ], [
-    { name: 'spam', usernames: ['Alice', 'Bob'] },
-    { name: 'VIP', usernames: ['Charlie'] }
-  ]), [
-    { id: 'spam', name: 'Spam', usernames: ['alice', 'bob'] },
-    { id: 'vip', name: 'VIP', usernames: ['charlie'] }
+  const renamed = await renameUsernameList('vip', 'VIP renamed', extensionApi);
+  assert.deepEqual(renamed.list, { id: 'vip', name: 'VIP renamed', usernames: [] });
+
+  const imported = await importUsernameLists([
+    { name: 'VIP renamed', usernames: ['Dana'] },
+    { name: 'Muted', usernames: ['Eve'] }
+  ], extensionApi);
+  assert.equal(imported.activeListId, 'vip');
+  assert.deepEqual(imported.lists, [
+    { id: 'blocklist', name: 'Blocklist', usernames: ['alice'] },
+    { id: 'watchlist', name: 'Watchlist', usernames: ['bob'] },
+    { id: 'vip', name: 'VIP renamed', usernames: ['dana'] },
+    { id: 'muted', name: 'Muted', usernames: ['eve'] }
   ]);
+
+  const deleted = await deleteUsernameList('vip', extensionApi);
+  assert.equal(deleted.activeListId, 'muted');
+  assert.deepEqual(deleted.deletedList, { id: 'vip', name: 'VIP renamed', usernames: ['dana'] });
+  assert.deepEqual(extensionApi.store[USERNAME_LISTS_STORAGE_KEY], [
+    { id: 'blocklist', name: 'Blocklist', usernames: ['alice'] },
+    { id: 'watchlist', name: 'Watchlist', usernames: ['bob'] },
+    { id: 'muted', name: 'Muted', usernames: ['eve'] }
+  ]);
+  assert.equal(extensionApi.store[ACTIVE_USERNAME_LIST_ID_STORAGE_KEY], 'muted');
 });
 
-test('stored username helpers also work with promise-based storage APIs', async () => {
-  const extensionApi = createPromiseExtensionApi();
-
-  const savedUsernames = await setStoredUsernames(['Felixmfdo', 'spam_account'], extensionApi);
-  const loadedUsernames = await getStoredUsernames(extensionApi);
-
-  assert.deepEqual(savedUsernames, ['felixmfdo', 'spam_account']);
-  assert.deepEqual(loadedUsernames, ['felixmfdo', 'spam_account']);
-});
-
-test('getStoredUsernames rejects callback-style storage errors', async () => {
+test('getActiveUsernameList rejects callback-style storage errors', async () => {
   const extensionApi = {
     runtime: {
       lastError: null
@@ -389,21 +364,7 @@ test('getStoredUsernames rejects callback-style storage errors', async () => {
     }
   };
 
-  await assert.rejects(getStoredUsernames(extensionApi), /storage get failed/);
-});
-
-test('observeStoredUsernames notifies normalized updates and unsubscribe stops listening', async () => {
-  const extensionApi = createPromiseExtensionApi();
-  const updates = [];
-  const unsubscribe = observeStoredUsernames((usernames) => {
-    updates.push(usernames);
-  }, extensionApi);
-
-  await setStoredUsernames(['Felixmfdo', '@Felixmfdo', 'spam_account'], extensionApi);
-  unsubscribe();
-  await setStoredUsernames(['another_user'], extensionApi);
-
-  assert.deepEqual(updates, [['felixmfdo', 'spam_account']]);
+  await assert.rejects(getActiveUsernameList(extensionApi), /storage get failed/);
 });
 
 test('observeActiveUsernameList follows active id and list content changes', async () => {

@@ -4,12 +4,15 @@
     || (typeof module !== 'undefined' && module.exports ? require('../shared/storage.js') : null);
   const settingsApi = globalThis.EasyTweetBlockSettings
     || (typeof module !== 'undefined' && module.exports ? require('../shared/settings.js') : null);
+  const usernamesApi = globalThis.EasyTweetBlockUsernames
+    || (typeof module !== 'undefined' && module.exports ? require('../shared/usernames.js') : null);
 
-  if (!storageApi || !settingsApi) {
-    throw new Error('Missing Easy TweetBlock shared settings/storage API.');
+  if (!storageApi || !settingsApi || !usernamesApi) {
+    throw new Error('Missing Easy TweetBlock shared settings/storage/usernames API.');
   }
 
   const { getExtensionApi: getStorageExtensionApi } = storageApi;
+  const { createUsernameSet: createSharedUsernameSet, normalizeUsername, USERNAME_PATTERN } = usernamesApi;
   const {
     DEFAULT_BATCH_BLOCK_DELAY_MS,
     DEFAULT_PAGE_BLOCK_BUTTON_STYLE,
@@ -61,7 +64,6 @@
   });
   const WAIT_INTERVAL_MS = 50;
   const WAIT_TIMEOUT_MS = 2500;
-  const USERNAME_PATTERN = /^[A-Za-z0-9_]{1,15}$/;
   const FALLBACK_RESERVED_PATH_SEGMENTS = new Set([
     'compose',
     'explore',
@@ -202,30 +204,11 @@
   }
 
   function normalizeUsernameForMatching(value) {
-    if (typeof value !== 'string') {
-      return null;
-    }
-
-    const normalizedValue = value.trim().replace(/^[@/]+/, '').toLowerCase();
-    return normalizedValue && USERNAME_PATTERN.test(normalizedValue) ? normalizedValue : null;
+    return normalizeUsername(value);
   }
 
   function createUsernameSet(usernames) {
-    const normalizedUsernames = new Set();
-
-    if (!Array.isArray(usernames)) {
-      return normalizedUsernames;
-    }
-
-    for (const username of usernames) {
-      const normalizedUsername = normalizeUsernameForMatching(username);
-
-      if (normalizedUsername) {
-        normalizedUsernames.add(normalizedUsername);
-      }
-    }
-
-    return normalizedUsernames;
+    return createSharedUsernameSet(usernames);
   }
 
   function getExtensionApi(globalRef = globalThis) {

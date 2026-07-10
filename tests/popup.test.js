@@ -182,12 +182,7 @@ async function runStaleContinuationRetryScan({
 } = {}) {
   const { documentRef, elements } = createPopupDocument();
   const messages = [];
-  const blocklist = {
-    ...sharedBlocklist,
-    async getStoredUsernames() {
-      return [];
-    }
-  };
+  const blocklist = sharedBlocklist;
   const extensionApi = createStorageExtensionApi({
     [sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY]: {
       version: 1,
@@ -1135,8 +1130,20 @@ test('init loads stored popup state and supports settings navigation', async () 
   const { documentRef, elements } = createPopupDocument();
   const blocklist = {
     ...sharedBlocklist,
-    async getStoredUsernames() {
-      return ['alice', 'bob'];
+    async getStoredUsernameListState() {
+      return {
+        activeList: {
+          id: 'blocklist',
+          name: 'Blocklist',
+          usernames: ['alice', 'bob']
+        },
+        activeListId: 'blocklist',
+        lists: [{
+          id: 'blocklist',
+          name: 'Blocklist',
+          usernames: ['alice', 'bob']
+        }]
+      };
     }
   };
   const settings = {
@@ -1312,12 +1319,7 @@ test('init disables scanning when the stored session has ready candidates but no
 test('init resumes a stored follower scan session by sending the rebuilt resume state and merging the new batch', async () => {
   const { documentRef, elements } = createPopupDocument();
   const messages = [];
-  const blocklist = {
-    ...sharedBlocklist,
-    async getStoredUsernames() {
-      return [];
-    }
-  };
+  const blocklist = sharedBlocklist;
   const extensionApi = createStorageExtensionApi({
     [sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY]: {
       version: 1,
@@ -1705,12 +1707,7 @@ test('init ignores legacy popup preview persistence during hydration and evicts 
 
   const { documentRef, elements } = createPopupDocument();
 
-  init(documentRef, extensionApi, {
-    ...sharedBlocklist,
-    async getStoredUsernames() {
-      return [];
-    }
-  }, sharedFollowers, sharedSettings, sharedFollowerScanSessions);
+  init(documentRef, extensionApi, sharedBlocklist, sharedFollowers, sharedSettings, sharedFollowerScanSessions);
   await flushAsyncWork();
 
   assert.equal(elements['popup-shell'].dataset.view, POPUP_VIEWS.followers);
@@ -1943,6 +1940,41 @@ test('init imports usernames into the active list and JSON lists by name', async
   ]);
 });
 
+test('init imports usernames without dropping external active-list additions', async () => {
+  const extensionApi = createStorageExtensionApi({
+    [sharedBlocklist.ACTIVE_USERNAME_LIST_ID_STORAGE_KEY]: 'blocklist',
+    [sharedBlocklist.USERNAME_LISTS_STORAGE_KEY]: [
+      { id: 'blocklist', name: 'Blocklist', usernames: ['alice'] }
+    ]
+  });
+  const { documentRef, elements } = createPopupDocument();
+
+  init(documentRef, extensionApi, sharedBlocklist);
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  elements['username-blocklist'].value = '@alice\n@bob';
+  elements['username-blocklist'].dispatch('input');
+
+  await sharedBlocklist.addUsernameToActiveList('Carol', extensionApi);
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  elements['import-usernames-file'].files = [{
+    name: 'names.csv',
+    text: () => Promise.resolve('@Dana,bad-name')
+  }];
+  elements['import-usernames-file'].change();
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  assert.deepEqual(extensionApi.store[sharedBlocklist.USERNAME_LISTS_STORAGE_KEY][0].usernames, ['alice', 'carol', 'bob', 'dana']);
+  assert.equal(elements['username-blocklist'].value, '@alice\n@carol\n@bob\n@dana');
+  assert.equal(elements['username-count'].textContent, '4 usernames');
+  assert.equal(elements.status.textContent, 'Save usernames for later, or block the whole list immediately through any open X tab.');
+  assert.equal(getToastText(elements), 'Imported 1 username into Blocklist. Skipped invalid values: bad-name.');
+});
+
 test('init protects incompatible drafts and reacts to external list changes', async (t) => {
   const originalLocalStorage = globalThis.localStorage;
   const storage = createLocalStorageStub();
@@ -2061,12 +2093,7 @@ test('init ignores a persisted completed follower-run status and restores the de
 
   const { documentRef, elements } = createPopupDocument();
 
-  init(documentRef, { runtime: {}, tabs: {} }, {
-    ...sharedBlocklist,
-    async getStoredUsernames() {
-      return [];
-    }
-  });
+  init(documentRef, { runtime: {}, tabs: {} }, sharedBlocklist);
   await flushAsyncWork();
 
   assert.equal(elements.status.textContent, 'Save usernames for later, or block the whole list immediately through any open X tab.');
@@ -2093,12 +2120,7 @@ test('init ignores a persisted list CRUD status and restores the default header 
 
   const { documentRef, elements } = createPopupDocument();
 
-  init(documentRef, { runtime: {}, tabs: {} }, {
-    ...sharedBlocklist,
-    async getStoredUsernames() {
-      return [];
-    }
-  });
+  init(documentRef, { runtime: {}, tabs: {} }, sharedBlocklist);
   await flushAsyncWork();
 
   assert.equal(elements.status.textContent, 'Save usernames for later, or block the whole list immediately through any open X tab.');
@@ -2150,11 +2172,27 @@ test('init saves the blocklist, disables actions while saving, and reports inval
   const persistedUsernames = [];
   const blocklist = {
     ...sharedBlocklist,
-    async getStoredUsernames() {
-      return [];
+    async getStoredUsernameListState() {
+      return {
+        activeList: {
+          id: 'blocklist',
+          name: 'Blocklist',
+          usernames: []
+        },
+        activeListId: 'blocklist',
+        lists: [{
+          id: 'blocklist',
+          name: 'Blocklist',
+          usernames: []
+        }]
+      };
     },
-    setStoredUsernames(usernames) {
-      persistedUsernames.push(usernames);
+    updateUsernameListUsernames(_listId, createNextUsernames) {
+      persistedUsernames.push(createNextUsernames({
+        id: 'blocklist',
+        name: 'Blocklist',
+        usernames: []
+      }));
       return deferredSave.promise;
     }
   };
@@ -2173,7 +2211,7 @@ test('init saves the blocklist, disables actions while saving, and reports inval
   assert.equal(elements['block-now'].disabled, true);
   assert.equal(elements['save-settings'].disabled, true);
 
-  deferredSave.resolve(['alice', 'bob']);
+  deferredSave.resolve({ usernames: ['alice', 'bob'] });
   await flushAsyncWork();
 
   assert.equal(elements['username-blocklist'].value, '@alice\n@bob');
@@ -2195,12 +2233,7 @@ test('init saves settings, updates the active delay, and returns to the main vie
   const savedStyles = [];
   const savedAddStyles = [];
   const savedVisibilityInputs = [];
-  const blocklist = {
-    ...sharedBlocklist,
-    async getStoredUsernames() {
-      return [];
-    }
-  };
+  const blocklist = sharedBlocklist;
   const settings = {
     ...sharedSettings,
     async getStoredBatchBlockDelayMs() {
@@ -2299,15 +2332,7 @@ test('init saves settings, updates the active delay, and returns to the main vie
 test('init blocks the saved list through an open X tab and reports failures with the saved delay', async () => {
   const { documentRef, elements } = createPopupDocument();
   const sentMessages = [];
-  const blocklist = {
-    ...sharedBlocklist,
-    async getStoredUsernames() {
-      return [];
-    },
-    async setStoredUsernames(usernames) {
-      return usernames;
-    }
-  };
+  const blocklist = sharedBlocklist;
   const settings = {
     ...sharedSettings,
     async getStoredBatchBlockDelayMs() {
@@ -2363,12 +2388,7 @@ test('init blocks the saved list through an open X tab and reports failures with
 test('init requires at least one valid username before blocking', async () => {
   const { documentRef, elements } = createPopupDocument();
 
-  init(documentRef, { runtime: {}, tabs: {} }, {
-    ...sharedBlocklist,
-    async getStoredUsernames() {
-      return [];
-    }
-  });
+  init(documentRef, { runtime: {}, tabs: {} }, sharedBlocklist);
   await flushAsyncWork();
 
   elements['username-blocklist'].value = 'bad-name';
@@ -2384,12 +2404,7 @@ test('init scans followers in the active tab and blocks only the ready preview c
   const blockDeferred = createDeferred();
   const messages = [];
   const runtimeListeners = [];
-  const blocklist = {
-    ...sharedBlocklist,
-    async getStoredUsernames() {
-      return [];
-    }
-  };
+  const blocklist = sharedBlocklist;
   const settings = {
     ...sharedSettings,
     async getStoredBatchBlockDelayMs() {
@@ -2651,12 +2666,7 @@ test('init can cancel an active follower block run', async () => {
   const messages = [];
   const ports = [];
   let activeBlockRunId = null;
-  const blocklist = {
-    ...sharedBlocklist,
-    async getStoredUsernames() {
-      return [];
-    }
-  };
+  const blocklist = sharedBlocklist;
   const extensionApi = {
     runtime: {},
     tabs: {
@@ -2749,12 +2759,7 @@ test('init can cancel an active follower block run', async () => {
 test('init scans following when the following source is selected', async () => {
   const { documentRef, elements } = createPopupDocument();
   const messages = [];
-  const blocklist = {
-    ...sharedBlocklist,
-    async getStoredUsernames() {
-      return [];
-    }
-  };
+  const blocklist = sharedBlocklist;
   const extensionApi = {
     runtime: {},
     tabs: {
@@ -2835,12 +2840,7 @@ test('init resets the active scan session when switching sources and restores th
   });
 
   const { documentRef, elements } = createPopupDocument();
-  const blocklist = {
-    ...sharedBlocklist,
-    async getStoredUsernames() {
-      return [];
-    }
-  };
+  const blocklist = sharedBlocklist;
   const extensionApi = createStorageExtensionApi();
   extensionApi.runtime = {};
   extensionApi.tabs = {
@@ -2940,7 +2940,7 @@ test('init renders fatal popup text when the initial popup load rejects', async 
   const { documentRef } = createPopupDocument();
   const blocklist = {
     ...sharedBlocklist,
-    async getStoredUsernames() {
+    async getStoredUsernameListState() {
       throw new Error('storage exploded');
     }
   };
