@@ -664,15 +664,16 @@
       return;
     }
 
-    const blocklistApi = getBlocklistSharedApi();
     const screenName = button.dataset?.screenName || '';
+    const normalizeUsername = namespace.normalizeUsernameForMatching;
 
-    if (!blocklistApi?.normalizeUsername) {
+    if (typeof normalizeUsername !== 'function') {
       namespace.setButtonState(button, 'error', screenName, BUTTON_KINDS.native);
       return;
     }
 
-    const normalizedUsername = blocklistApi.normalizeUsername(screenName);
+    const normalizedUsername = normalizeUsername(screenName);
+    const blocklistApi = getBlocklistSharedApi();
     const isListed = activeList && Array.isArray(activeList.usernames)
       ? activeList.usernames.includes(normalizedUsername)
       : await blocklistApi.isUsernameInActiveList(normalizedUsername, getExtensionApiForOptions(options));

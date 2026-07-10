@@ -3460,6 +3460,37 @@ test('createUserCellListButton uses the configured Add button icon on creation a
   assert.equal(button.innerHTML.includes('M9.55 16.94'), true);
 });
 
+test('createUserCellListButton keeps an unlisted button idle while hydrating the active list', async (t) => {
+  const { documentRef } = createDocumentStub();
+  const { userCell } = createUserCellNode('Aungko1531435');
+  const extensionApi = createStorageExtensionApi({
+    [sharedBlocklist.ACTIVE_USERNAME_LIST_ID_STORAGE_KEY]: 'blocklist',
+    [sharedBlocklist.USERNAME_LISTS_STORAGE_KEY]: [{
+      id: 'blocklist',
+      name: 'Blocklist',
+      usernames: []
+    }]
+  });
+
+  useGlobalOverrides(t, { document: documentRef });
+  setCurrentUserCellAddButtonStyle(PAGE_BLOCK_BUTTON_STYLES.icon);
+  t.after(() => {
+    setCurrentUserCellAddButtonStyle(DEFAULT_USER_CELL_ADD_BUTTON_STYLE);
+  });
+
+  const button = createUserCellListButton(userCell, {
+    documentRef,
+    extensionApi
+  });
+
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  assert.equal(button.dataset.state, 'idle');
+  assert.equal(button.title, 'Add @Aungko1531435 to the active list');
+  assert.equal(button.innerHTML.includes('M11.25 4.75'), true);
+});
+
 test('createUserCellListButton keeps remove retry semantics when removal fails', async (t) => {
   const { documentRef } = createDocumentStub();
   const { userCell } = createUserCellNode('Milana62234788');
