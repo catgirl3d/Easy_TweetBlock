@@ -2777,7 +2777,7 @@ test('init scans following when the following source is selected', async () => {
   assert.equal(elements['followers-progress-label'].textContent, 'Ready to block 1 following account');
 });
 
-test('init resets the active scan session when switching sources and restores the current session after reopening', async (t) => {
+test('init preserves each source scan session when switching sources and restores it after reopening', async (t) => {
   const originalLocalStorage = globalThis.localStorage;
   const storage = createLocalStorageStub();
 
@@ -2879,6 +2879,16 @@ test('init resets the active scan session when switching sources and restores th
   assert.equal(elements['followers-preview'].textContent, '@charlie');
   assert.equal(extensionApi.store[sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY].activeSession.source, 'following');
   assert.equal(elements['followers-summary'].textContent, 'Scanned 1 following account from @targetuser. Already blocked: 0. Blocked this session: 0. Ready: 1.');
+
+  elements['followers-source-followers'].click();
+  await flushAsyncWork();
+  assert.equal(elements['followers-preview'].textContent, '@alice');
+  assert.equal(elements['followers-summary'].textContent, 'Scanned 1 follower from @targetuser. Already blocked: 0. Blocked this session: 0. Ready: 1.');
+  assert.equal(extensionApi.store[sharedFollowerScanSessions.FOLLOWER_SCAN_SESSION_STORAGE_KEY].activeSession.source, 'followers');
+
+  elements['followers-source-following'].click();
+  await flushAsyncWork();
+  assert.equal(elements['followers-preview'].textContent, '@charlie');
 
   const reopenedPopup = createPopupDocument();
   init(reopenedPopup.documentRef, extensionApi, blocklist, sharedFollowers);

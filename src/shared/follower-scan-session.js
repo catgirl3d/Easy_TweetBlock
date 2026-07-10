@@ -254,11 +254,29 @@
 
   function normalizeFollowerScanSessionStore(value) {
     const normalizedActiveSession = normalizeFollowerScanSession(value?.activeSession);
+    const normalizedSessions = {};
+    const storedSessions = value?.sessions;
 
-    return {
+    if (storedSessions && typeof storedSessions === 'object' && !Array.isArray(storedSessions)) {
+      for (const source of Object.values(FALLBACK_FOLLOWERS_SOURCES)) {
+        const normalizedSession = normalizeFollowerScanSession(storedSessions[source]);
+
+        if (normalizedSession?.source === source) {
+          normalizedSessions[source] = normalizedSession;
+        }
+      }
+    }
+
+    const normalizedStore = {
       version: FOLLOWER_SCAN_SESSION_VERSION,
       activeSession: normalizedActiveSession
     };
+
+    if (Object.keys(normalizedSessions).length) {
+      normalizedStore.sessions = normalizedSessions;
+    }
+
+    return normalizedStore;
   }
 
   function isFollowerScanSessionExpired(session, now = Date.now()) {
@@ -310,6 +328,84 @@
     return activeSession;
   }
 
+  function getFollowerScanSession(store, source, expectedKey = null) {
+    const normalizedStore = normalizeFollowerScanSessionStore(store);
+    const normalizedSource = normalizeFollowersSource(source);
+    const storedSession = normalizedStore.sessions?.[normalizedSource];
+    const activeSession = normalizedStore.activeSession?.source === normalizedSource
+      ? normalizedStore.activeSession
+      : null;
+    const session = storedSession || activeSession;
+    const normalizedExpectedKey = normalizeOptionalString(expectedKey);
+
+    if (!session || isFollowerScanSessionExpired(session)) {
+      return null;
+    }
+
+    if (normalizedExpectedKey && session.key !== normalizedExpectedKey) {
+      return null;
+    }
+
+    return session;
+  }
+
+  function setFollowerScanSession(store, source, session) {
+    const normalizedStore = normalizeFollowerScanSessionStore(store);
+    const normalizedSource = normalizeFollowersSource(source);
+    const normalizedSession = normalizeFollowerScanSession(session);
+    const sessions = {
+      ...(normalizedStore.sessions || {})
+    };
+
+    // Migrate a legacy single active session as soon as the source-aware store
+    // is updated, so switching sources does not discard it.
+    if (normalizedStore.activeSession && !sessions[normalizedStore.activeSession.source]) {
+      sessions[normalizedStore.activeSession.source] = normalizedStore.activeSession;
+    }
+
+    if (normalizedSession && normalizedSession.source === normalizedSource) {
+      sessions[normalizedSource] = normalizedSession;
+    } else {
+      delete sessions[normalizedSource];
+    }
+
+    const nextStore = {
+      version: FOLLOWER_SCAN_SESSION_VERSION,
+      activeSession: normalizedSession
+    };
+
+    if (Object.keys(sessions).length) {
+      nextStore.sessions = sessions;
+    }
+
+    return nextStore;
+  }
+
+  function clearFollowerScanSession(store, source) {
+    const normalizedStore = normalizeFollowerScanSessionStore(store);
+    const normalizedSource = normalizeFollowersSource(source);
+    const sessions = {
+      ...(normalizedStore.sessions || {})
+    };
+
+    if (normalizedStore.activeSession && !sessions[normalizedStore.activeSession.source]) {
+      sessions[normalizedStore.activeSession.source] = normalizedStore.activeSession;
+    }
+
+    delete sessions[normalizedSource];
+
+    const nextStore = {
+      version: FOLLOWER_SCAN_SESSION_VERSION,
+      activeSession: null
+    };
+
+    if (Object.keys(sessions).length) {
+      nextStore.sessions = sessions;
+    }
+
+    return nextStore;
+  }
+
   function setActiveFollowerScanSession(store, session) {
     const normalizedStore = normalizeFollowerScanSessionStore(store);
     return {
@@ -340,8 +436,11 @@
     normalizeFollowerScanSessionStore,
     loadFollowerScanSessionStore,
     saveFollowerScanSessionStore,
+    getFollowerScanSession,
     getActiveFollowerScanSession,
+    setFollowerScanSession,
     setActiveFollowerScanSession,
+    clearFollowerScanSession,
     clearActiveFollowerScanSession
   };
 

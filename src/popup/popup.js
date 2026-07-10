@@ -1005,20 +1005,42 @@
       return isSaving || isBlocking || isFollowersScanning || isFollowersBlocking || isFollowersSessionResetting;
     }
 
+    function getStoredFollowerScanSession(source = currentFollowersSource, expectedKey = null) {
+      if (typeof followerScanSessions.getFollowerScanSession === 'function') {
+        return followerScanSessions.getFollowerScanSession(currentFollowerScanSessionStore, source, expectedKey);
+      }
+
+      const activeSession = followerScanSessions.getActiveFollowerScanSession(currentFollowerScanSessionStore, expectedKey);
+      return activeSession?.source === followers.normalizeFollowersSource(source) ? activeSession : null;
+    }
+
     function getFollowerScanSessionForCurrentSource() {
       return currentFollowerScanSession?.source === currentFollowersSource
         ? currentFollowerScanSession
-        : null;
+        : getStoredFollowerScanSession(currentFollowersSource);
     }
 
     function syncFollowerScanSessionState(session) {
       currentFollowerScanSession = followerScanControllerApi.normalizeFollowerScanSessionForController(session);
 
-      if (currentFollowerScanSessionStore && currentFollowerScanSessionStore.activeSession !== currentFollowerScanSession) {
-        currentFollowerScanSessionStore = {
-          ...currentFollowerScanSessionStore,
-          activeSession: currentFollowerScanSession
-        };
+      if (currentFollowerScanSessionStore) {
+        if (typeof followerScanSessions.setFollowerScanSession === 'function' && currentFollowerScanSession) {
+          currentFollowerScanSessionStore = followerScanSessions.setFollowerScanSession(
+            currentFollowerScanSessionStore,
+            currentFollowersSource,
+            currentFollowerScanSession
+          );
+        } else if (typeof followerScanSessions.clearFollowerScanSession === 'function') {
+          currentFollowerScanSessionStore = followerScanSessions.clearFollowerScanSession(
+            currentFollowerScanSessionStore,
+            currentFollowersSource
+          );
+        } else if (currentFollowerScanSessionStore.activeSession !== currentFollowerScanSession) {
+          currentFollowerScanSessionStore = {
+            ...currentFollowerScanSessionStore,
+            activeSession: currentFollowerScanSession
+          };
+        }
       }
 
       currentFollowersPreview = followerScanControllerApi.deriveFollowersPreviewFromSession(currentFollowerScanSession);
@@ -1035,10 +1057,18 @@
         status,
         updatedAt: Date.now()
       };
-      currentFollowerScanSessionStore = {
-        ...currentFollowerScanSessionStore,
-        activeSession: currentFollowerScanSession
-      };
+      if (typeof followerScanSessions.setFollowerScanSession === 'function') {
+        currentFollowerScanSessionStore = followerScanSessions.setFollowerScanSession(
+          currentFollowerScanSessionStore,
+          currentFollowersSource,
+          currentFollowerScanSession
+        );
+      } else {
+        currentFollowerScanSessionStore = {
+          ...currentFollowerScanSessionStore,
+          activeSession: currentFollowerScanSession
+        };
+      }
       currentFollowersPreview = followerScanControllerApi.deriveFollowersPreviewFromSession(currentFollowerScanSession);
       return currentFollowerScanSession;
     }
@@ -1055,14 +1085,16 @@
 
     async function saveFollowerScanSessionStoreValue(store) {
       currentFollowerScanSessionStore = await followerScanSessions.saveFollowerScanSessionStore(store, extensionApi);
-      syncFollowerScanSessionState(currentFollowerScanSessionStore.activeSession);
+      syncFollowerScanSessionState(getStoredFollowerScanSession(currentFollowersSource));
       return currentFollowerScanSessionStore;
     }
 
     async function clearPersistedFollowerScanSession() {
-      return saveFollowerScanSessionStoreValue(
-        followerScanSessions.clearActiveFollowerScanSession(currentFollowerScanSessionStore)
-      );
+      const clearSession = typeof followerScanSessions.clearFollowerScanSession === 'function'
+        ? followerScanSessions.clearFollowerScanSession(currentFollowerScanSessionStore, currentFollowersSource)
+        : followerScanSessions.clearActiveFollowerScanSession(currentFollowerScanSessionStore);
+
+      return saveFollowerScanSessionStoreValue(clearSession);
     }
 
     function buildFollowerScanExpectedKey(targetScreenName, source = currentFollowersSource, blockLimit = currentFollowersBlockLimit, scanLimit = currentFollowersScanLimit) {
@@ -1123,7 +1155,9 @@
       );
 
       await saveFollowerScanSessionStoreValue(
-        followerScanSessions.setActiveFollowerScanSession(currentFollowerScanSessionStore, nextSession)
+        typeof followerScanSessions.setFollowerScanSession === 'function'
+          ? followerScanSessions.setFollowerScanSession(currentFollowerScanSessionStore, currentFollowersSource, nextSession)
+          : followerScanSessions.setActiveFollowerScanSession(currentFollowerScanSessionStore, nextSession)
       );
       renderFollowersPreviewFromSession(currentFollowerScanSession);
       return currentFollowerScanSession;
@@ -1978,8 +2012,55 @@
         return;
       }
 
-      renderFollowersSource(nextSource);
-      await resetFollowerScanSession(`Source changed to ${getFollowersSourceCopy(nextSource).graphLabel}. Run a new scan.`);
+      isFollowersSessionResetting = true;
+      setBusyState();
+
+      try {
+        const previousSession = getFollowerScanSessionForCurrentSource();
+
+        if (previousSession) {
+          await saveFollowerScanSessionStoreValue(
+            followerScanSessions.setFollowerScanSession(
+              currentFollowerScanSessionStore,
+              currentFollowersSource,
+              previousSession
+            )
+          );
+        }
+
+        currentFollowersSource = nextSource;
+        renderFollowersSource(nextSource);
+
+        const nextSession = getStoredFollowerScanSession(nextSource);
+
+        if (nextSession) {
+          currentFollowersBlockLimit = followers.normalizeFollowersBlockLimit(nextSession.blockLimit);
+          currentFollowersScanLimit = followers.normalizeFollowersScanLimit(nextSession.scanLimit);
+          renderFollowersBlockLimit(currentFollowersBlockLimit);
+          renderFollowersScanLimit(currentFollowersScanLimit);
+          await saveFollowerScanSessionStoreValue(
+            followerScanSessions.setFollowerScanSession(
+              currentFollowerScanSessionStore,
+              nextSource,
+              nextSession
+            )
+          );
+          renderFollowersPreviewFromSession(currentFollowerScanSession);
+        } else {
+          await saveFollowerScanSessionStoreValue(
+            typeof followerScanSessions.clearFollowerScanSession === 'function'
+              ? followerScanSessions.clearFollowerScanSession(currentFollowerScanSessionStore, nextSource)
+              : followerScanSessions.clearActiveFollowerScanSession(currentFollowerScanSessionStore)
+          );
+          clearFollowersPreview(`Source changed to ${getFollowersSourceCopy(nextSource).graphLabel}. Run a new scan.`);
+          renderFollowerBlockProgress({ phase: 'idle' });
+        }
+
+        persistCurrentPopupState();
+      } finally {
+        isFollowersSessionResetting = false;
+        setBusyState();
+      }
     }
 
     function handleAsyncPopupAction(actionName, action) {
@@ -2029,7 +2110,19 @@
         settings.getStoredUserCellAddButtonVisibility(extensionApi),
         followerScanSessions.loadFollowerScanSessionStore(extensionApi)
       ]);
-      let activeFollowerScanSession = followerScanSessions.getActiveFollowerScanSession(followerScanSessionStore);
+      currentFollowerScanSessionStore = followerScanSessionStore;
+
+      const storedPopupSource = storedPopupState.followersSource
+        ? followers.normalizeFollowersSource(storedPopupState.followersSource)
+        : null;
+      const preferredFollowerSource = storedPopupSource
+        || followers.normalizeFollowersSource(followerScanSessionStore?.activeSession?.source)
+        || followers.DEFAULT_FOLLOWERS_SOURCE;
+      let activeFollowerScanSession = getStoredFollowerScanSession(preferredFollowerSource);
+
+      if (!activeFollowerScanSession && !storedPopupSource) {
+        activeFollowerScanSession = followerScanSessions.getActiveFollowerScanSession(followerScanSessionStore);
+      }
 
       setCurrentUsernameListState(usernameListState);
       const usernameDraftStatus = renderActiveUsernameList();
@@ -2050,12 +2143,10 @@
       );
       currentFollowersSource = followers.normalizeFollowersSource(
         activeFollowerScanSession?.source
-          ?? storedPopupState.followersSource
-          ?? followers.DEFAULT_FOLLOWERS_SOURCE
+          ?? preferredFollowerSource
       );
-      currentFollowerScanSessionStore = followerScanSessionStore;
 
-      if (!activeFollowerScanSession && currentFollowerScanSessionStore?.activeSession) {
+      if (!activeFollowerScanSession && currentFollowerScanSessionStore?.activeSession?.source === currentFollowersSource) {
         await clearPersistedFollowerScanSession();
       } else {
         syncFollowerScanSessionState(activeFollowerScanSession);
@@ -2269,12 +2360,10 @@
           currentFollowersBlockLimit,
           currentFollowersScanLimit
         );
-        let activeFollowerScanSession = followerScanSessions.getActiveFollowerScanSession(
-          currentFollowerScanSessionStore,
-          expectedSessionKey
-        );
+        const storedSourceSession = getStoredFollowerScanSession(currentFollowersSource);
+        let activeFollowerScanSession = getStoredFollowerScanSession(currentFollowersSource, expectedSessionKey);
 
-        if (!activeFollowerScanSession && currentFollowerScanSessionStore?.activeSession) {
+        if (!activeFollowerScanSession && storedSourceSession) {
           await clearPersistedFollowerScanSession();
         }
 
@@ -2351,7 +2440,11 @@
           const resetSession = followerScanControllerApi.createContinuationResetFollowerScanSession(activeFollowerScanSession);
 
           await saveFollowerScanSessionStoreValue(
-            followerScanSessions.setActiveFollowerScanSession(currentFollowerScanSessionStore, resetSession)
+            followerScanSessions.setFollowerScanSession(
+              currentFollowerScanSessionStore,
+              currentFollowersSource,
+              resetSession
+            )
           );
           activeFollowerScanSession = currentFollowerScanSession;
           fallbackStatusMessage = 'Saved scan position was invalid. Started a fresh scan from the top.';
@@ -2534,7 +2627,11 @@
         refreshPopupDebugLog();
 
         await saveFollowerScanSessionStoreValue(
-          followerScanSessions.setActiveFollowerScanSession(currentFollowerScanSessionStore, blockUpdate.session)
+          followerScanSessions.setFollowerScanSession(
+            currentFollowerScanSessionStore,
+            currentFollowersSource,
+            blockUpdate.session
+          )
         );
         renderFollowersPreviewFromSession(currentFollowerScanSession, { preserveProgress: true });
 
