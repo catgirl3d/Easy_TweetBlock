@@ -36,11 +36,15 @@ test("buildManifest merges the Chrome overlay into the base manifest", () => {
 test("content script files load storage, shared domain modules, and content dependencies before content main", () => {
   assert.equal(CONTENT_SCRIPT_FILES.includes("src/shared/storage.js"), true);
   assert.equal(CONTENT_SCRIPT_FILES.includes("src/shared/settings.js"), true);
+  assert.equal(CONTENT_SCRIPT_FILES.includes("src/shared/normalization.js"), true);
   assert.equal(CONTENT_SCRIPT_FILES.includes("src/shared/usernames.js"), true);
+  assert.equal(CONTENT_SCRIPT_FILES.includes("src/shared/x-platform.js"), true);
+  assert.equal(CONTENT_SCRIPT_FILES.includes("src/shared/follower-candidates.js"), true);
   assert.equal(CONTENT_SCRIPT_FILES.includes("src/shared/username-lists.js"), true);
   assert.equal(CONTENT_SCRIPT_FILES.includes("src/content/shared.js"), true);
   assert.equal(CONTENT_SCRIPT_FILES.includes("src/shared/blocklist.js"), true);
   assert.equal(CONTENT_SCRIPT_FILES.includes("src/shared/follower-scan-session.js"), true);
+  assert.equal(CONTENT_SCRIPT_FILES.includes("src/shared/follower-scan-controller.js"), true);
   assert.equal(CONTENT_SCRIPT_FILES.includes("src/content/features.js"), true);
   assert.equal(
     CONTENT_SCRIPT_FILES.indexOf("src/shared/storage.js") < CONTENT_SCRIPT_FILES.indexOf("src/shared/settings.js"),
@@ -48,6 +52,10 @@ test("content script files load storage, shared domain modules, and content depe
   );
   assert.equal(
     CONTENT_SCRIPT_FILES.indexOf("src/shared/settings.js") < CONTENT_SCRIPT_FILES.indexOf("src/shared/followers.js"),
+    true
+  );
+  assert.equal(
+    CONTENT_SCRIPT_FILES.indexOf("src/shared/normalization.js") < CONTENT_SCRIPT_FILES.indexOf("src/shared/follower-candidates.js"),
     true
   );
   assert.equal(
@@ -64,6 +72,18 @@ test("content script files load storage, shared domain modules, and content depe
   );
   assert.equal(
     CONTENT_SCRIPT_FILES.indexOf("src/shared/usernames.js") < CONTENT_SCRIPT_FILES.indexOf("src/shared/follower-scan-session.js"),
+    true
+  );
+  assert.equal(
+    CONTENT_SCRIPT_FILES.indexOf("src/shared/identity.js") < CONTENT_SCRIPT_FILES.indexOf("src/shared/x-platform.js"),
+    true
+  );
+  assert.equal(
+    CONTENT_SCRIPT_FILES.indexOf("src/shared/x-platform.js") < CONTENT_SCRIPT_FILES.indexOf("src/shared/follower-candidates.js"),
+    true
+  );
+  assert.equal(
+    CONTENT_SCRIPT_FILES.indexOf("src/shared/follower-candidates.js") < CONTENT_SCRIPT_FILES.indexOf("src/shared/follower-scan-session.js"),
     true
   );
   assert.equal(
@@ -84,6 +104,10 @@ test("content script files load storage, shared domain modules, and content depe
   );
   assert.equal(
     CONTENT_SCRIPT_FILES.indexOf("src/shared/follower-scan-session.js") < CONTENT_SCRIPT_FILES.indexOf("src/content/api.js"),
+    true
+  );
+  assert.equal(
+    CONTENT_SCRIPT_FILES.indexOf("src/shared/follower-scan-controller.js") < CONTENT_SCRIPT_FILES.indexOf("src/content/api.js"),
     true
   );
   assert.equal(

@@ -24,10 +24,14 @@
     require('../shared/settings.js');
     require('../shared/followers.js');
     require('../shared/usernames.js');
+    require('../shared/identity.js');
+    require('../shared/x-platform.js');
+    require('../shared/follower-candidates.js');
     require('../shared/username-lists.js');
     require('./shared.js');
     require('../shared/blocklist.js');
     require('../shared/follower-scan-session.js');
+    require('../shared/follower-scan-controller.js');
     require('./x-client-transaction.js');
     require('./api.js');
     require('./dom.js');
@@ -665,7 +669,7 @@
     }
 
     const screenName = button.dataset?.screenName || '';
-    const normalizeUsername = namespace.normalizeUsernameForMatching;
+    const normalizeUsername = namespace.normalizeUsername;
 
     if (typeof normalizeUsername !== 'function') {
       namespace.setButtonState(button, 'error', screenName, BUTTON_KINDS.native);
@@ -1166,7 +1170,7 @@
       normalizePageBlockButtonStyle: namespace.normalizePageBlockButtonStyle,
       normalizePageBlockButtonStyles: namespace.normalizePageBlockButtonStyles,
       normalizeUserCellAddButtonVisibility: namespace.normalizeUserCellAddButtonVisibility,
-      normalizeUsernameForMatching: namespace.normalizeUsernameForMatching,
+      normalizeUsername: namespace.normalizeUsername,
       observeStoredPageButtonStyle,
       observeStoredUserCellAddButtonStyle,
       observeStoredUserCellAddButtonVisibility,

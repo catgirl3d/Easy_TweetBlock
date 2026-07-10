@@ -37,7 +37,6 @@ const {
   requestFollowerBlocks,
   requestFollowersPreview,
   requestImmediateBlock,
-  requestMessageWithContentScript,
   saveStoredPopupDebugEntries,
   sendTabMessage,
   setPopupView,
@@ -828,53 +827,6 @@ test('requestImmediateBlock injects scripts and falls back to direct tab executi
   });
   assert.equal(typeof executeScriptCalls[1].func, 'function');
   assert.equal(executeScriptCalls[1].args[1], 1600);
-});
-
-test('requestMessageWithContentScript injects scripts and retries the message after missing receiver', async () => {
-  const insertCssCalls = [];
-  const executeScriptCalls = [];
-  const sentMessages = [];
-  let attempt = 0;
-  const extensionApi = {
-    runtime: {},
-    scripting: {
-      async insertCSS(options) {
-        insertCssCalls.push(options);
-      },
-      async executeScript(options) {
-        executeScriptCalls.push(options);
-        return [];
-      }
-    },
-    tabs: {
-      async sendMessage(tabId, message) {
-        sentMessages.push({ message, tabId });
-        attempt += 1;
-
-        if (attempt === 1) {
-          throw new Error('Could not establish connection. Receiving end does not exist.');
-        }
-
-        return {
-          echoed: true,
-          ok: true
-        };
-      }
-    }
-  };
-
-  const response = await requestMessageWithContentScript(12, { type: 'ping' }, extensionApi);
-
-  assert.deepEqual(response, { echoed: true, ok: true });
-  assert.equal(sentMessages.length, 2);
-  assert.deepEqual(insertCssCalls, [{
-    files: CONTENT_SCRIPT_CSS_FILES,
-    target: { tabId: 12 }
-  }]);
-  assert.deepEqual(executeScriptCalls, [{
-    files: CONTENT_SCRIPT_FILES,
-    target: { tabId: 12 }
-  }]);
 });
 
 test('requestFollowersPreview and requestFollowerBlocks send the expected message payloads', async () => {

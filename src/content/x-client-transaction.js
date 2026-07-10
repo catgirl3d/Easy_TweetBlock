@@ -4,6 +4,14 @@
   }
 
   const namespace = globalThis.EasyTweetBlockContent || (globalThis.EasyTweetBlockContent = {});
+  const xPlatformApi = globalThis.EasyTweetBlockXPlatform
+    || (typeof module !== 'undefined' && module.exports ? require('../shared/x-platform.js') : null);
+
+  if (!xPlatformApi) {
+    throw new Error('Missing Easy TweetBlock x-platform API.');
+  }
+
+  const { DEFAULT_X_ORIGIN } = xPlatformApi;
   const TRANSACTION_LOG_PREFIX = '[Easy TweetBlock][transaction]';
   const ON_DEMAND_CHUNK_NAME = 'ondemand.s';
   const TRANSACTION_CACHE_TTL_MS = 10 * 60 * 1000;
@@ -308,7 +316,7 @@
 
   async function fetchXHomeDocument(options = {}) {
     const {
-      baseOrigin = 'https://x.com',
+      baseOrigin = DEFAULT_X_ORIGIN,
       fetchImpl = globalThis.fetch,
       signal = null
     } = options;
@@ -369,7 +377,7 @@
 
   async function loadXClientTransactionState(options = {}) {
     const {
-      baseOrigin = 'https://x.com',
+      baseOrigin = DEFAULT_X_ORIGIN,
       documentRef = document,
       fetchImpl = globalThis.fetch,
       signal = null

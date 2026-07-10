@@ -1,55 +1,10 @@
 (() => {
   const PAGE_LOG_PREFIX = '[Easy TweetBlock][page]';
   const POPUP_STATE_STORAGE_KEY = 'easyTweetBlockPopupState';
-  const POPUP_LOG_PREFIX = '[Easy TweetBlock][popup]';
   const DEFAULT_STATUS_MESSAGE = 'Save usernames for later, or block the whole list immediately through any open X tab.';
   const OUTDATED_USERNAME_DRAFT_STATUS = 'Unsaved draft was outdated; loaded the saved list.';
   const EXTERNAL_USERNAME_LIST_CHANGE_STATUS = 'The active list changed elsewhere; your unsaved edits were kept.';
-  const MAX_POPUP_DEBUG_ENTRIES = 120;
   const TOAST_AUTO_DISMISS_MS = 4200;
-  const popupDebugEntriesCache = new Map();
-
-  function safeSerializePopupDetails(details) {
-    if (details === undefined) {
-      return '';
-    }
-
-    if (details instanceof Error) {
-      return details.stack || details.message;
-    }
-
-    if (typeof details === 'string') {
-      return details;
-    }
-
-    try {
-      return JSON.stringify(details, (_key, value) => {
-        if (value instanceof Error) {
-          return {
-            message: value.message,
-            name: value.name,
-            stack: value.stack || null
-          };
-        }
-
-        return value;
-      }, 2);
-    } catch {
-      return String(details);
-    }
-  }
-
-  function getPopupDebugCacheKey(storageRef = globalThis.localStorage) {
-    return storageRef && (typeof storageRef === 'object' || typeof storageRef === 'function')
-      ? storageRef
-      : globalThis;
-  }
-
-  function normalizePopupDebugEntries(entries) {
-    return Array.isArray(entries)
-      ? entries.filter((entry) => typeof entry === 'string').slice(-MAX_POPUP_DEBUG_ENTRIES)
-      : [];
-  }
 
   function normalizeStoredStatusMessage(statusMessage) {
     const normalizedMessage = typeof statusMessage === 'string' ? statusMessage.trim() : '';
@@ -77,160 +32,56 @@
     return '';
   }
 
-  function setCachedPopupDebugEntries(entries, storageRef = globalThis.localStorage) {
-    const normalizedEntries = normalizePopupDebugEntries(entries);
-    const cacheKey = getPopupDebugCacheKey(storageRef);
-
-    popupDebugEntriesCache.set(cacheKey, normalizedEntries);
-    globalThis.__easyTweetBlockPopupDebugEntries__ = normalizedEntries;
-    return normalizedEntries;
-  }
-
-  function getMutablePopupDebugEntries(storageRef = globalThis.localStorage) {
-    const cacheKey = getPopupDebugCacheKey(storageRef);
-
-    if (popupDebugEntriesCache.has(cacheKey)) {
-      return popupDebugEntriesCache.get(cacheKey);
-    }
-
-    return setCachedPopupDebugEntries([], storageRef);
-  }
-
-  function loadStoredPopupDebugEntries(storageRef = globalThis.localStorage) {
-    return [...getMutablePopupDebugEntries(storageRef)];
-  }
-
-  function saveStoredPopupDebugEntries(entries, storageRef = globalThis.localStorage) {
-    setCachedPopupDebugEntries(entries, storageRef);
-  }
-
-  function appendPopupDebugEntry(level, message, details, storageRef = globalThis.localStorage) {
-    const timestamp = new Date().toISOString();
-    const detailsText = safeSerializePopupDetails(details);
-    const composedEntry = detailsText
-      ? `${timestamp} ${level} ${message}\n${detailsText}`
-      : `${timestamp} ${level} ${message}`;
-    const entries = getMutablePopupDebugEntries(storageRef);
-
-    entries.push(composedEntry);
-
-    if (entries.length > MAX_POPUP_DEBUG_ENTRIES) {
-      entries.splice(0, entries.length - MAX_POPUP_DEBUG_ENTRIES);
-    }
-
-    globalThis.__easyTweetBlockPopupDebugEntries__ = entries;
-    return composedEntry;
-  }
-
-  function clearStoredPopupDebugEntries(storageRef = globalThis.localStorage) {
-    setCachedPopupDebugEntries([], storageRef);
-  }
-
-  function renderPopupDebugLog(debugElement, storageRef = globalThis.localStorage) {
-    if (!debugElement) {
-      return '';
-    }
-
-    const entries = loadStoredPopupDebugEntries(storageRef);
-    const renderedValue = entries.length ? entries.join('\n\n') : 'No popup debug events recorded yet.';
-
-    debugElement.textContent = renderedValue;
-    return renderedValue;
-  }
-
-  function logPopupInfo(message, details) {
-    appendPopupDebugEntry('INFO', message, details);
-
-    if (details === undefined) {
-      console.info(POPUP_LOG_PREFIX, message);
-      return;
-    }
-
-    console.info(POPUP_LOG_PREFIX, message, details);
-  }
-
-  function logPopupWarn(message, details) {
-    appendPopupDebugEntry('WARN', message, details);
-
-    if (details === undefined) {
-      console.warn(POPUP_LOG_PREFIX, message);
-      return;
-    }
-
-    console.warn(POPUP_LOG_PREFIX, message, details);
-  }
-
-  function logPopupError(message, error) {
-    appendPopupDebugEntry('ERROR', message, error);
-
-    if (error === undefined) {
-      console.error(POPUP_LOG_PREFIX, message);
-      return;
-    }
-
-    console.error(POPUP_LOG_PREFIX, message, error);
-  }
-
-  function formatPopupError(error) {
-    if (error instanceof Error) {
-      return error.stack || error.message;
-    }
-
-    if (typeof error === 'string') {
-      return error;
-    }
-
-    try {
-      return JSON.stringify(error, null, 2);
-    } catch {
-      return String(error);
-    }
-  }
-
-  function renderFatalPopupError(error, documentRef = globalThis.document) {
-    const message = formatPopupError(error);
-    const debugLog = loadStoredPopupDebugEntries().join('\n\n');
-
-    logPopupError('Fatal popup error.', error);
-
-    if (!documentRef?.body) {
-      return message;
-    }
-
-    documentRef.body.textContent = `Easy TweetBlock popup failed to load.\n\n${message}${debugLog ? `\n\nDebug log:\n\n${debugLog}` : ''}`;
-    return message;
-  }
-
-  function registerPopupErrorHandlers(globalRef = globalThis, documentRef = globalRef?.document || globalThis.document) {
-    if (!globalRef?.addEventListener || globalRef.__easyTweetBlockPopupErrorHandlersAttached__) {
-      return;
-    }
-
-    globalRef.addEventListener('error', (event) => {
-      event?.preventDefault?.();
-      renderFatalPopupError(event?.error || event?.message || 'Unknown popup error', documentRef);
-    });
-    globalRef.addEventListener('unhandledrejection', (event) => {
-      event?.preventDefault?.();
-      renderFatalPopupError(event?.reason || 'Unhandled popup promise rejection', documentRef);
-    });
-
-    globalRef.__easyTweetBlockPopupErrorHandlersAttached__ = true;
-  }
-
   const contentScriptFilesApi = globalThis.EasyTweetBlockContentScriptFiles
     || (typeof module !== 'undefined' && module.exports ? require('../shared/content-script-files.js') : null);
+  const followerCandidatesApi = globalThis.EasyTweetBlockFollowerCandidates
+    || (typeof module !== 'undefined' && module.exports ? require('../shared/follower-candidates.js') : null);
+  const followerScanControllerApi = globalThis.EasyTweetBlockFollowerScanController
+    || (typeof module !== 'undefined' && module.exports ? require('../shared/follower-scan-controller.js') : null);
   const followersApi = globalThis.EasyTweetBlockFollowers
     || (typeof module !== 'undefined' && module.exports ? require('../shared/followers.js') : null);
   const followerScanSessionsApi = globalThis.EasyTweetBlockFollowerScanSessions
     || (typeof module !== 'undefined' && module.exports ? require('../shared/follower-scan-session.js') : null);
+  const popupDebugApi = globalThis.EasyTweetBlockPopupDebug
+    || (typeof module !== 'undefined' && module.exports ? require('./debug-log.js') : null);
   const settingsApi = globalThis.EasyTweetBlockSettings
     || (typeof module !== 'undefined' && module.exports ? require('../shared/settings.js') : null);
   const usernameListsApi = globalThis.EasyTweetBlockUsernameLists
     || (typeof module !== 'undefined' && module.exports ? require('../shared/username-lists.js') : null);
+  const xPlatformApi = globalThis.EasyTweetBlockXPlatform
+    || (typeof module !== 'undefined' && module.exports ? require('../shared/x-platform.js') : null);
+
+  if (!popupDebugApi) {
+    throw new Error('Missing Easy TweetBlock popup debug API.');
+  }
+
+  const {
+    appendPopupDebugEntry,
+    clearStoredPopupDebugEntries,
+    formatPopupError,
+    loadStoredPopupDebugEntries,
+    logPopupError,
+    logPopupInfo,
+    logPopupWarn,
+    registerPopupErrorHandlers,
+    renderFatalPopupError,
+    renderPopupDebugLog,
+    safeSerializePopupDetails,
+    saveStoredPopupDebugEntries
+  } = popupDebugApi;
 
   if (!contentScriptFilesApi) {
     renderFatalPopupError(new Error('Missing Easy TweetBlock content script file config.'));
+    return;
+  }
+
+  if (!followerCandidatesApi) {
+    renderFatalPopupError(new Error('Missing Easy TweetBlock follower candidate API.'));
+    return;
+  }
+
+  if (!followerScanControllerApi) {
+    renderFatalPopupError(new Error('Missing Easy TweetBlock follower scan controller API.'));
     return;
   }
 
@@ -254,7 +105,13 @@
     return;
   }
 
+  if (!xPlatformApi) {
+    renderFatalPopupError(new Error('Missing Easy TweetBlock x-platform API.'));
+    return;
+  }
+
   const sleep = followersApi.sleep;
+  const { DEFAULT_X_ORIGIN } = xPlatformApi;
 
   const IMMEDIATE_BLOCK_MESSAGE_TYPE = 'easy-tweetblock:block-usernames-via-api';
   const FOLLOWERS_BLOCK_MESSAGE_TYPE = 'easy-tweetblock:block-follower-candidates-via-api';
@@ -326,7 +183,7 @@
 
   function isSupportedTabUrl(url) {
     return typeof url === 'string'
-      && (url.startsWith('https://x.com/') || url.startsWith('https://twitter.com/'));
+      && (url.startsWith(`${DEFAULT_X_ORIGIN}/`) || url.startsWith('https://twitter.com/'));
   }
 
   function readScreenNameFromTabUrl(url) {
@@ -701,26 +558,6 @@
     }
   }
 
-  async function requestMessageWithContentScript(tabId, message, extensionApi = getExtensionApi()) {
-    try {
-      logPopupInfo(`Sending message to tab ${tabId}.`, message);
-      return await sendTabMessage(tabId, message, extensionApi);
-    } catch (error) {
-      if (!isMissingReceiverError(error)) {
-        logPopupError(`Message delivery failed for tab ${tabId}.`, {
-          error,
-          message
-        });
-        throw error;
-      }
-
-      logPopupInfo(`Content script missing in tab ${tabId}; injecting before retry.`, message);
-      await ensureContentScriptsInTab(tabId, extensionApi);
-      logPopupInfo(`Retrying message after content script injection for tab ${tabId}.`, message);
-      return sendTabMessage(tabId, message, extensionApi);
-    }
-  }
-
   async function invokeFollowersPreviewInTab(tabId, blockLimit, scanLimit, source, extensionApi = getExtensionApi(), runId = null, resumeState = null) {
     const port = connectFollowerRunPort(tabId, runId, extensionApi);
 
@@ -948,7 +785,7 @@
       return activeTab;
     }
 
-    const xTabs = await queryTabs({ url: ['https://x.com/*', 'https://twitter.com/*'] }, extensionApi);
+    const xTabs = await queryTabs({ url: [`${DEFAULT_X_ORIGIN}/*`, 'https://twitter.com/*'] }, extensionApi);
     return xTabs.find((tab) => tab?.id != null && isSupportedTabUrl(tab?.url)) || null;
   }
 
@@ -1164,80 +1001,6 @@
 
     void emitPopupOpenDebug(extensionApi);
 
-    function stripFollowerSessionCandidates(candidates) {
-      return Array.isArray(candidates)
-        ? candidates.map((candidate) => ({
-          restId: candidate?.restId || null,
-          username: candidate?.username || null
-        }))
-        : [];
-    }
-
-    function countRetryableFailedCandidates(candidates) {
-      return Array.isArray(candidates)
-        ? candidates.filter((candidate) => Math.max(0, Math.round(Number(candidate?.attempts) || 0)) > 0).length
-        : 0;
-    }
-
-    function getFollowerScanReadyKeys(candidates) {
-      const readyKeys = [];
-      const seenKeys = new Set();
-
-      for (const candidate of Array.isArray(candidates) ? candidates : []) {
-        const identityKeys = followerScanSessions.getFollowerScanCandidateIdentityKeys(candidate);
-
-        for (const identityKey of identityKeys) {
-          if (seenKeys.has(identityKey)) {
-            continue;
-          }
-
-          seenKeys.add(identityKey);
-          readyKeys.push(identityKey);
-        }
-      }
-
-      return readyKeys;
-    }
-
-    function computeFollowerScanSessionStatus(session) {
-      if (!session) {
-        return 'idle';
-      }
-
-      if (Array.isArray(session.readyCandidates) && session.readyCandidates.length) {
-        return 'ready';
-      }
-
-      if (!session.pendingUsers?.length && session.hasMorePages === false) {
-        return 'completed';
-      }
-
-      return 'idle';
-    }
-
-    function normalizeFollowerScanSessionForPopup(session) {
-      if (!session) {
-        return null;
-      }
-
-      if (session.status !== 'scanning' && session.status !== 'blocking') {
-        return session;
-      }
-
-      return {
-        ...session,
-        status: computeFollowerScanSessionStatus(session)
-      };
-    }
-
-    function followerScanSessionHasRemainingWork(session) {
-      return Boolean(session?.pendingUsers?.length) || session?.hasMorePages === true;
-    }
-
-    function followerScanSessionHasReadyCandidates(session) {
-      return Array.isArray(session?.readyCandidates) && session.readyCandidates.length > 0;
-    }
-
     function isPopupBusy() {
       return isSaving || isBlocking || isFollowersScanning || isFollowersBlocking || isFollowersSessionResetting;
     }
@@ -1248,32 +1011,8 @@
         : null;
     }
 
-    function deriveFollowersPreviewFromSession(session) {
-      if (!session) {
-        return null;
-      }
-
-      const candidates = stripFollowerSessionCandidates(session.readyCandidates);
-
-      return {
-        abandonedFailedCount: Math.max(0, Math.round(Number(session?.totals?.abandonedFailed) || 0)),
-        alreadyBlockedCount: Math.max(0, Math.round(Number(session?.totals?.alreadyBlocked) || 0)),
-        blockedFailedCount: countRetryableFailedCandidates(session.readyCandidates),
-        blockedSuccessCount: Math.max(0, Math.round(Number(session?.totals?.blockedSuccess) || 0)),
-        blockLimit: followers.normalizeFollowersBlockLimit(session.blockLimit),
-        candidates,
-        hasMorePages: Boolean(session.hasMorePages),
-        readyCount: candidates.length,
-        scanLimit: followers.normalizeFollowersScanLimit(session.scanLimit),
-        scannedCount: Math.max(0, Math.round(Number(session?.totals?.scanned) || 0)),
-        source: followers.normalizeFollowersSource(session.source),
-        targetRestId: session.targetRestId == null ? null : String(session.targetRestId),
-        targetScreenName: session.targetScreenName == null ? null : String(session.targetScreenName)
-      };
-    }
-
     function syncFollowerScanSessionState(session) {
-      currentFollowerScanSession = normalizeFollowerScanSessionForPopup(session);
+      currentFollowerScanSession = followerScanControllerApi.normalizeFollowerScanSessionForController(session);
 
       if (currentFollowerScanSessionStore && currentFollowerScanSessionStore.activeSession !== currentFollowerScanSession) {
         currentFollowerScanSessionStore = {
@@ -1282,7 +1021,7 @@
         };
       }
 
-      currentFollowersPreview = deriveFollowersPreviewFromSession(currentFollowerScanSession);
+      currentFollowersPreview = followerScanControllerApi.deriveFollowersPreviewFromSession(currentFollowerScanSession);
       return currentFollowersPreview;
     }
 
@@ -1300,7 +1039,7 @@
         ...currentFollowerScanSessionStore,
         activeSession: currentFollowerScanSession
       };
-      currentFollowersPreview = deriveFollowersPreviewFromSession(currentFollowerScanSession);
+      currentFollowersPreview = followerScanControllerApi.deriveFollowersPreviewFromSession(currentFollowerScanSession);
       return currentFollowerScanSession;
     }
 
@@ -1309,7 +1048,9 @@
         return currentFollowerScanSession;
       }
 
-      return setCurrentFollowerScanSessionStatus(computeFollowerScanSessionStatus(currentFollowerScanSession));
+      return setCurrentFollowerScanSessionStatus(
+        followerScanControllerApi.computeFollowerScanSessionStatus(currentFollowerScanSession)
+      );
     }
 
     async function saveFollowerScanSessionStoreValue(store) {
@@ -1324,126 +1065,31 @@
       );
     }
 
-    function createFollowerScanResumeState(session, { includeContinuation = true } = {}) {
-      if (!session) {
-        return null;
-      }
-
-      return {
-        alreadyBlockedKeys: Array.isArray(session?.dedupe?.alreadyBlockedKeys)
-          ? [...session.dedupe.alreadyBlockedKeys]
-          : [],
-        existingReadyCount: Array.isArray(session.readyCandidates) ? session.readyCandidates.length : 0,
-        existingReadyKeys: getFollowerScanReadyKeys(session.readyCandidates),
-        hasMorePages: includeContinuation ? Boolean(session.hasMorePages) : true,
-        nextCursor: includeContinuation ? session.nextCursor || null : null,
-        pendingUsers: includeContinuation ? [...(session.pendingUsers || [])] : []
-      };
-    }
-
     function buildFollowerScanExpectedKey(targetScreenName, source = currentFollowersSource, blockLimit = currentFollowersBlockLimit, scanLimit = currentFollowersScanLimit) {
-      const normalizedTargetScreenName = readScreenNameFromTabUrl(`https://x.com/${targetScreenName || ''}`) || targetScreenName;
-
-      if (!normalizedTargetScreenName) {
-        return null;
-      }
-
-      return followerScanSessions.createFollowerScanSessionKey({
-        targetScreenName: normalizedTargetScreenName,
+      return followerScanControllerApi.buildFollowerScanExpectedKey(
+        targetScreenName,
         source,
         blockLimit,
         scanLimit
-      });
+      );
     }
 
     function createEmptyFollowerScanSessionForTarget(targetScreenName, source, blockLimit, scanLimit) {
-      const expectedKey = buildFollowerScanExpectedKey(targetScreenName, source, blockLimit, scanLimit);
-
-      if (!expectedKey) {
-        return null;
-      }
-
-      return followerScanSessions.createEmptyFollowerScanSession({
-        blockLimit,
-        key: expectedKey,
-        scanLimit,
+      return followerScanControllerApi.createEmptyFollowerScanSessionForTarget(
+        targetScreenName,
         source,
-        targetScreenName
-      });
-    }
-
-    function updateFollowerScanSessionFromPreview(baseSession, preview, expectedKey, fallbackTargetScreenName) {
-      const now = Date.now();
-      const nextReadyCandidates = followerScanSessions.mergeFollowerScanReadyCandidates(
-        baseSession?.readyCandidates,
-        preview?.candidates
+        blockLimit,
+        scanLimit
       );
-      const nextSession = {
-        ...(baseSession || {}),
-        blockLimit: followers.normalizeFollowersBlockLimit(preview?.blockLimit ?? baseSession?.blockLimit),
-        dedupe: {
-          alreadyBlockedKeys: Array.isArray(preview?.resumeState?.alreadyBlockedKeys)
-            ? preview.resumeState.alreadyBlockedKeys
-            : (baseSession?.dedupe?.alreadyBlockedKeys || [])
-        },
-        hasMorePages: Boolean(preview?.resumeState?.hasMorePages),
-        key: expectedKey,
-        nextCursor: preview?.resumeState?.nextCursor || null,
-        pendingUsers: Array.isArray(preview?.resumeState?.pendingUsers)
-          ? preview.resumeState.pendingUsers
-          : [],
-        readyCandidates: nextReadyCandidates,
-        scanLimit: followers.normalizeFollowersScanLimit(preview?.scanLimit ?? baseSession?.scanLimit),
-        source: followers.normalizeFollowersSource(preview?.source ?? baseSession?.source),
-        startedAt: baseSession?.startedAt || now,
-        status: 'idle',
-        targetRestId: preview?.targetRestId || baseSession?.targetRestId || null,
-        targetScreenName: preview?.targetScreenName || baseSession?.targetScreenName || fallbackTargetScreenName || null,
-        totals: {
-          abandonedFailed: Math.max(0, Math.round(Number(baseSession?.totals?.abandonedFailed) || 0)),
-          alreadyBlocked: Math.max(0, Math.round(Number(baseSession?.totals?.alreadyBlocked) || 0)) + Math.max(0, Math.round(Number(preview?.alreadyBlockedCount) || 0)),
-          blockedFailed: countRetryableFailedCandidates(nextReadyCandidates),
-          blockedSuccess: Math.max(0, Math.round(Number(baseSession?.totals?.blockedSuccess) || 0)),
-          scanned: Math.max(0, Math.round(Number(baseSession?.totals?.scanned) || 0)) + Math.max(0, Math.round(Number(preview?.scannedCount) || 0))
-        },
-        updatedAt: now,
-        version: baseSession?.version || 1
-      };
-
-      nextSession.status = computeFollowerScanSessionStatus(nextSession);
-      return nextSession;
-    }
-
-    function createContinuationResetFollowerScanSession(session) {
-      if (!session) {
-        return null;
-      }
-
-      const now = Date.now();
-      const nextSession = {
-        ...session,
-        hasMorePages: true,
-        nextCursor: null,
-        pendingUsers: [],
-        status: computeFollowerScanSessionStatus({
-          ...session,
-          hasMorePages: true,
-          nextCursor: null,
-          pendingUsers: []
-        }),
-        updatedAt: now
-      };
-
-      return nextSession;
     }
 
     function renderFollowersPreviewFromSession(session, options = {}) {
-      return renderFollowersPreview(deriveFollowersPreviewFromSession(session), options);
+      return renderFollowersPreview(followerScanControllerApi.deriveFollowersPreviewFromSession(session), options);
     }
 
     function renderFollowersScanButton() {
       const session = getFollowerScanSessionForCurrentSource();
-      const hasRemainingWork = followerScanSessionHasRemainingWork(session);
+      const hasRemainingWork = followerScanControllerApi.hasRemainingFollowerScanWork(session);
       const readyCandidateCount = Array.isArray(session?.readyCandidates) ? session.readyCandidates.length : 0;
       const shouldDisableForSession = Boolean(session)
         && (
@@ -1469,7 +1115,7 @@
         throw new Error('Unable to build a follower scan session for the active profile.');
       }
 
-      const nextSession = updateFollowerScanSessionFromPreview(
+      const nextSession = followerScanControllerApi.updateFollowerScanSessionFromPreview(
         baseSession,
         preview,
         expectedSessionKey,
@@ -2244,7 +1890,7 @@
       setFollowersPreviewSummary(normalizedPreview, targetLabel);
       followersPreviewElement.textContent = previewLines.length
         ? previewLines.join('\n')
-        : followerScanSessionHasRemainingWork(currentFollowerScanSession)
+        : followerScanControllerApi.hasRemainingFollowerScanWork(currentFollowerScanSession)
           ? `No block-ready ${getFollowersSourceCopy(normalizedPreview.source).accountsLabel} are queued right now. Continue scanning for the next batch.`
           : `No block-ready ${getFollowersSourceCopy(normalizedPreview.source).accountsLabel} were found within the current scan limit.`;
 
@@ -2575,98 +2221,6 @@
       }
     }
 
-    function doesFollowerBlockResultMatchCandidate(result, candidate) {
-      const resultIdentityKeys = followerScanSessions.getFollowerScanCandidateIdentityKeys(result);
-      const candidateIdentityKeys = followerScanSessions.getFollowerScanCandidateIdentityKeys(candidate);
-
-      if (!resultIdentityKeys.length || !candidateIdentityKeys.length) {
-        return true;
-      }
-
-      return resultIdentityKeys.some((identityKey) => candidateIdentityKeys.includes(identityKey));
-    }
-
-    function updateFollowerScanSessionAfterBlock(session, results) {
-      const normalizedResults = Array.isArray(results) ? results : [];
-      const readyCandidates = Array.isArray(session?.readyCandidates) ? session.readyCandidates : [];
-      const nextReadyCandidates = [];
-      let batchFailedCount = 0;
-      let mismatchedCount = 0;
-      let successCount = 0;
-      let abandonedCount = 0;
-
-      for (let index = 0; index < readyCandidates.length; index += 1) {
-        const candidate = readyCandidates[index];
-        const result = normalizedResults[index];
-
-        // The block API contract is index-aligned with the queued readyCandidates array.
-        // Guard against mismatches anyway so a duplicated or out-of-order response cannot
-        // silently drop the wrong candidate from the retry queue.
-        if (result && !doesFollowerBlockResultMatchCandidate(result, candidate)) {
-          mismatchedCount += 1;
-          batchFailedCount += 1;
-          const nextAttempts = Math.max(0, Math.round(Number(candidate?.attempts) || 0)) + 1;
-
-          if (nextAttempts >= followerScanSessions.MAX_FOLLOWER_SCAN_CANDIDATE_ATTEMPTS) {
-            abandonedCount += 1;
-            continue;
-          }
-
-          nextReadyCandidates.push({
-            ...candidate,
-            attempts: nextAttempts,
-            lastError: 'Block result did not match the queued candidate.'
-          });
-          continue;
-        }
-
-        if (result?.ok) {
-          successCount += 1;
-          continue;
-        }
-
-        batchFailedCount += 1;
-        const nextAttempts = Math.max(0, Math.round(Number(candidate?.attempts) || 0)) + 1;
-
-        if (nextAttempts >= followerScanSessions.MAX_FOLLOWER_SCAN_CANDIDATE_ATTEMPTS) {
-          abandonedCount += 1;
-          continue;
-        }
-
-        nextReadyCandidates.push({
-          ...candidate,
-          attempts: nextAttempts,
-          lastError: typeof result?.error === 'string' && result.error.trim()
-            ? result.error.trim()
-            : 'Block request failed.'
-        });
-      }
-
-      const nextSession = {
-        ...session,
-        readyCandidates: nextReadyCandidates,
-        status: 'idle',
-        totals: {
-          ...session.totals,
-          abandonedFailed: Math.max(0, Math.round(Number(session?.totals?.abandonedFailed) || 0)) + abandonedCount,
-          blockedFailed: countRetryableFailedCandidates(nextReadyCandidates),
-          blockedSuccess: Math.max(0, Math.round(Number(session?.totals?.blockedSuccess) || 0)) + successCount
-        },
-        updatedAt: Date.now()
-      };
-
-      nextSession.status = computeFollowerScanSessionStatus(nextSession);
-
-      return {
-        abandonedCount,
-        batchFailedCount,
-        failedCount: nextReadyCandidates.length,
-        mismatchedCount,
-        session: nextSession,
-        successCount
-      };
-    }
-
     async function scanFollowersPreview() {
       let scanRunId = null;
 
@@ -2785,23 +2339,27 @@
         let fallbackStatusMessage = '';
 
         try {
-          response = await runPreviewRequest(createFollowerScanResumeState(activeFollowerScanSession));
+          response = await runPreviewRequest(
+            followerScanControllerApi.createFollowerScanResumeState(activeFollowerScanSession)
+          );
         } catch (error) {
           if (isFollowerRunCanceledError(error) || !activeFollowerScanSession) {
             throw error;
           }
 
           logPopupWarn('Saved follower scan continuation failed; retrying once from the top.', error);
-          const resetSession = createContinuationResetFollowerScanSession(activeFollowerScanSession);
+          const resetSession = followerScanControllerApi.createContinuationResetFollowerScanSession(activeFollowerScanSession);
 
           await saveFollowerScanSessionStoreValue(
             followerScanSessions.setActiveFollowerScanSession(currentFollowerScanSessionStore, resetSession)
           );
           activeFollowerScanSession = currentFollowerScanSession;
           fallbackStatusMessage = 'Saved scan position was invalid. Started a fresh scan from the top.';
-          response = await runPreviewRequest(createFollowerScanResumeState(activeFollowerScanSession, {
-            includeContinuation: false
-          }));
+          response = await runPreviewRequest(
+            followerScanControllerApi.createFollowerScanResumeState(activeFollowerScanSession, {
+              includeContinuation: false
+            })
+          );
         }
 
         if (response?.canceled) {
@@ -2828,7 +2386,7 @@
         if (!currentFollowerScanSession?.readyCandidates?.length) {
           const fallbackStatusPrefix = fallbackStatusMessage ? `${fallbackStatusMessage} ` : '';
 
-          if (followerScanSessionHasRemainingWork(currentFollowerScanSession)) {
+          if (followerScanControllerApi.hasRemainingFollowerScanWork(currentFollowerScanSession)) {
             setStatus(`${fallbackStatusPrefix}Scan complete. No block-ready ${sourceCopy.accountsLabel} found in this pass. Continue scanning for the next batch.`, { tone: fallbackStatusMessage ? 'warning' : 'info' });
             return;
           }
@@ -2904,7 +2462,7 @@
         }
 
         const sourceCopy = getFollowersSourceCopy(currentFollowersPreview.source || currentFollowersSource);
-        const queuedCandidates = stripFollowerSessionCandidates(currentFollowerScanSession.readyCandidates);
+        const queuedCandidates = followerCandidatesApi.stripFollowerCandidates(currentFollowerScanSession.readyCandidates);
 
         logPopupInfo('Follower block run: resolving active X tab.');
         const targetTab = await findActiveXTab(extensionApi);
@@ -2964,7 +2522,7 @@
 
         renderFollowerBlockResultProgress(results, currentDelayMs, currentFollowersPreview.source || currentFollowersSource);
 
-        const blockUpdate = updateFollowerScanSessionAfterBlock(currentFollowerScanSession, results);
+        const blockUpdate = followerScanControllerApi.updateFollowerScanSessionAfterBlock(currentFollowerScanSession, results);
 
         logPopupInfo('Follower block run finished.', {
           batchFailedCount: blockUpdate.batchFailedCount,
@@ -2993,7 +2551,7 @@
           return;
         }
 
-        if (followerScanSessionHasRemainingWork(currentFollowerScanSession)) {
+        if (followerScanControllerApi.hasRemainingFollowerScanWork(currentFollowerScanSession)) {
           setStatus('Batch blocked. Continue scanning for the next batch.', { tone: 'success' });
           return;
         }
@@ -3549,7 +3107,6 @@
       requestFollowerBlocks,
       requestFollowersPreview,
       requestImmediateBlock,
-      requestMessageWithContentScript,
       clearStoredPopupDebugEntries,
       clearStoredPopupState,
       appendPopupDebugEntry,

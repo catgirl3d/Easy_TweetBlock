@@ -5,6 +5,10 @@
     || (typeof module !== 'undefined' && module.exports ? require('./usernames.js') : null);
   const identityApi = globalThis.EasyTweetBlockIdentity
     || (typeof module !== 'undefined' && module.exports ? require('./identity.js') : null);
+  const followerCandidatesApi = globalThis.EasyTweetBlockFollowerCandidates
+    || (typeof module !== 'undefined' && module.exports ? require('./follower-candidates.js') : null);
+  const normalizationApi = globalThis.EasyTweetBlockNormalization
+    || (typeof module !== 'undefined' && module.exports ? require('./normalization.js') : null);
   const FALLBACK_FOLLOWERS_SOURCES = Object.freeze({
     followers: 'followers',
     following: 'following'
@@ -17,13 +21,19 @@
   const FALLBACK_MIN_FOLLOWERS_SCAN_LIMIT = 1;
   const FALLBACK_MAX_FOLLOWERS_SCAN_LIMIT = 500;
 
-  if (!storageApi || !usernamesApi || !identityApi) {
-    throw new Error('Missing Easy TweetBlock storage/usernames/identity API.');
+  if (!storageApi || !usernamesApi || !identityApi || !followerCandidatesApi || !normalizationApi) {
+    throw new Error('Missing Easy TweetBlock storage/usernames/identity/follower-candidate API.');
   }
 
   const { callStorageGet, callStorageSet, getExtensionApi } = storageApi;
   const { normalizeUsername } = usernamesApi;
   const { normalizeRestId } = identityApi;
+  const { normalizeNonNegativeInteger, normalizeOptionalString } = normalizationApi;
+  const {
+    normalizeFollowerPendingUsers: normalizeFollowerScanPendingUsers,
+    normalizeFollowerReadyCandidates,
+    normalizeIdentityKeyListAll
+  } = followerCandidatesApi;
 
   const FOLLOWER_SCAN_SESSION_STORAGE_KEY = 'followerScanSession';
   const FOLLOWER_SCAN_SESSION_VERSION = 1;
@@ -98,20 +108,6 @@
       : FALLBACK_DEFAULT_FOLLOWERS_SOURCE;
   }
 
-  function normalizeUsernameForMatching(value) {
-    return normalizeUsername(value);
-  }
-
-  function normalizeNonNegativeInteger(value, fallback = 0) {
-    const normalizedValue = Math.round(Number(value));
-
-    if (!Number.isFinite(normalizedValue) || normalizedValue < 0) {
-      return fallback;
-    }
-
-    return normalizedValue;
-  }
-
   function normalizeTimestamp(value) {
     const normalizedValue = Math.round(Number(value));
 
@@ -122,51 +118,10 @@
     return normalizedValue;
   }
 
-  function normalizeOptionalString(value) {
-    if (value == null) {
-      return null;
-    }
-
-    const normalizedValue = String(value).trim();
-    return normalizedValue || null;
-  }
-
   function normalizeSessionStatus(value) {
     return FOLLOWER_SCAN_SESSION_STATUSES.has(value)
       ? value
       : 'idle';
-  }
-
-  function capQueue(values, maximum) {
-    return values.length > maximum
-      ? values.slice(0, maximum)
-      : values;
-  }
-
-  function normalizeIdentityKeyListAll(keys) {
-    const normalizedKeys = [];
-    const seenKeys = new Set();
-
-    if (!Array.isArray(keys)) {
-      return normalizedKeys;
-    }
-
-    for (const key of keys) {
-      if (typeof key !== 'string') {
-        continue;
-      }
-
-      const normalizedKey = key.trim();
-
-      if (!normalizedKey || seenKeys.has(normalizedKey)) {
-        continue;
-      }
-
-      seenKeys.add(normalizedKey);
-      normalizedKeys.push(normalizedKey);
-    }
-
-    return normalizedKeys;
   }
 
   function normalizeIdentityKeyList(keys, maximum = MAX_FOLLOWER_SCAN_DEDUPE_KEYS) {
@@ -175,154 +130,6 @@
     return normalizedKeys.length > maximum
       ? normalizedKeys.slice(normalizedKeys.length - maximum)
       : normalizedKeys;
-  }
-
-  function normalizeFollowerScanPendingUser(user) {
-    if (!user || typeof user !== 'object') {
-      return null;
-    }
-
-    const restId = normalizeRestId(user.restId || user.userId || user.id);
-    const username = normalizeUsernameForMatching(user.username || user.screenName || '');
-
-    if (!restId && !username) {
-      return null;
-    }
-
-    return {
-      restId,
-      username,
-      blocking: user.blocking === true
-    };
-  }
-
-  function normalizeFollowerScanPendingUsers(users) {
-    if (!Array.isArray(users)) {
-      return [];
-    }
-
-    const normalizedUsers = [];
-
-    for (const user of users) {
-      const normalizedUser = normalizeFollowerScanPendingUser(user);
-
-      if (normalizedUser) {
-        normalizedUsers.push(normalizedUser);
-      }
-    }
-
-    return capQueue(normalizedUsers, MAX_FOLLOWER_SCAN_QUEUE_SIZE);
-  }
-
-  function getFollowerScanCandidateIdentityKeys(candidate) {
-    if (!candidate || typeof candidate !== 'object') {
-      return [];
-    }
-
-    const restId = normalizeRestId(candidate.restId || candidate.userId || candidate.id);
-    const username = normalizeUsernameForMatching(candidate.username || candidate.screenName || '');
-    const identityKeys = [];
-
-    if (restId) {
-      identityKeys.push(`id:${restId}`);
-    }
-
-    if (username) {
-      identityKeys.push(`username:${username}`);
-    }
-
-    return identityKeys;
-  }
-
-  function getFollowerScanCandidatePrimaryKey(candidate) {
-    return getFollowerScanCandidateIdentityKeys(candidate)[0] || null;
-  }
-
-  function normalizeFollowerScanReadyCandidates(candidates) {
-    const normalizedCandidates = [];
-    const seenKeys = new Set();
-    let droppedForAttempts = 0;
-
-    if (!Array.isArray(candidates)) {
-      return {
-        candidates: normalizedCandidates,
-        droppedForAttempts
-      };
-    }
-
-    for (const candidate of candidates) {
-      const normalizedPendingUser = normalizeFollowerScanPendingUser(candidate);
-
-      if (!normalizedPendingUser) {
-        continue;
-      }
-
-      const attempts = normalizeNonNegativeInteger(candidate?.attempts);
-
-      if (attempts >= MAX_FOLLOWER_SCAN_CANDIDATE_ATTEMPTS) {
-        droppedForAttempts += 1;
-        continue;
-      }
-
-      const identityKeys = getFollowerScanCandidateIdentityKeys(normalizedPendingUser);
-
-      if (!identityKeys.length || identityKeys.some((identityKey) => seenKeys.has(identityKey))) {
-        continue;
-      }
-
-      for (const identityKey of identityKeys) {
-        seenKeys.add(identityKey);
-      }
-
-      normalizedCandidates.push({
-        restId: normalizedPendingUser.restId,
-        username: normalizedPendingUser.username,
-        attempts,
-        lastError: normalizeOptionalString(candidate?.lastError)
-      });
-
-      if (normalizedCandidates.length >= MAX_FOLLOWER_SCAN_QUEUE_SIZE) {
-        break;
-      }
-    }
-
-    return {
-      candidates: normalizedCandidates,
-      droppedForAttempts
-    };
-  }
-
-  function mergeFollowerScanReadyCandidates(existingCandidates, newCandidates) {
-    const normalizedExisting = normalizeFollowerScanReadyCandidates(existingCandidates).candidates;
-    const normalizedNew = normalizeFollowerScanReadyCandidates(newCandidates).candidates;
-    const mergedCandidates = normalizedExisting.slice();
-    const seenKeys = new Set();
-
-    for (const candidate of normalizedExisting) {
-      for (const identityKey of getFollowerScanCandidateIdentityKeys(candidate)) {
-        seenKeys.add(identityKey);
-      }
-    }
-
-    for (const candidate of normalizedNew) {
-      const identityKeys = getFollowerScanCandidateIdentityKeys(candidate);
-
-      if (!identityKeys.length || identityKeys.some((identityKey) => seenKeys.has(identityKey))) {
-        continue;
-      }
-
-      for (const identityKey of identityKeys) {
-        seenKeys.add(identityKey);
-      }
-
-      mergedCandidates.push(candidate);
-
-      if (mergedCandidates.length >= MAX_FOLLOWER_SCAN_QUEUE_SIZE) {
-        break;
-      }
-    }
-
-    return mergedCandidates;
   }
 
   function normalizeFollowerScanTotals(totals) {
@@ -346,7 +153,7 @@
     blockLimit,
     scanLimit
   } = {}) {
-    const normalizedTargetScreenName = normalizeUsernameForMatching(targetScreenName);
+    const normalizedTargetScreenName = normalizeUsername(targetScreenName);
     const normalizedTargetRestId = normalizeRestId(targetRestId);
     const targetKey = normalizedTargetScreenName || normalizedTargetRestId || 'unknown';
 
@@ -361,7 +168,7 @@
   function createEmptyFollowerScanSession(input = {}) {
     const now = normalizeTimestamp(input.updatedAt || input.startedAt || Date.now()) || Date.now();
     const targetRestId = normalizeRestId(input.targetRestId);
-    const targetScreenName = normalizeUsernameForMatching(input.targetScreenName);
+    const targetScreenName = normalizeUsername(input.targetScreenName);
 
     return {
       version: FOLLOWER_SCAN_SESSION_VERSION,
@@ -397,14 +204,17 @@
     }
 
     const targetRestId = normalizeRestId(value.targetRestId);
-    const targetScreenName = normalizeUsernameForMatching(value.targetScreenName);
+    const targetScreenName = normalizeUsername(value.targetScreenName);
 
     if (!targetRestId && !targetScreenName) {
       return null;
     }
 
-    const normalizedPendingUsers = normalizeFollowerScanPendingUsers(value.pendingUsers);
-    const normalizedReadyCandidateResult = normalizeFollowerScanReadyCandidates(value.readyCandidates);
+    const normalizedPendingUsers = normalizeFollowerScanPendingUsers(value.pendingUsers, MAX_FOLLOWER_SCAN_QUEUE_SIZE);
+    const normalizedReadyCandidateResult = normalizeFollowerReadyCandidates(value.readyCandidates, {
+      maxAttempts: MAX_FOLLOWER_SCAN_CANDIDATE_ATTEMPTS,
+      maxCandidates: MAX_FOLLOWER_SCAN_QUEUE_SIZE
+    });
     const normalizedTotals = normalizeFollowerScanTotals(value.totals);
     const normalizedNextCursor = normalizeOptionalString(value.nextCursor);
     const normalizedStartedAt = normalizeTimestamp(value.startedAt);
@@ -525,10 +335,6 @@
     MAX_FOLLOWER_SCAN_CANDIDATE_ATTEMPTS,
     createFollowerScanSessionKey,
     createEmptyFollowerScanSession,
-    getFollowerScanCandidateIdentityKeys,
-    getFollowerScanCandidatePrimaryKey,
-    mergeFollowerScanReadyCandidates,
-    normalizeIdentityKeyListAll,
     normalizeIdentityKeyList,
     normalizeFollowerScanSession,
     normalizeFollowerScanSessionStore,

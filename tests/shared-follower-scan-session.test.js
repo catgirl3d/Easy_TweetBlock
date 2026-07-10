@@ -2,6 +2,12 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const {
+  getFollowerCandidateIdentityKeys,
+  getFollowerCandidatePrimaryKey,
+  mergeFollowerReadyCandidates,
+  normalizeIdentityKeyListAll
+} = require('../src/shared/follower-candidates.js');
+const {
   FOLLOWER_SCAN_SESSION_STORAGE_KEY,
   FOLLOWER_SCAN_SESSION_TTL_MS,
   MAX_FOLLOWER_SCAN_CANDIDATE_ATTEMPTS,
@@ -11,11 +17,7 @@ const {
   createEmptyFollowerScanSession,
   createFollowerScanSessionKey,
   getActiveFollowerScanSession,
-  getFollowerScanCandidateIdentityKeys,
-  getFollowerScanCandidatePrimaryKey,
   loadFollowerScanSessionStore,
-  mergeFollowerScanReadyCandidates,
-  normalizeIdentityKeyListAll,
   normalizeFollowerScanSession,
   normalizeFollowerScanSessionStore,
   saveFollowerScanSessionStore,
@@ -226,11 +228,11 @@ test('normalizeFollowerScanSession preserves aggregates and omits lastBatch fiel
 });
 
 test('candidate identity helpers normalize usernames consistently', () => {
-  assert.deepEqual(getFollowerScanCandidateIdentityKeys({
+  assert.deepEqual(getFollowerCandidateIdentityKeys({
     restId: 123,
     username: ' @Alice '
   }), ['id:123', 'username:alice']);
-  assert.equal(getFollowerScanCandidatePrimaryKey({ username: '/Bob' }), 'username:bob');
+  assert.equal(getFollowerCandidatePrimaryKey({ username: '/Bob' }), 'username:bob');
 });
 
 test('normalizeFollowerScanSession drops malformed user entries', () => {
@@ -262,7 +264,7 @@ test('normalizeFollowerScanSession drops malformed user entries', () => {
 });
 
 test('mergeFollowerScanReadyCandidates appends unique candidates after the existing queue', () => {
-  const mergedCandidates = mergeFollowerScanReadyCandidates(
+  const mergedCandidates = mergeFollowerReadyCandidates(
     [
       { restId: '1', username: 'alice', attempts: 1, lastError: 'temporary' },
       { restId: '2', username: 'bob', attempts: 0 }

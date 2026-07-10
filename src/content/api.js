@@ -5,17 +5,24 @@
     require('./shared.js');
     require('./features.js');
     require('../shared/identity.js');
+    require('../shared/x-platform.js');
+    require('../shared/follower-candidates.js');
     require('../shared/follower-scan-session.js');
+    require('../shared/follower-scan-controller.js');
   }
 
   const followersApi = globalThis.EasyTweetBlockFollowers
     || (typeof module !== 'undefined' && module.exports ? require('../shared/followers.js') : null);
-  const followerScanSessionsApi = globalThis.EasyTweetBlockFollowerScanSessions
-    || (typeof module !== 'undefined' && module.exports ? require('../shared/follower-scan-session.js') : null);
+  const followerCandidatesApi = globalThis.EasyTweetBlockFollowerCandidates
+    || (typeof module !== 'undefined' && module.exports ? require('../shared/follower-candidates.js') : null);
+  const followerScanControllerApi = globalThis.EasyTweetBlockFollowerScanController
+    || (typeof module !== 'undefined' && module.exports ? require('../shared/follower-scan-controller.js') : null);
   const identityApi = globalThis.EasyTweetBlockIdentity
     || (typeof module !== 'undefined' && module.exports ? require('../shared/identity.js') : null);
   const contentFeaturesApi = globalThis.EasyTweetBlockContentFeatures
     || (typeof module !== 'undefined' && module.exports ? require('./features.js') : null);
+  const xPlatformApi = globalThis.EasyTweetBlockXPlatform
+    || (typeof module !== 'undefined' && module.exports ? require('../shared/x-platform.js') : null);
 
   if (!followersApi) {
     throw new Error('Missing Easy TweetBlock followers shared API.');
@@ -25,12 +32,20 @@
     throw new Error('Missing Easy TweetBlock content features API.');
   }
 
-  if (!followerScanSessionsApi) {
-    throw new Error('Missing Easy TweetBlock follower scan session API.');
+  if (!followerCandidatesApi) {
+    throw new Error('Missing Easy TweetBlock follower candidate API.');
+  }
+
+  if (!followerScanControllerApi) {
+    throw new Error('Missing Easy TweetBlock follower scan controller API.');
   }
 
   if (!identityApi) {
     throw new Error('Missing Easy TweetBlock identity API.');
+  }
+
+  if (!xPlatformApi) {
+    throw new Error('Missing Easy TweetBlock x-platform API.');
   }
 
   const namespace = globalThis.EasyTweetBlockContent || (globalThis.EasyTweetBlockContent = {});
@@ -51,10 +66,17 @@
     USER_BY_SCREEN_NAME_FEATURES
   } = contentFeaturesApi;
   const {
-    getFollowerScanCandidateIdentityKeys,
-    normalizeIdentityKeyListAll
-  } = followerScanSessionsApi;
+    createFollowerBlockCandidates,
+    getFollowerCandidateIdentityKeys,
+    normalizeFollowerBlockCandidate,
+    normalizeFollowerPendingUsers
+  } = followerCandidatesApi;
+  const {
+    createFollowerScanResumeStateOutput,
+    normalizeFollowerScanResumeState
+  } = followerScanControllerApi;
   const { normalizeRestId } = identityApi;
+  const { DEFAULT_X_ORIGIN } = xPlatformApi;
 
   const X_WEB_BEARER_TOKEN = 'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
   const USER_BY_SCREEN_NAME_QUERY_IDS = Object.freeze([
@@ -210,7 +232,7 @@
     }
   }
 
-  function collectGraphqlDiscoveryScriptUrls(documentRef = document, baseOrigin = 'https://x.com') {
+  function collectGraphqlDiscoveryScriptUrls(documentRef = document, baseOrigin = DEFAULT_X_ORIGIN) {
     const scriptUrls = new Set();
     const baseUrl = documentRef?.baseURI || documentRef?.location?.href || baseOrigin;
     const scriptElements = typeof documentRef?.querySelectorAll === 'function'
@@ -312,7 +334,7 @@
     const {
       documentRef = document,
       fetchImpl = globalThis.fetch,
-      baseOrigin = documentRef?.location?.origin || 'https://x.com',
+      baseOrigin = documentRef?.location?.origin || DEFAULT_X_ORIGIN,
       signal = null
     } = options;
     const cache = getGraphqlQueryIdCache();
@@ -407,7 +429,7 @@
       documentRef = document,
       extraHeaders = {},
       fetchImpl = globalThis.fetch,
-      baseOrigin = documentRef?.location?.origin || 'https://x.com',
+      baseOrigin = documentRef?.location?.origin || DEFAULT_X_ORIGIN,
       signal = null
     } = options;
     const requestHeaders = buildXApiHeaders(documentRef, extraHeaders);
@@ -435,7 +457,7 @@
     return requestHeaders;
   }
 
-  function buildUserLookupUrls(screenName, baseOrigin = 'https://x.com', queryIds = USER_BY_SCREEN_NAME_QUERY_IDS) {
+  function buildUserLookupUrls(screenName, baseOrigin = DEFAULT_X_ORIGIN, queryIds = USER_BY_SCREEN_NAME_QUERY_IDS) {
     if (!screenName) {
       return [];
     }
@@ -513,7 +535,7 @@
     }
 
     const relationshipPerspectives = userResult.relationship_perspectives || {};
-    const username = namespace.normalizeUsernameForMatching(
+    const username = namespace.normalizeUsername(
       userResult?.core?.screen_name || userResult?.legacy?.screen_name || ''
     );
     const restId = normalizeRestId(userResult?.rest_id);
@@ -610,7 +632,7 @@
     }
 
     const {
-      baseOrigin = 'https://x.com',
+      baseOrigin = DEFAULT_X_ORIGIN,
       count = FOLLOWERS_PAGE_SIZE,
       cursor = '',
       source = DEFAULT_FOLLOWERS_SOURCE
@@ -652,7 +674,7 @@
       cursor = '',
       documentRef = document,
       fetchImpl = globalThis.fetch,
-      baseOrigin = documentRef?.location?.origin || 'https://x.com',
+      baseOrigin = documentRef?.location?.origin || DEFAULT_X_ORIGIN,
       signal = null,
       source = DEFAULT_FOLLOWERS_SOURCE
     } = options;
@@ -780,129 +802,11 @@
     throw lastError || new Error(`Unable to fetch ${sourceConfig.operationName} for user ${normalizedUserId}`);
   }
 
-  function normalizeFollowerBlockCandidate(candidate) {
-    if (!candidate || typeof candidate !== 'object') {
-      return null;
-    }
-
-    const restId = normalizeRestId(candidate.restId || candidate.userId || candidate.id);
-    const username = namespace.normalizeUsernameForMatching(candidate.username || candidate.screenName || '');
-
-    if (!restId && !username) {
-      return null;
-    }
-
-    return {
-      restId,
-      username
-    };
-  }
-
-  function normalizeResumePendingUser(user) {
-    const normalizedCandidate = normalizeFollowerBlockCandidate(user);
-
-    if (!normalizedCandidate) {
-      return null;
-    }
-
-    return {
-      ...normalizedCandidate,
-      blocking: user?.blocking === true
-    };
-  }
-
-  function normalizeResumePendingUsers(users) {
-    if (!Array.isArray(users)) {
-      return [];
-    }
-
-    const normalizedUsers = [];
-
-    for (const user of users) {
-      const normalizedUser = normalizeResumePendingUser(user);
-
-      if (normalizedUser) {
-        normalizedUsers.push(normalizedUser);
-      }
-    }
-
-    return normalizedUsers;
-  }
-
-  function normalizeResumeCount(value) {
-    return Math.max(0, Math.round(Number(value) || 0));
-  }
-
-  function normalizeResumeCursor(value) {
-    return typeof value === 'string' && value.trim()
-      ? value.trim()
-      : null;
-  }
-
-  function normalizeScanResumeState(resumeState) {
-    const normalizedResumeState = resumeState && typeof resumeState === 'object' && !Array.isArray(resumeState)
-      ? resumeState
-      : null;
-
-    return {
-      alreadyBlockedKeys: normalizeIdentityKeyListAll(normalizedResumeState?.alreadyBlockedKeys),
-      existingReadyCount: normalizeResumeCount(normalizedResumeState?.existingReadyCount),
-      existingReadyKeys: normalizeIdentityKeyListAll(normalizedResumeState?.existingReadyKeys),
-      hasExplicitResumeState: Boolean(normalizedResumeState),
-      hasMorePages: typeof normalizedResumeState?.hasMorePages === 'boolean'
-        ? normalizedResumeState.hasMorePages
-        : null,
-      nextCursor: normalizeResumeCursor(normalizedResumeState?.nextCursor),
-      pendingUsers: normalizeResumePendingUsers(normalizedResumeState?.pendingUsers),
-      raw: normalizedResumeState ? { ...normalizedResumeState } : null
-    };
-  }
-
-  function createScanResumeStateOutput({ nextCursor, pendingUsers, alreadyBlockedKeys, hasMorePages }) {
-    return {
-      nextCursor: nextCursor || null,
-      pendingUsers,
-      alreadyBlockedKeys,
-      hasMorePages: Boolean(hasMorePages)
-    };
-  }
-
-  function createFollowerBlockCandidates(candidates) {
-    if (!Array.isArray(candidates)) {
-      return [];
-    }
-
-    const normalizedCandidates = [];
-    const seenKeys = new Set();
-
-    for (const candidate of candidates) {
-      const normalizedCandidate = normalizeFollowerBlockCandidate(candidate);
-
-      if (!normalizedCandidate) {
-        continue;
-      }
-
-      const identityKeys = getFollowerScanCandidateIdentityKeys(normalizedCandidate);
-
-      if (identityKeys.some((identityKey) => seenKeys.has(identityKey))) {
-        continue;
-      }
-
-      for (const identityKey of identityKeys) {
-        seenKeys.add(identityKey);
-      }
-
-      normalizedCandidates.push(normalizedCandidate);
-    }
-
-    return normalizedCandidates;
-  }
-
   async function scanFollowersForBlocking(options = {}, runtimeOptions = {}) {
     const {
       documentRef = document,
       fetchImpl = globalThis.fetch,
-      baseOrigin = documentRef?.location?.origin || 'https://x.com',
+      baseOrigin = documentRef?.location?.origin || DEFAULT_X_ORIGIN,
       signal = null,
       userLookupQueryIds = USER_BY_SCREEN_NAME_QUERY_IDS
     } = runtimeOptions;
@@ -916,7 +820,7 @@
 
     const blockLimit = normalizeFollowersBlockLimit(options.blockLimit);
     const scanLimit = normalizeFollowersScanLimit(options.scanLimit);
-    const normalizedResumeState = normalizeScanResumeState(options.resumeState);
+    const normalizedResumeState = normalizeFollowerScanResumeState(options.resumeState);
     signal?.throwIfAborted?.();
 
     const targetRestId = await lookupUserRestId(targetScreenName, {
@@ -953,7 +857,7 @@
         readyCount: 0,
         resumeState: normalizedResumeState.raw
           ? { ...normalizedResumeState.raw }
-          : createScanResumeStateOutput({
+          : createFollowerScanResumeStateOutput({
             alreadyBlockedKeys: normalizedResumeState.alreadyBlockedKeys,
             hasMorePages,
             nextCursor: cursor,
@@ -984,7 +888,7 @@
 
         if (user.blocking) {
           const normalizedAlreadyBlockedUser = normalizeFollowerBlockCandidate(user);
-          const identityKeys = getFollowerScanCandidateIdentityKeys(normalizedAlreadyBlockedUser);
+          const identityKeys = getFollowerCandidateIdentityKeys(normalizedAlreadyBlockedUser);
 
           if (!identityKeys.some((identityKey) => seenAlreadyBlockedKeys.has(identityKey))) {
             for (const identityKey of identityKeys) {
@@ -1005,7 +909,7 @@
           continue;
         }
 
-        const identityKeys = getFollowerScanCandidateIdentityKeys(normalizedCandidate);
+        const identityKeys = getFollowerCandidateIdentityKeys(normalizedCandidate);
 
         if (!identityKeys.length || identityKeys.some((identityKey) => seenCandidateKeys.has(identityKey))) {
           continue;
@@ -1031,7 +935,7 @@
         const remainingPendingUsers = consumeUsers(pendingUsers);
 
         if (remainingPendingUsers) {
-          pendingUsers = normalizeResumePendingUsers(remainingPendingUsers);
+          pendingUsers = normalizeFollowerPendingUsers(remainingPendingUsers);
           hasMorePages = pendingUsers.length > 0 || Boolean(cursor) || normalizedResumeState.hasMorePages === true;
           break;
         }
@@ -1085,7 +989,7 @@
       const remainingPageUsers = consumeUsers(users);
 
       if (remainingPageUsers) {
-        pendingUsers = normalizeResumePendingUsers(remainingPageUsers);
+        pendingUsers = normalizeFollowerPendingUsers(remainingPageUsers);
         cursor = page.nextCursor || null;
         hasMorePages = Boolean(page.hasNext && page.nextCursor);
         break;
@@ -1132,7 +1036,7 @@
       candidates,
       hasMorePages,
       readyCount: candidates.length,
-      resumeState: createScanResumeStateOutput({
+      resumeState: createFollowerScanResumeStateOutput({
         alreadyBlockedKeys: Array.from(seenAlreadyBlockedKeys),
         hasMorePages,
         nextCursor: cursor,
@@ -1159,7 +1063,7 @@
     const {
       documentRef = document,
       fetchImpl = globalThis.fetch,
-      baseOrigin = documentRef?.location?.origin || 'https://x.com',
+      baseOrigin = documentRef?.location?.origin || DEFAULT_X_ORIGIN,
       queryIds = USER_BY_SCREEN_NAME_QUERY_IDS,
       cache = namespace.getUserRestIdCache(),
       signal = null
@@ -1238,7 +1142,7 @@
     const {
       documentRef = document,
       fetchImpl = globalThis.fetch,
-      baseOrigin = documentRef?.location?.origin || 'https://x.com',
+      baseOrigin = documentRef?.location?.origin || DEFAULT_X_ORIGIN,
       signal = null,
       screenName = null
     } = options;
@@ -1288,7 +1192,7 @@
     return {
       payload,
       restId: normalizedRestId,
-      screenName: namespace.normalizeUsernameForMatching(screenName)
+      screenName: namespace.normalizeUsername(screenName)
     };
   }
 
@@ -1301,7 +1205,7 @@
   }
 
   async function postBlockMutationByScreenName(screenName, mutationConfig, options = {}) {
-    const normalizedUsername = namespace.normalizeUsernameForMatching(screenName);
+    const normalizedUsername = namespace.normalizeUsername(screenName);
 
     if (!normalizedUsername) {
       throw new Error(mutationConfig.invalidUsernameErrorMessage);
@@ -1310,7 +1214,7 @@
     const {
       documentRef = document,
       fetchImpl = globalThis.fetch,
-      baseOrigin = documentRef?.location?.origin || 'https://x.com',
+      baseOrigin = documentRef?.location?.origin || DEFAULT_X_ORIGIN,
       queryIds = USER_BY_SCREEN_NAME_QUERY_IDS,
       cache = namespace.getUserRestIdCache(),
       signal = null

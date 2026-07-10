@@ -2,6 +2,10 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const sharedBlocklist = require('../src/shared/blocklist.js');
+const {
+  createFollowerBlockCandidates,
+  normalizeFollowerBlockCandidate
+} = require('../src/shared/follower-candidates.js');
 const sharedSettings = require('../src/shared/settings.js');
 const contentFeatures = require('../src/content/features.js');
 
@@ -42,7 +46,6 @@ const {
   cancelFollowerRun,
   collectTweets,
   collectUserCells,
-  createFollowerBlockCandidates,
   createApiBlockButton,
   createNativeBlockButton,
   createProfileBlockButton,
@@ -65,10 +68,9 @@ const {
   init,
   lookupUserRestId,
   normalizeBatchBlockDelayMs,
-  normalizeFollowerBlockCandidate,
   normalizePageBlockButtonStyle,
   normalizePageBlockButtonStyles,
-  normalizeUsernameForMatching,
+  normalizeUsername,
   observeStoredPageButtonStyle,
   observeStoredUserCellAddButtonStyle,
   observeStoredUserCellAddButtonVisibility,
@@ -3270,11 +3272,11 @@ test('stored setting observers ignore unrelated changes and unsubscribe listener
   assert.equal(listeners.size, 0);
 });
 
-test('normalizeUsernameForMatching lowercases usernames for blocklist checks', () => {
-  assert.equal(normalizeUsernameForMatching('@Felixmfdo'), 'felixmfdo');
-  assert.equal(normalizeUsernameForMatching('/Felixmfdo'), 'felixmfdo');
-  assert.equal(normalizeUsernameForMatching('bad-name'), null);
-  assert.equal(normalizeUsernameForMatching(''), null);
+test('normalizeUsername lowercases usernames for blocklist checks', () => {
+  assert.equal(normalizeUsername('@Felixmfdo'), 'felixmfdo');
+  assert.equal(normalizeUsername('/Felixmfdo'), 'felixmfdo');
+  assert.equal(normalizeUsername('bad-name'), null);
+  assert.equal(normalizeUsername(''), null);
 });
 
 test('createUsernameSet deduplicates and normalizes usernames', () => {

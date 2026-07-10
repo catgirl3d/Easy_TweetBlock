@@ -6,13 +6,16 @@
     || (typeof module !== 'undefined' && module.exports ? require('../shared/settings.js') : null);
   const usernamesApi = globalThis.EasyTweetBlockUsernames
     || (typeof module !== 'undefined' && module.exports ? require('../shared/usernames.js') : null);
+  const xPlatformApi = globalThis.EasyTweetBlockXPlatform
+    || (typeof module !== 'undefined' && module.exports ? require('../shared/x-platform.js') : null);
 
-  if (!storageApi || !settingsApi || !usernamesApi) {
-    throw new Error('Missing Easy TweetBlock shared settings/storage/usernames API.');
+  if (!storageApi || !settingsApi || !usernamesApi || !xPlatformApi) {
+    throw new Error('Missing Easy TweetBlock shared settings/storage/usernames/x-platform API.');
   }
 
   const { getExtensionApi: getStorageExtensionApi } = storageApi;
   const { createUsernameSet: createSharedUsernameSet, normalizeUsername, USERNAME_PATTERN } = usernamesApi;
+  const { DEFAULT_X_ORIGIN } = xPlatformApi;
   const {
     DEFAULT_BATCH_BLOCK_DELAY_MS,
     DEFAULT_PAGE_BLOCK_BUTTON_STYLE,
@@ -125,7 +128,7 @@
     return typeof value === 'string' && FALLBACK_RESERVED_PATH_SEGMENTS.has(value.trim().toLowerCase());
   }
 
-  function extractScreenNameFromHref(href, baseUrl = 'https://x.com') {
+  function extractScreenNameFromHref(href, baseUrl = DEFAULT_X_ORIGIN) {
     if (typeof href !== 'string' || !href.trim()) {
       return null;
     }
@@ -201,10 +204,6 @@
     }
 
     return USERNAME_PATTERN.test(firstPathSegment) ? firstPathSegment : null;
-  }
-
-  function normalizeUsernameForMatching(value) {
-    return normalizeUsername(value);
   }
 
   function createUsernameSet(usernames) {
@@ -582,7 +581,7 @@
     normalizePageBlockButtonStyles,
     normalizePageButtonStyleSurface,
     normalizeUserCellAddButtonVisibility,
-    normalizeUsernameForMatching,
+    normalizeUsername,
     readCookieValue,
     readScreenNameFromProfilePage,
     readScreenNameFromTweet,
