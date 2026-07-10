@@ -2780,6 +2780,62 @@ test('blockUsernamesViaApi blocks usernames sequentially and returns per-user re
   assert.deepEqual(sleepCalls, [1200]);
 });
 
+test('blockUsernamesViaApi aborts the batch when canceled during the inter-user delay', async () => {
+  const controller = new AbortController();
+  const abortError = new Error('Immediate block canceled.');
+  abortError.name = 'AbortError';
+  const requestedUrls = [];
+  const sleepCalls = [];
+
+  async function fetchImpl(url, options = {}) {
+    requestedUrls.push({ options, url });
+
+    if (options.method === 'POST') {
+      return {
+        ok: true,
+        async json() {
+          return { ok: true };
+        }
+      };
+    }
+
+    return {
+      ok: true,
+      async json() {
+        return {
+          data: {
+            user: {
+              result: {
+                rest_id: '111'
+              }
+            }
+          }
+        };
+      }
+    };
+  }
+
+  await assert.rejects(async () => blockUsernamesViaApi(['FirstUser', 'SecondUser'], {
+    delayMs: 1000,
+    documentRef: {
+      cookie: 'ct0=token123',
+      documentElement: { lang: 'en-US' },
+      location: { origin: 'https://x.com' }
+    },
+    fetchImpl,
+    queryIds: ['workingQueryId'],
+    signal: controller.signal,
+    sleepImpl: async (delayMs) => {
+      sleepCalls.push(delayMs);
+      controller.abort(abortError);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }), (error) => error?.name === 'AbortError' && error.message === 'Immediate block canceled.');
+
+  assert.equal(requestedUrls.filter((entry) => entry.options.method === 'POST').length, 1);
+  assert.deepEqual(sleepCalls, [1000]);
+});
+
 test('blockFollowerCandidatesViaApi deduplicates candidates and uses rest_id when available', async () => {
   const progressEvents = [];
   const sleepCalls = [];

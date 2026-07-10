@@ -7,6 +7,7 @@
     'src/shared/settings.js',
     'src/shared/followers.js',
     'src/shared/usernames.js',
+    'src/shared/identity.js',
     'src/shared/username-lists.js',
     'src/content/shared.js',
     'src/shared/blocklist.js',

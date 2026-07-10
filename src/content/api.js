@@ -4,6 +4,7 @@
   if (typeof module !== 'undefined' && module.exports) {
     require('./shared.js');
     require('./features.js');
+    require('../shared/identity.js');
     require('../shared/follower-scan-session.js');
   }
 
@@ -11,6 +12,8 @@
     || (typeof module !== 'undefined' && module.exports ? require('../shared/followers.js') : null);
   const followerScanSessionsApi = globalThis.EasyTweetBlockFollowerScanSessions
     || (typeof module !== 'undefined' && module.exports ? require('../shared/follower-scan-session.js') : null);
+  const identityApi = globalThis.EasyTweetBlockIdentity
+    || (typeof module !== 'undefined' && module.exports ? require('../shared/identity.js') : null);
   const contentFeaturesApi = globalThis.EasyTweetBlockContentFeatures
     || (typeof module !== 'undefined' && module.exports ? require('./features.js') : null);
 
@@ -24,6 +27,10 @@
 
   if (!followerScanSessionsApi) {
     throw new Error('Missing Easy TweetBlock follower scan session API.');
+  }
+
+  if (!identityApi) {
+    throw new Error('Missing Easy TweetBlock identity API.');
   }
 
   const namespace = globalThis.EasyTweetBlockContent || (globalThis.EasyTweetBlockContent = {});
@@ -47,9 +54,9 @@
     getFollowerScanCandidateIdentityKeys,
     normalizeIdentityKeyListAll
   } = followerScanSessionsApi;
+  const { normalizeRestId } = identityApi;
 
   const X_WEB_BEARER_TOKEN = 'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
-  const USER_ID_PATTERN = /^\d+$/;
   const USER_BY_SCREEN_NAME_QUERY_IDS = Object.freeze([
     'IGgvgiOx4QZndDHuD3x9TQ',
     'NimuplG1OB7Fd2btCLdBOw',
@@ -132,15 +139,6 @@
         handleAbort();
       }
     });
-  }
-
-  function normalizeRestId(value) {
-    if (typeof value !== 'string' && typeof value !== 'number') {
-      return null;
-    }
-
-    const normalizedValue = String(value).trim();
-    return USER_ID_PATTERN.test(normalizedValue) ? normalizedValue : null;
   }
 
   function normalizeGraphqlQueryId(value) {
@@ -1467,9 +1465,14 @@
     const normalizedUsernames = Array.from(namespace.createUsernameSet(usernames));
     const normalizedDelayMs = namespace.normalizeBatchBlockDelayMs(options.delayMs);
     const sleepImpl = options.sleepImpl || namespace.sleep;
+    const signal = options.signal || null;
     const results = [];
 
+    signal?.throwIfAborted?.();
+
     for (const [index, username] of normalizedUsernames.entries()) {
+      signal?.throwIfAborted?.();
+
       try {
         const result = await blockUserByScreenNameViaApi(username, options);
 
@@ -1479,6 +1482,10 @@
           username
         });
       } catch (error) {
+        if (namespace.isAbortError(error) || signal?.aborted) {
+          throw signal?.reason || error;
+        }
+
         results.push({
           error: error instanceof Error ? error.message : String(error),
           ok: false,
@@ -1487,7 +1494,7 @@
       }
 
       if (index < normalizedUsernames.length - 1) {
-        await sleepImpl(normalizedDelayMs);
+        await waitForDelay(normalizedDelayMs, sleepImpl, signal);
       }
     }
 

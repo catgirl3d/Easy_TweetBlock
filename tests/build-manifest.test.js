@@ -67,6 +67,10 @@ test("content script files load storage, shared domain modules, and content depe
     true
   );
   assert.equal(
+    CONTENT_SCRIPT_FILES.indexOf("src/shared/identity.js") < CONTENT_SCRIPT_FILES.indexOf("src/shared/follower-scan-session.js"),
+    true
+  );
+  assert.equal(
     CONTENT_SCRIPT_FILES.indexOf("src/shared/username-lists.js") < CONTENT_SCRIPT_FILES.indexOf("src/shared/blocklist.js"),
     true
   );
