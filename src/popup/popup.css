@@ -60,8 +60,10 @@ h1 {
   margin-bottom: 6px;
 }
 
-.logo-shield {
-  color: var(--accent-cyan);
+.logo-icon {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
   filter: drop-shadow(0 0 6px rgba(0, 240, 255, 0.4));
   flex-shrink: 0;
 }

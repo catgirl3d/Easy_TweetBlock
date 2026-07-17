@@ -1,4 +1,6 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
 
 const sharedBlocklist = require('../src/shared/blocklist.js');
@@ -42,6 +44,13 @@ const {
   setPopupView,
   saveStoredPopupState
 } = require('../src/popup/popup.js');
+
+test('popup header uses the packaged extension icon', () => {
+  const popupHtml = fs.readFileSync(path.join(__dirname, '..', 'src', 'popup', 'popup.html'), 'utf8');
+
+  assert.match(popupHtml, /<img class="logo-icon" src="\.\.\/\.\.\/assets\/extension\/48\.png" alt="" width="20" height="20">/);
+  assert.doesNotMatch(popupHtml, /class="logo-shield"/);
+});
 
 function flushAsyncWork() {
   return new Promise((resolve) => setImmediate(resolve));
