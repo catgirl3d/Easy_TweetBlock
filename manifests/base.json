@@ -3,6 +3,12 @@
   "name": "Easy TweetBlock",
   "version": "0.1.0",
   "description": "Block unwanted users on X and Twitter with one click.",
+  "icons": {
+    "16": "assets/extension/16.png",
+    "32": "assets/extension/32.png",
+    "48": "assets/extension/48.png",
+    "128": "assets/extension/128.png"
+  },
   "permissions": [
     "activeTab",
     "scripting",
@@ -15,6 +21,11 @@
   ],
   "action": {
     "default_title": "Easy TweetBlock",
+    "default_icon": {
+      "16": "assets/extension/16.png",
+      "32": "assets/extension/32.png",
+      "48": "assets/extension/48.png"
+    },
     "default_popup": "src/popup/popup.html"
   },
   "content_scripts": [

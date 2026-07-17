@@ -28,6 +28,17 @@ test("buildManifest merges the Chrome overlay into the base manifest", () => {
     "https://x.com/*",
     "https://twitter.com/*"
   ]);
+  assert.deepEqual(manifest.icons, {
+    16: "assets/extension/16.png",
+    32: "assets/extension/32.png",
+    48: "assets/extension/48.png",
+    128: "assets/extension/128.png"
+  });
+  assert.deepEqual(manifest.action.default_icon, {
+    16: "assets/extension/16.png",
+    32: "assets/extension/32.png",
+    48: "assets/extension/48.png"
+  });
   assert.equal(manifest.action.default_popup, "src/popup/popup.html");
   assert.deepEqual(manifest.content_scripts[0].css, CONTENT_SCRIPT_CSS_FILES);
   assert.deepEqual(manifest.content_scripts[0].js, CONTENT_SCRIPT_FILES);

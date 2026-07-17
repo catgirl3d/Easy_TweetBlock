@@ -5,7 +5,15 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 
-const { assertRequiredPath, assertTarget, copyIfExists, prepareStageDir, stageExtension } = require("../scripts/stage-extension.js");
+const {
+  EXTENSION_ICON_FILES,
+  assertExtensionAssets,
+  assertRequiredPath,
+  assertTarget,
+  copyIfExists,
+  prepareStageDir,
+  stageExtension
+} = require("../scripts/stage-extension.js");
 
 test("stageExtension prepares a Chrome stage with sources and a manifest", () => {
   const distDir = fs.mkdtempSync(path.join(os.tmpdir(), "easy-tweetblock-stage-chrome-"));
@@ -23,6 +31,9 @@ test("stageExtension prepares a Chrome stage with sources and a manifest", () =>
     assert.equal(fs.existsSync(path.join(stageDir, "src", "shared", "content-script-files.js")), true);
     assert.equal(fs.existsSync(path.join(stageDir, "src", "shared", "settings.js")), true);
     assert.equal(fs.existsSync(path.join(stageDir, "src", "shared", "storage.js")), true);
+    for (const iconFile of EXTENSION_ICON_FILES) {
+      assert.equal(fs.existsSync(path.join(stageDir, "assets", "extension", iconFile)), true);
+    }
   } finally {
     fs.rmSync(distDir, { recursive: true, force: true });
   }
@@ -49,6 +60,10 @@ test("assertTarget rejects unsupported stage targets", () => {
 
 test("assertRequiredPath throws when a required path is missing", () => {
   assert.throws(() => assertRequiredPath(path.join(os.tmpdir(), "easy-tweetblock-missing-path")), /Missing required path:/);
+});
+
+test("assertExtensionAssets accepts the configured extension icons", () => {
+  assert.doesNotThrow(() => assertExtensionAssets());
 });
 
 test("prepareStageDir recreates a clean stage directory", () => {

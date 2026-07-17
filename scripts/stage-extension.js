@@ -6,6 +6,12 @@ const { PROJECT_ROOT, SUPPORTED_TARGETS, writeManifest } = require("./build-mani
 const DIST_DIR = path.join(PROJECT_ROOT, "dist");
 const SRC_DIR = path.join(PROJECT_ROOT, "src");
 const ASSETS_DIR = path.join(PROJECT_ROOT, "assets");
+const EXTENSION_ICON_FILES = Object.freeze([
+  "16.png",
+  "32.png",
+  "48.png",
+  "128.png"
+]);
 
 function assertTarget(target) {
   if (!SUPPORTED_TARGETS.has(target)) {
@@ -16,6 +22,12 @@ function assertTarget(target) {
 function assertRequiredPath(requiredPath) {
   if (!fs.existsSync(requiredPath)) {
     throw new Error(`Missing required path: ${requiredPath}`);
+  }
+}
+
+function assertExtensionAssets() {
+  for (const iconFile of EXTENSION_ICON_FILES) {
+    assertRequiredPath(path.join(ASSETS_DIR, "extension", iconFile));
   }
 }
 
@@ -40,6 +52,7 @@ function copyIfExists(sourcePath, targetPath) {
 function stageExtension(target, distDir = DIST_DIR) {
   assertTarget(target);
   assertRequiredPath(SRC_DIR);
+  assertExtensionAssets();
 
   const stageDir = prepareStageDir(target, distDir);
 
@@ -74,8 +87,10 @@ if (require.main === module) {
 module.exports = {
   ASSETS_DIR,
   DIST_DIR,
+  EXTENSION_ICON_FILES,
   SRC_DIR,
   assertRequiredPath,
+  assertExtensionAssets,
   assertTarget,
   copyIfExists,
   prepareStageDir,
