@@ -103,7 +103,9 @@ test('followers tool places a reset action below the block actions', () => {
 
   assert.notEqual(blockActionIndex, -1);
   assert.equal(resetActionIndex > blockActionIndex, true);
-  assert.match(popupHtml, /class="actions-row followers-reset-row">[\s\S]*?id="reset-follower-scan-session" class="ghost-button"/);
+  assert.match(popupHtml, /class="actions-row followers-reset-row" hidden>[\s\S]*?id="reset-follower-scan-session" class="ghost-button" type="button" disabled/);
+  const popupCss = fs.readFileSync(path.join(__dirname, '..', 'src', 'popup', 'popup.css'), 'utf8');
+  assert.match(popupCss, /\.followers-reset-row\[hidden\]\s*\{[\s\S]*?display: none;/);
 });
 
 test('toggle thumb remains vertically centered in both states', () => {
@@ -433,6 +435,7 @@ function createPopupDocument() {
     'followers-progress-fill': createPopupElement(),
     'followers-progress-label': createPopupElement(),
     'followers-preview': createPopupElement(),
+    'followers-reset-row': createPopupElement({ hidden: true }),
     'followers-run-warning': createPopupElement({ hidden: true }),
     'followers-scan-limit': createPopupElement(),
     'followers-source-followers': createPopupElement(),
@@ -1714,6 +1717,7 @@ test('init resets the active source scan session without changing its limits', a
   await flushAsyncWork();
 
   elements['open-followers'].click();
+  assert.equal(elements['followers-reset-row'].hidden, false);
   assert.equal(elements['reset-follower-scan-session'].disabled, false);
   assert.equal(elements['followers-preview'].textContent, '@alice');
 
@@ -1727,10 +1731,24 @@ test('init resets the active source scan session without changing its limits', a
   assert.equal(elements['followers-summary'].textContent, 'Followers scan reset. Run a new scan.');
   assert.equal(elements['followers-preview'].textContent, '');
   assert.equal(elements['followers-progress-label'].textContent, 'Preview required');
+  assert.equal(elements['followers-reset-row'].hidden, true);
   assert.equal(elements['reset-follower-scan-session'].disabled, true);
   assert.equal(elements['block-follower-candidates'].disabled, true);
   assert.equal(elements['scan-followers-preview'].disabled, false);
   assert.equal(getToastText(elements), 'Followers scan reset.');
+});
+
+test('init hides reset scan until the current source has been scanned', async () => {
+  const extensionApi = createStorageExtensionApi();
+  const { documentRef, elements } = createPopupDocument();
+
+  init(documentRef, extensionApi, sharedBlocklist, sharedFollowers, sharedSettings, sharedFollowerScanSessions);
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  elements['open-followers'].click();
+
+  assert.equal(elements['followers-reset-row'].hidden, true);
 });
 
 test('init keeps scan and block actions fenced while follower limit changes are persisting', async () => {

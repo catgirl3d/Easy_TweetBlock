@@ -888,6 +888,7 @@
     const scanFollowersButtonLabelElement = documentRef.getElementById('scan-followers-preview-label');
     const blockFollowerCandidatesButton = documentRef.getElementById('block-follower-candidates');
     const blockFollowerCandidatesButtonLabelElement = documentRef.getElementById('block-follower-candidates-label');
+    const resetFollowerScanSessionRow = documentRef.getElementById('followers-reset-row');
     const resetFollowerScanSessionButton = documentRef.getElementById('reset-follower-scan-session');
 
     const pageButtonStyleSurfaces = settings?.PAGE_BUTTON_STYLE_SURFACES || {
@@ -970,7 +971,7 @@
       return;
     }
 
-    if (!blocklist || !followers || !settings || !extensionApi || !shellElement || !statusElement || !toastRegionElement || !textareaElement || !usernameListSelectLabelElement || !usernameListSelectElement || !usernameListOptionsElement || !newUsernameListButton || !renameUsernameListButton || !deleteUsernameListButton || !importUsernamesButton || !importUsernamesFileInput || !delayInputElement || !pageButtonStyleTweetIconElement || !pageButtonStyleTweetTextElement || !pageButtonStyleProfileIconElement || !pageButtonStyleProfileTextElement || !pageButtonStyleUserCellIconElement || !pageButtonStyleUserCellTextElement || !showUserCellAddButtonElement || !openSettingsButton || !openFollowersButton || !backToMainButton || !backFromFollowersButton || !saveButton || !saveSettingsButton || !blockNowButton || !cancelFollowersRunButton || !countElement || !followersBlockLimitElement || !followersScanLimitElement || !followersSummaryElement || !followersPreviewElement || !followersRunWarningElement || !followersBlockProgressElement || !followersProgressCountElement || !followersProgressDetailElement || !followersProgressFillElement || !followersProgressLabelElement || !followersSourceFollowersElement || !followersSourceFollowingElement || !scanFollowersButton || !scanFollowersButtonLabelElement || !blockFollowerCandidatesButton || !blockFollowerCandidatesButtonLabelElement || !resetFollowerScanSessionButton || !addFollowersToListButton || !clearListButton) {
+    if (!blocklist || !followers || !settings || !extensionApi || !shellElement || !statusElement || !toastRegionElement || !textareaElement || !usernameListSelectLabelElement || !usernameListSelectElement || !usernameListOptionsElement || !newUsernameListButton || !renameUsernameListButton || !deleteUsernameListButton || !importUsernamesButton || !importUsernamesFileInput || !delayInputElement || !pageButtonStyleTweetIconElement || !pageButtonStyleTweetTextElement || !pageButtonStyleProfileIconElement || !pageButtonStyleProfileTextElement || !pageButtonStyleUserCellIconElement || !pageButtonStyleUserCellTextElement || !showUserCellAddButtonElement || !openSettingsButton || !openFollowersButton || !backToMainButton || !backFromFollowersButton || !saveButton || !saveSettingsButton || !blockNowButton || !cancelFollowersRunButton || !countElement || !followersBlockLimitElement || !followersScanLimitElement || !followersSummaryElement || !followersPreviewElement || !followersRunWarningElement || !followersBlockProgressElement || !followersProgressCountElement || !followersProgressDetailElement || !followersProgressFillElement || !followersProgressLabelElement || !followersSourceFollowersElement || !followersSourceFollowingElement || !scanFollowersButton || !scanFollowersButtonLabelElement || !blockFollowerCandidatesButton || !blockFollowerCandidatesButtonLabelElement || !resetFollowerScanSessionRow || !resetFollowerScanSessionButton || !addFollowersToListButton || !clearListButton) {
       return;
     }
 
@@ -1987,7 +1988,9 @@
       blockFollowerCandidatesButton.disabled = isAnyBusy || !currentFollowersPreview?.candidates?.length;
       cancelFollowersRunButton.disabled = !(isFollowersScanning || isFollowersBlocking);
       addFollowersToListButton.disabled = isAnyBusy || !currentFollowersPreview?.candidates?.length;
-      resetFollowerScanSessionButton.disabled = isAnyBusy || !getFollowerScanSessionForCurrentSource();
+      const hasFollowerScanSession = Boolean(getFollowerScanSessionForCurrentSource());
+      resetFollowerScanSessionRow.hidden = !hasFollowerScanSession;
+      resetFollowerScanSessionButton.disabled = isAnyBusy || !hasFollowerScanSession;
       renderFollowersScanButton();
       renderFollowersBlockButton();
     }

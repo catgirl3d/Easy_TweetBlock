@@ -1056,6 +1056,10 @@ h1 {
   margin-top: 8px;
 }
 
+.followers-reset-row[hidden] {
+  display: none;
+}
+
 #reset-follower-scan-session {
   flex-basis: 100%;
 }
