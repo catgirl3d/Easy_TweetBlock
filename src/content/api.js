@@ -57,6 +57,7 @@
     FOLLOWERS_SOURCES,
     DEFAULT_FOLLOWERS_BLOCK_LIMIT,
     DEFAULT_FOLLOWERS_SCAN_LIMIT,
+    MAX_FOLLOWERS_SCAN_LIMIT,
     normalizeFollowersBlockLimit,
     normalizeFollowersScanLimit,
     normalizeFollowersSource
@@ -110,6 +111,7 @@
   });
   const FOLLOWERS_FEATURES_PARAM = JSON.stringify(FOLLOWERS_FEATURES);
   const FOLLOWERS_PAGE_SIZE = 50;
+  const MAX_FOLLOWER_SCAN_INSPECTED_USERS = MAX_FOLLOWERS_SCAN_LIMIT * 2;
   const GRAPHQL_DISCOVERY_CACHE_TTL_MS = 5 * 60 * 1000;
   const GRAPHQL_DISCOVERY_OPERATION_WINDOW_SIZE = 700;
   const GRAPHQL_DISCOVERY_SCRIPT_LIMIT = 40;
@@ -820,6 +822,12 @@
 
     const blockLimit = normalizeFollowersBlockLimit(options.blockLimit);
     const scanLimit = normalizeFollowersScanLimit(options.scanLimit);
+    const maxInspectedUsers = clampRoundedNumber(
+      runtimeOptions.maxInspectedUsers,
+      scanLimit + MAX_FOLLOWERS_SCAN_LIMIT,
+      1,
+      MAX_FOLLOWER_SCAN_INSPECTED_USERS
+    );
     const normalizedResumeState = normalizeFollowerScanResumeState(options.resumeState);
     signal?.throwIfAborted?.();
 
@@ -845,10 +853,10 @@
     let pendingUsers = normalizedResumeState.pendingUsers.slice();
     let processedUserCount = 0;
     let hasMorePages = pendingUsers.length > 0 || Boolean(cursor) || normalizedResumeState.hasMorePages === true;
-    let stoppedByBlockLimit = false;
     let stoppedByScanLimit = false;
+    let stoppedBySafetyLimit = false;
 
-    if (existingReadyCount >= blockLimit) {
+    if (existingReadyCount >= scanLimit) {
       return {
         alreadyBlockedCount: 0,
         blockLimit,
@@ -866,8 +874,8 @@
         scanLimit,
         scannedCount: 0,
         source: sourceConfig.source,
-        stoppedByBlockLimit: false,
-        stoppedByScanLimit: false,
+        stoppedBySafetyLimit: false,
+        stoppedByScanLimit: true,
         targetRestId,
         targetScreenName
       };
@@ -879,8 +887,8 @@
 
         signal?.throwIfAborted?.();
 
-        if (processedUserCount >= scanLimit) {
-          stoppedByScanLimit = true;
+        if (processedUserCount >= maxInspectedUsers) {
+          stoppedBySafetyLimit = true;
           return users.slice(index);
         }
 
@@ -921,8 +929,8 @@
 
         candidates.push(normalizedCandidate);
 
-        if (existingReadyCount + candidates.length >= blockLimit) {
-          stoppedByBlockLimit = true;
+        if (existingReadyCount + candidates.length >= scanLimit) {
+          stoppedByScanLimit = true;
           return users.slice(index + 1);
         }
       }
@@ -930,7 +938,7 @@
       return null;
     }
 
-    while (processedUserCount < scanLimit && existingReadyCount + candidates.length < blockLimit) {
+    while (processedUserCount < maxInspectedUsers && existingReadyCount + candidates.length < scanLimit) {
       if (pendingUsers.length) {
         const remainingPendingUsers = consumeUsers(pendingUsers);
 
@@ -943,7 +951,7 @@
         pendingUsers = [];
       }
 
-      if (stoppedByBlockLimit || stoppedByScanLimit) {
+      if (stoppedBySafetyLimit || stoppedByScanLimit) {
         hasMorePages = pendingUsers.length > 0 || Boolean(cursor) || normalizedResumeState.hasMorePages === true;
         break;
       }
@@ -997,7 +1005,7 @@
 
       pendingUsers = [];
 
-      if (stoppedByBlockLimit || stoppedByScanLimit) {
+      if (stoppedBySafetyLimit || stoppedByScanLimit) {
         cursor = page.nextCursor || null;
         hasMorePages = Boolean(page.hasNext && page.nextCursor);
         break;
@@ -1017,6 +1025,14 @@
       cursor = page.nextCursor;
     }
 
+    if (
+      processedUserCount >= maxInspectedUsers
+      && existingReadyCount + candidates.length < scanLimit
+      && hasMorePages
+    ) {
+      stoppedBySafetyLimit = true;
+    }
+
     logContentApiInfo(`${sourceConfig.operationName} preview scan finished.`, {
       alreadyBlockedCount,
       blockLimit,
@@ -1025,6 +1041,7 @@
       pendingUserCount: pendingUsers.length,
       scanLimit,
       scannedCount: processedUserCount,
+      stoppedBySafetyLimit,
       source: sourceConfig.source,
       targetRestId,
       targetScreenName
@@ -1046,7 +1063,7 @@
       // Keep the public field name for popup/UI compatibility.
       scannedCount: processedUserCount,
       source: sourceConfig.source,
-      stoppedByBlockLimit,
+      stoppedBySafetyLimit,
       stoppedByScanLimit,
       targetRestId,
       targetScreenName

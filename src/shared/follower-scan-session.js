@@ -82,9 +82,7 @@
   function createFollowerScanSessionKey({
     targetRestId,
     targetScreenName,
-    source,
-    blockLimit,
-    scanLimit
+    source
   } = {}) {
     const normalizedTargetScreenName = normalizeUsername(targetScreenName);
     const normalizedTargetRestId = normalizeRestId(targetRestId);
@@ -92,9 +90,7 @@
 
     return [
       normalizeFollowersSource(source),
-      targetKey,
-      normalizeFollowersBlockLimit(blockLimit),
-      normalizeFollowersScanLimit(scanLimit)
+      targetKey
     ].join(':');
   }
 
@@ -105,12 +101,10 @@
 
     return {
       version: FOLLOWER_SCAN_SESSION_VERSION,
-      key: normalizeOptionalString(input.key) || createFollowerScanSessionKey({
+      key: createFollowerScanSessionKey({
         targetRestId,
         targetScreenName,
-        source: input.source,
-        blockLimit: input.blockLimit,
-        scanLimit: input.scanLimit
+        source: input.source
       }),
       targetRestId,
       targetScreenName,
@@ -159,12 +153,10 @@
 
     return {
       version: FOLLOWER_SCAN_SESSION_VERSION,
-      key: normalizeOptionalString(value.key) || createFollowerScanSessionKey({
+      key: createFollowerScanSessionKey({
         targetRestId,
         targetScreenName,
-        source: value.source,
-        blockLimit: value.blockLimit,
-        scanLimit: value.scanLimit
+        source: value.source
       }),
       targetRestId,
       targetScreenName,

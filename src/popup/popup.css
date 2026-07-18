@@ -1022,6 +1022,20 @@ h1 {
   flex-wrap: wrap;
 }
 
+.followers-reset-row {
+  margin-top: 8px;
+}
+
+#reset-follower-scan-session {
+  flex-basis: 100%;
+}
+
+#reset-follower-scan-session:hover:not(:disabled) {
+  background: #ef444414;
+  border-color: #ef444447;
+  color: #fca5a5;
+}
+
 /* Follower tool results */
 .followers-summary {
   margin: 12px 0 0;

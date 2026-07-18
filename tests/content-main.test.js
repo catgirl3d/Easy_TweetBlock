@@ -1665,7 +1665,7 @@ function createFollowersScanDocument(pathname = '/targetuser/followers') {
   };
 }
 
-test('scanFollowersForBlocking skips already blocked followers and stops once the block limit is filled', async () => {
+test('scanFollowersForBlocking skips already blocked followers and fills the candidate limit independently of the block limit', async () => {
   const requestedFollowersUrls = [];
 
   async function fetchImpl(url) {
@@ -1770,8 +1770,8 @@ test('scanFollowersForBlocking skips already blocked followers and stops once th
   }
 
   const preview = await scanFollowersForBlocking({
-    blockLimit: 2,
-    scanLimit: 10
+    blockLimit: 1,
+    scanLimit: 2
   }, {
     documentRef: {
       cookie: 'ct0=token123',
@@ -1791,7 +1791,8 @@ test('scanFollowersForBlocking skips already blocked followers and stops once th
   assert.equal(preview.scannedCount, 4);
   assert.equal(preview.alreadyBlockedCount, 1);
   assert.equal(preview.readyCount, 2);
-  assert.equal(preview.stoppedByBlockLimit, true);
+  assert.equal(preview.stoppedByScanLimit, true);
+  assert.equal(preview.stoppedBySafetyLimit, false);
   assert.equal(requestedFollowersUrls.length, 1);
 
   const requestedFollowersVariables = new URL(requestedFollowersUrls[0]).searchParams.get('variables');
@@ -1804,7 +1805,7 @@ test('scanFollowersForBlocking skips already blocked followers and stops once th
   ]);
 });
 
-test('scanFollowersForBlocking returns resume state with pending users when blockLimit stops in the middle of a page', async () => {
+test('scanFollowersForBlocking returns resume state with pending users when the candidate limit is reached in the middle of a page', async () => {
   let timelineRequestCount = 0;
 
   async function fetchImpl(url) {
@@ -1823,8 +1824,8 @@ test('scanFollowersForBlocking returns resume state with pending users when bloc
   }
 
   const preview = await scanFollowersForBlocking({
-    blockLimit: 2,
-    scanLimit: 10
+    blockLimit: 1,
+    scanLimit: 2
   }, {
     documentRef: createFollowersScanDocument(),
     fetchImpl,
@@ -1834,7 +1835,7 @@ test('scanFollowersForBlocking returns resume state with pending users when bloc
 
   assert.equal(timelineRequestCount, 1);
   assert.equal(preview.scannedCount, 2);
-  assert.equal(preview.stoppedByBlockLimit, true);
+  assert.equal(preview.stoppedByScanLimit, true);
   assert.equal(preview.hasMorePages, true);
   assert.deepEqual(preview.candidates, [
     { restId: '101', username: 'alice' },
@@ -1884,7 +1885,7 @@ test('scanFollowersForBlocking returns resume state with pending users when scan
   });
 });
 
-test('scanFollowersForBlocking returns zero counters and echoes resumeState when the existing ready queue already fills the block limit', async () => {
+test('scanFollowersForBlocking returns zero counters and echoes resumeState when the existing ready queue already fills the candidate limit', async () => {
   let timelineRequestCount = 0;
   const resumeState = {
     alreadyBlockedKeys: ['id:301'],
@@ -1905,9 +1906,9 @@ test('scanFollowersForBlocking returns zero counters and echoes resumeState when
   }
 
   const preview = await scanFollowersForBlocking({
-    blockLimit: 2,
+    blockLimit: 1,
     resumeState,
-    scanLimit: 10
+    scanLimit: 2
   }, {
     documentRef: createFollowersScanDocument(),
     fetchImpl,
@@ -1965,7 +1966,7 @@ test('scanFollowersForBlocking consumes pending users before fetching resumeStat
   });
 });
 
-test('scanFollowersForBlocking seeds duplicate protection from existingReadyKeys and existingReadyCount', async () => {
+test('scanFollowersForBlocking seeds duplicate protection and fills the remaining candidate capacity', async () => {
   async function fetchImpl(url) {
     if (url.includes('/UserByScreenName')) {
       return createFollowersLookupResponse();
@@ -1979,13 +1980,13 @@ test('scanFollowersForBlocking seeds duplicate protection from existingReadyKeys
   }
 
   const preview = await scanFollowersForBlocking({
-    blockLimit: 2,
+    blockLimit: 1,
     resumeState: {
       existingReadyCount: 1,
       existingReadyKeys: ['id:101', 'username:alice'],
       hasMorePages: true
     },
-    scanLimit: 10
+    scanLimit: 2
   }, {
     documentRef: createFollowersScanDocument(),
     fetchImpl,
@@ -1995,11 +1996,47 @@ test('scanFollowersForBlocking seeds duplicate protection from existingReadyKeys
 
   assert.equal(preview.scannedCount, 2);
   assert.equal(preview.readyCount, 1);
-  assert.equal(preview.stoppedByBlockLimit, true);
+  assert.equal(preview.stoppedByScanLimit, true);
   assert.deepEqual(preview.candidates, [
     { restId: '202', username: 'bob' }
   ]);
   assert.deepEqual(preview.resumeState.pendingUsers, []);
+});
+
+test('scanFollowersForBlocking preserves continuation when the inspected-user safety limit is reached', async () => {
+  async function fetchImpl(url) {
+    if (url.includes('/UserByScreenName')) {
+      return createFollowersLookupResponse();
+    }
+
+    return createFollowersTimelineResponse([
+      createFollowersUserEntry('BlockedOne', '301', true),
+      createFollowersUserEntry('BlockedTwo', '302', true),
+      createFollowersUserEntry('Alice', '101'),
+      createFollowersBottomCursorEntry('cursor-bottom')
+    ]);
+  }
+
+  const preview = await scanFollowersForBlocking({
+    blockLimit: 1,
+    scanLimit: 2
+  }, {
+    documentRef: createFollowersScanDocument(),
+    fetchImpl,
+    maxInspectedUsers: 2,
+    queryIds: ['followersWorkingQueryId'],
+    userLookupQueryIds: ['workingUserLookup']
+  });
+
+  assert.equal(preview.scannedCount, 2);
+  assert.equal(preview.alreadyBlockedCount, 2);
+  assert.equal(preview.readyCount, 0);
+  assert.equal(preview.stoppedByScanLimit, false);
+  assert.equal(preview.stoppedBySafetyLimit, true);
+  assert.equal(preview.hasMorePages, true);
+  assert.deepEqual(preview.resumeState.pendingUsers, [
+    { restId: '101', username: 'alice', blocking: false }
+  ]);
 });
 
 test('scanFollowersForBlocking counts resumed blocking users without turning them into candidates and does not double count already blocked identities', async () => {
@@ -2078,8 +2115,8 @@ test('scanFollowersForBlocking does not fetch timeline pages when explicit resum
   assert.equal(preview.scannedCount, 0);
   assert.equal(preview.readyCount, 0);
   assert.equal(preview.hasMorePages, false);
-  assert.equal(preview.stoppedByBlockLimit, false);
   assert.equal(preview.stoppedByScanLimit, false);
+  assert.equal(preview.stoppedBySafetyLimit, false);
   assert.deepEqual(preview.candidates, []);
   assert.deepEqual(preview.resumeState, {
     nextCursor: null,

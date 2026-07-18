@@ -167,7 +167,7 @@
     };
   }
 
-  function buildFollowerScanExpectedKey(targetScreenName, source, blockLimit, scanLimit) {
+  function buildFollowerScanExpectedKey(targetScreenName, source) {
     const normalizedTargetScreenName = normalizeUsername(targetScreenName);
 
     if (!normalizedTargetScreenName) {
@@ -176,14 +176,12 @@
 
     return createFollowerScanSessionKey({
       targetScreenName: normalizedTargetScreenName,
-      source,
-      blockLimit,
-      scanLimit
+      source
     });
   }
 
   function createEmptyFollowerScanSessionForTarget(targetScreenName, source, blockLimit, scanLimit) {
-    const expectedKey = buildFollowerScanExpectedKey(targetScreenName, source, blockLimit, scanLimit);
+    const expectedKey = buildFollowerScanExpectedKey(targetScreenName, source);
 
     if (!expectedKey) {
       return null;
@@ -263,9 +261,13 @@
     };
   }
 
-  function updateFollowerScanSessionAfterBlock(session, results) {
+  function updateFollowerScanSessionAfterBlock(session, results, attemptedCount = results?.length) {
     const normalizedResults = Array.isArray(results) ? results : [];
     const readyCandidates = Array.isArray(session?.readyCandidates) ? session.readyCandidates : [];
+    const normalizedAttemptedCount = Math.min(
+      readyCandidates.length,
+      Math.max(normalizedResults.length, normalizeNonNegativeInteger(attemptedCount))
+    );
     const nextReadyCandidates = [];
     let batchFailedCount = 0;
     let mismatchedCount = 0;
@@ -274,6 +276,12 @@
 
     for (let index = 0; index < readyCandidates.length; index += 1) {
       const candidate = readyCandidates[index];
+
+      if (index >= normalizedAttemptedCount) {
+        nextReadyCandidates.push(candidate);
+        continue;
+      }
+
       const result = normalizedResults[index];
 
       if (result && !doFollowerCandidatesMatch(result, candidate)) {
@@ -322,7 +330,7 @@
       totals: {
         ...session.totals,
         abandonedFailed: normalizeNonNegativeInteger(session?.totals?.abandonedFailed) + abandonedCount,
-        blockedFailed: nextReadyCandidates.length,
+        blockedFailed: countRetryableFailedCandidates(nextReadyCandidates),
         blockedSuccess: normalizeNonNegativeInteger(session?.totals?.blockedSuccess) + successCount
       },
       updatedAt: Date.now()
@@ -333,7 +341,7 @@
     return {
       abandonedCount,
       batchFailedCount,
-      failedCount: nextReadyCandidates.length,
+      failedCount: countRetryableFailedCandidates(nextReadyCandidates),
       mismatchedCount,
       session: nextSession,
       successCount
