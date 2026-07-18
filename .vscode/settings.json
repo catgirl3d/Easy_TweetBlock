@@ -2,6 +2,24 @@
     "actionButtons": {
         "commands": [
 			{
+                "name": "PACKAGE_PROD",
+                "color": "white",
+                "singleInstance": true,
+                "command": "npm run build:production"
+            },
+			{
+                "name": "PACKAGE_PROD_FF",
+                "color": "white",
+                "singleInstance": true,
+                "command": "npm run build:production:firefox"
+            },
+			{
+                "name": "PACKAGE_PROD_CHROME",
+                "color": "white",
+                "singleInstance": true,
+                "command": "npm run build:production:chrome"
+            },
+			{
                 "name": "STAGE_FF",
                 "color": "white",
                 "singleInstance": true,
