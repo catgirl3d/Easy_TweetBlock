@@ -52,6 +52,32 @@ test('popup header uses the packaged extension icon', () => {
   assert.doesNotMatch(popupHtml, /class="logo-shield"/);
 });
 
+test('popup save and import buttons use distinct semantic hover colors', () => {
+  const popupCss = fs.readFileSync(path.join(__dirname, '..', 'src', 'popup', 'popup.css'), 'utf8');
+
+  assert.match(popupCss, /#save-blocklist:hover:not\(:disabled\)[\s\S]*?rgba\(16, 185, 129, 0\.14\)/);
+  assert.match(popupCss, /#import-usernames:hover:not\(:disabled\)[\s\S]*?rgba\(59, 130, 246, 0\.14\)/);
+});
+
+test('followers tool includes a caution note with a keyboard-accessible tooltip', () => {
+  const popupHtml = fs.readFileSync(path.join(__dirname, '..', 'src', 'popup', 'popup.html'), 'utf8');
+  const popupCss = fs.readFileSync(path.join(__dirname, '..', 'src', 'popup', 'popup.css'), 'utf8');
+
+  assert.match(popupHtml, /class="followers-caution" role="note"/);
+  assert.match(popupHtml, /Use with caution: blocking many accounts at once may look suspicious to X\/Twitter\./);
+  assert.match(popupHtml, /id="followers-caution-help"[\s\S]*aria-describedby="followers-caution-tooltip"/);
+  assert.match(popupHtml, /id="followers-caution-tooltip" class="followers-caution-tooltip" role="tooltip"/);
+  assert.match(popupCss, /\.followers-caution-help:hover \.followers-caution-tooltip,[\s\S]*\.followers-caution-help:focus-within \.followers-caution-tooltip/);
+});
+
+test('followers tool does not render the popup debug log UI', () => {
+  const popupHtml = fs.readFileSync(path.join(__dirname, '..', 'src', 'popup', 'popup.html'), 'utf8');
+  const popupCss = fs.readFileSync(path.join(__dirname, '..', 'src', 'popup', 'popup.css'), 'utf8');
+
+  assert.doesNotMatch(popupHtml, /popup-debug-log|clear-popup-debug-log|Debug log/);
+  assert.doesNotMatch(popupCss, /popup-debug-log|debug-header/);
+});
+
 function flushAsyncWork() {
   return new Promise((resolve) => setImmediate(resolve));
 }
@@ -336,7 +362,6 @@ function createPopupDocument() {
     'block-now': createPopupElement(),
     'cancel-followers-run': createPopupElement(),
     'clear-list': createPopupElement(),
-    'clear-popup-debug-log': createPopupElement(),
     'followers-block-limit': createPopupElement(),
     'followers-block-progress': createPopupElement(),
     'followers-progress-count': createPopupElement(),
@@ -354,7 +379,6 @@ function createPopupDocument() {
     'new-username-list': createPopupElement(),
     'open-settings': createPopupElement(),
     'open-followers': createPopupElement(),
-    'popup-debug-log': createPopupElement({ scrollTop: 0, scrollHeight: 0 }),
     'page-button-style-profile-icon': createPopupElement({ setAttribute() {} }),
     'page-button-style-profile-text': createPopupElement({ setAttribute() {} }),
     'page-button-style-tweet-icon': createPopupElement({ setAttribute() {} }),
