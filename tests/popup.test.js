@@ -52,6 +52,57 @@ test('popup header uses the packaged extension icon', () => {
   assert.doesNotMatch(popupHtml, /class="logo-shield"/);
 });
 
+test('settings view replaces its topbar action with back navigation', () => {
+  const popupHtml = fs.readFileSync(path.join(__dirname, '..', 'src', 'popup', 'popup.html'), 'utf8');
+  const popupCss = fs.readFileSync(path.join(__dirname, '..', 'src', 'popup', 'popup.css'), 'utf8');
+  const settingsPanel = popupHtml.slice(
+    popupHtml.indexOf('data-view-panel="settings"'),
+    popupHtml.indexOf('data-view-panel="followers"')
+  );
+
+  assert.match(popupHtml, /<div class="topbar-actions">[\s\S]*?id="open-settings"[\s\S]*?id="back-to-main"/);
+  assert.doesNotMatch(settingsPanel, /id="back-to-main"/);
+  assert.match(popupCss, /\.topbar-actions\s*\{[\s\S]*?grid-template-areas: "action";/);
+  assert.match(popupCss, /\.popup-shell\[data-view="settings"\] #back-to-main\s*\{[\s\S]*?visibility: visible;/);
+});
+
+test('settings card uses the shared title icon markup', () => {
+  const popupHtml = fs.readFileSync(path.join(__dirname, '..', 'src', 'popup', 'popup.html'), 'utf8');
+  const settingsPanel = popupHtml.slice(
+    popupHtml.indexOf('data-view-panel="settings"'),
+    popupHtml.indexOf('data-view-panel="followers"')
+  );
+
+  assert.match(settingsPanel, /class="settings-header">\s*<div class="card-title">[\s\S]*?class="card-title-icon"[\s\S]*?<h2>Settings<\/h2>/);
+});
+
+test('segmented controls use the shared blue-gray surface', () => {
+  const popupCss = fs.readFileSync(path.join(__dirname, '..', 'src', 'popup', 'popup.css'), 'utf8');
+
+  assert.match(popupCss, /--bg-segmented-control:\s*#0f1628;/);
+  assert.match(popupCss, /\.segmented-control\s*\{[\s\S]*?background: var\(--bg-segmented-control\);/);
+  assert.match(popupCss, /\.source-toggle\s*\{[\s\S]*?background: var\(--bg-segmented-control\);/);
+  assert.match(popupCss, /\.segmented-control::before,[\s\S]*?\.source-toggle::before\s*\{[\s\S]*?transition: transform 220ms/);
+  assert.match(popupCss, /\.segmented-control:has\(\.segment-button\[data-active="true"\]:nth-child\(2\)\)::before,[\s\S]*?transform: translateX\(calc\(100% \+ 3px\)\);/);
+  assert.doesNotMatch(popupCss, /segmentedControlActivate/);
+  assert.match(popupCss, /@media \(prefers-reduced-motion: reduce\)/);
+});
+
+test('followers source and block actions use readable semantic colors', () => {
+  const popupCss = fs.readFileSync(path.join(__dirname, '..', 'src', 'popup', 'popup.css'), 'utf8');
+  const popupHtml = fs.readFileSync(path.join(__dirname, '..', 'src', 'popup', 'popup.html'), 'utf8');
+
+  assert.match(popupCss, /\.source-toggle-button\[data-active="true"\]\s*\{[\s\S]*?color: #ffffff;/);
+  assert.match(popupHtml, /id="block-follower-candidates" class="danger-button"/);
+});
+
+test('toggle thumb remains vertically centered in both states', () => {
+  const popupCss = fs.readFileSync(path.join(__dirname, '..', 'src', 'popup', 'popup.css'), 'utf8');
+
+  assert.match(popupCss, /\.toggle-checkbox-switch::after\s*\{[\s\S]*?top: 50%;[\s\S]*?transform: translateY\(-50%\);/);
+  assert.match(popupCss, /\.toggle-checkbox:checked \+ \.toggle-checkbox-switch::after\s*\{[\s\S]*?transform: translate\(14px, -50%\);/);
+});
+
 test('popup save and import buttons use distinct semantic hover colors', () => {
   const popupCss = fs.readFileSync(path.join(__dirname, '..', 'src', 'popup', 'popup.css'), 'utf8');
 

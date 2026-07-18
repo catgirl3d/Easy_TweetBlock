@@ -4,15 +4,16 @@
   --bg-card: #151b308c;
   --bg-card-solid: #111526;
   --bg-input: #07080f;
+  --bg-segmented-control: #0f1628;
   --border-color: #ffffff0f;
   --border-hover: #ffffff1f;
   --border-focus: var(--accent-primary);
   --text-primary: #f8fafc;
   --text-secondary: #94a3b8;
   --text-muted: #64748b;
-  --accent-primary: #007cff;
+  --accent-primary: #3279c5;
   --accent-primary-strong: #0066d8;
-  --accent-primary-light: #2f9dff;
+  --accent-primary-light: #3663e9;
   --accent-primary-alpha-05: #007cff0d;
   --accent-primary-alpha-08: #007cff14;
   --accent-primary-alpha-12: #007cff1f;
@@ -101,6 +102,16 @@ h1 {
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 4px;
+}
+
+.topbar-actions {
+  display: grid;
+  flex: 0 0 auto;
+  grid-template-areas: "action";
+}
+
+.topbar-actions .toolbar-button {
+  grid-area: action;
 }
 
 .title-group {
@@ -263,7 +274,7 @@ h1 {
 .secondary-button {
   background: linear-gradient(135deg, var(--accent-primary-light) 0%, var(--accent-primary) 100%);
   box-shadow: 0 4px 12px var(--accent-primary-alpha-15);
-  color: #0c1524;
+  color: white;
 }
 
 .secondary-button:hover:not(:disabled) {
@@ -293,11 +304,32 @@ h1 {
 }
 
 /* Visibility animations & transitions for views */
-.popup-shell[data-view="settings"] .toolbar-button,
-.popup-shell[data-view="followers"] .toolbar-button {
+#back-to-main {
   opacity: 0;
+  visibility: hidden;
   pointer-events: none;
   transform: translateX(8px);
+}
+
+.popup-shell[data-view="settings"] #open-settings,
+.popup-shell[data-view="followers"] #open-settings,
+.popup-shell[data-view="followers"] #back-to-main {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateX(8px);
+}
+
+.popup-shell[data-view="settings"] #back-to-main {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateX(0);
+}
+
+.popup-shell[data-view="settings"] #back-to-main:disabled {
+  opacity: 0.3;
+  pointer-events: none;
 }
 
 .popup-shell[data-view="followers"] .status-copy {
@@ -812,12 +844,13 @@ h1 {
 .toggle-checkbox-switch::after {
   content: "";
   position: absolute;
-  top: 2px;
+  top: 50%;
   left: 2px;
   width: 12px;
   height: 12px;
   background: var(--text-secondary);
   border-radius: 50%;
+  transform: translateY(-50%);
   transition: all 200ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -828,23 +861,55 @@ h1 {
 }
 
 .toggle-checkbox:checked + .toggle-checkbox-switch::after {
-  transform: translateX(14px);
+  transform: translate(14px, -50%);
   background: var(--accent-primary);
   box-shadow: 0 0 6px var(--accent-primary-alpha-50);
 }
 
 /* Segmented Control Styling */
 .segmented-control {
+  position: relative;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 3px;
   padding: 3px;
   border-radius: 10px;
-  background: var(--bg-input);
+  background: var(--bg-segmented-control);
   border: 1px solid var(--border-color);
 }
 
+.segmented-control::before,
+.source-toggle::before {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc(50% - 4.5px);
+  border-radius: 7px;
+  pointer-events: none;
+  transition: transform 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.segmented-control::before {
+  background: #ffffff0d;
+  box-shadow: inset 0 1px 0 #ffffff0d, 0 2px 6px #00000033;
+}
+
+.source-toggle::before {
+  background: linear-gradient(135deg, var(--accent-primary-light), var(--accent-primary));
+  box-shadow: 0 4px 10px var(--accent-primary-alpha-20);
+}
+
+.segmented-control:has(.segment-button[data-active="true"]:nth-child(2))::before,
+.source-toggle:has(.source-toggle-button[data-active="true"]:nth-child(2))::before {
+  transform: translateX(calc(100% + 3px));
+}
+
 .segment-button {
+  position: relative;
+  z-index: 1;
   appearance: none;
   border: 0;
   border-radius: 7px;
@@ -863,23 +928,32 @@ h1 {
 }
 
 .segment-button[data-active="true"] {
-  background: #ffffff0d;
+  background: var(--color-transparent);
   color: var(--text-primary);
-  box-shadow: inset 0 1px 0 #ffffff0d, 0 2px 6px #00000033;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .segmented-control::before,
+  .source-toggle::before {
+    transition: none;
+  }
 }
 
 /* Source Toggle styling */
 .source-toggle {
+  position: relative;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 3px;
   padding: 3px;
   border: 1px solid var(--border-color);
   border-radius: 10px;
-  background: var(--bg-input);
+  background: var(--bg-segmented-control);
 }
 
 .source-toggle-button {
+  position: relative;
+  z-index: 1;
   border: 0;
   border-radius: 7px;
   padding: 7px 10px;
@@ -893,9 +967,8 @@ h1 {
 }
 
 .source-toggle-button[data-active="true"] {
-  color: #0c1524;
-  background: linear-gradient(135deg, var(--accent-primary-light), var(--accent-primary));
-  box-shadow: 0 4px 10px var(--accent-primary-alpha-20);
+  color: #ffffff;
+  background: var(--color-transparent);
 }
 
 .source-toggle-button:disabled {
