@@ -140,7 +140,7 @@ test("buildManifest merges the Firefox overlay into the base manifest", () => {
   const manifest = buildManifest("firefox");
 
   assert.equal(manifest.manifest_version, 3);
-  assert.equal(manifest.browser_specific_settings.gecko.id, "easy-tweetblock@local.dev");
+  assert.equal(manifest.browser_specific_settings.gecko.id, "easy-tweetblock@catgirl3d.github.io");
   assert.equal(manifest.browser_specific_settings.gecko.strict_min_version, "142.0");
   assert.deepEqual(manifest.browser_specific_settings.gecko.data_collection_permissions, {
     required: [

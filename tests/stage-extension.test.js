@@ -47,7 +47,7 @@ test("stageExtension prepares a Firefox stage with the Firefox manifest overlay"
     const manifest = JSON.parse(fs.readFileSync(outputPath, "utf8"));
 
     assert.equal(stageDir, path.join(distDir, "firefox-package"));
-    assert.equal(manifest.browser_specific_settings.gecko.id, "easy-tweetblock@local.dev");
+    assert.equal(manifest.browser_specific_settings.gecko.id, "easy-tweetblock@catgirl3d.github.io");
     assert.equal(manifest.browser_specific_settings.gecko.strict_min_version, "142.0");
     assert.deepEqual(manifest.browser_specific_settings.gecko.data_collection_permissions, {
       required: [
