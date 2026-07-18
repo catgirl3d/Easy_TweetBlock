@@ -1,0 +1,69 @@
+name: Publish Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing git tag to publish
+        required: true
+        type: string
+
+concurrency:
+  group: publish-release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Verify requested tag exists
+        run: git ls-remote --exit-code --refs "https://github.com/${{ github.repository }}.git" "refs/tags/${{ inputs.tag }}"
+
+      - name: Check out repository at tag
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Validate release tag against manifest version
+        run: npm run validate:release-tag -- "${{ inputs.tag }}"
+
+      - name: Run test suite
+        run: npm test
+
+      - name: Build release packages
+        run: npm run package
+
+      - name: Run Firefox extension lint
+        run: npm run lint
+
+      - name: Upload build output
+        uses: actions/upload-artifact@v4
+        with:
+          name: easy-tweetblock-packages-${{ inputs.tag }}
+          path: dist
+          if-no-files-found: error
+
+      - name: Prepare release notes from changelog
+        run: node scripts/extract-release-notes.js "${{ inputs.tag }}" dist/release-notes.md
+
+      - name: Create or update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          files: |
+            dist/*.xpi
+            dist/*.zip
+          body_path: dist/release-notes.md
+          fail_on_unmatched_files: true
