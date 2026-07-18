@@ -170,6 +170,27 @@ test('updateFollowerScanSessionAfterBlock keeps retryable failures, abandons ret
   assert.equal(blockUpdate.session.status, 'ready');
 });
 
+test('updateFollowerScanSessionAfterBlock preserves candidates outside the attempted batch', () => {
+  const session = createSession({
+    readyCandidates: [
+      { restId: '101', username: 'alice', attempts: 0, lastError: null },
+      { restId: '202', username: 'bob', attempts: 0, lastError: null },
+      { restId: '303', username: 'carol', attempts: 0, lastError: null }
+    ]
+  });
+  const blockUpdate = updateFollowerScanSessionAfterBlock(session, [
+    { ok: true, restId: '101', username: 'alice' }
+  ]);
+
+  assert.equal(blockUpdate.successCount, 1);
+  assert.equal(blockUpdate.batchFailedCount, 0);
+  assert.deepEqual(blockUpdate.session.readyCandidates, [
+    { restId: '202', username: 'bob', attempts: 0, lastError: null },
+    { restId: '303', username: 'carol', attempts: 0, lastError: null }
+  ]);
+  assert.equal(blockUpdate.session.totals.blockedFailed, 0);
+});
+
 test('createEmptyFollowerScanSessionForTarget returns null for an invalid target and a keyed session for a valid target', () => {
   assert.equal(createEmptyFollowerScanSessionForTarget('bad-name', 'followers', 25, 80), null);
 

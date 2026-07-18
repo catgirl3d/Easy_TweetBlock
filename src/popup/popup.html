@@ -19,21 +19,39 @@
         </div>
         <p id="status" class="status-copy">Save usernames for later, or block the whole list immediately through any open X tab.</p>
       </div>
-      <button id="open-settings" class="toolbar-button" type="button">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="3"></circle>
-          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-        </svg>
-        <span>Settings</span>
-      </button>
+      <div class="topbar-actions">
+        <button id="open-settings" class="toolbar-button" type="button">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+          <span>Settings</span>
+        </button>
+        <button id="back-to-main" class="toolbar-button" type="button">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+          <span>Back</span>
+        </button>
+      </div>
     </header>
 
     <div class="view-window">
       <div class="view-track">
         <section class="view-panel view-panel-stack" data-view-panel="main">
-          <section class="card">
+          <section class="card main-tool-card username-lists-card">
             <div class="card-heading">
-              <h2>Username Lists</h2>
+              <div class="card-title">
+                <span class="card-title-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="8" y1="6" x2="21" y2="6"></line>
+                    <line x1="8" y1="12" x2="21" y2="12"></line>
+                    <line x1="8" y1="18" x2="21" y2="18"></line>
+                    <line x1="3" y1="6" x2="3.01" y2="6"></line>
+                    <line x1="3" y1="12" x2="3.01" y2="12"></line>
+                    <line x1="3" y1="18" x2="3.01" y2="18"></line>
+                  </svg>
+                </span>
+                <h2>Username Lists</h2>
+              </div>
               <span id="username-count" class="count-pill">0 usernames</span>
             </div>
             <div class="list-toolbar">
@@ -48,11 +66,11 @@
                   New
                 </button>
                 <button id="rename-username-list" class="ghost-button ghost-button-small" type="button">
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
                   Rename
                 </button>
                 <button id="delete-username-list" class="danger-button danger-button-small" type="button">
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
                   Delete
                 </button>
               </div>
@@ -80,9 +98,19 @@
             </div>
           </section>
 
-          <section class="card">
+          <section class="card main-tool-card followers-launch-card">
             <div class="card-heading">
-              <h2>Followers Tool</h2>
+              <div class="card-title">
+                <span class="card-title-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
+                    <circle cx="9" cy="7" r="4"></circle>
+                    <path d="M22 21v-2a4 4 0 0 0-3-3.87"></path>
+                    <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                  </svg>
+                </span>
+                <h2>Followers Tool</h2>
+              </div>
             </div>
             <p class="settings-copy">Scan followers from the active X profile tab, skip users already blocked, and send only a limited batch to the block API.</p>
             <div class="actions-row">
@@ -97,11 +125,15 @@
         <section class="view-panel" data-view-panel="settings">
           <section class="card settings-card">
             <div class="settings-header">
-              <button id="back-to-main" class="ghost-button" type="button">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
-                Back
-              </button>
-              <h2>Settings</h2>
+              <div class="card-title">
+                <span class="card-title-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="3"></circle>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                  </svg>
+                </span>
+                <h2>Settings</h2>
+              </div>
             </div>
             <p class="settings-copy">These settings affect block button appearance per surface, Add button appearance in user rows, visibility, and batch blocking from the popup.</p>
             <div class="setting-stack">
@@ -163,12 +195,12 @@
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
                 Back
               </button>
-              <h2>Follow graph</h2>
+              <h2>Followers Tool</h2>
             </div>
             <p class="settings-copy">Use the active X profile tab as the source, preview followers or following, then block only accounts that are not already blocked.</p>
-            <div class="followers-caution" role="note">
-              <span class="followers-caution-mark" aria-hidden="true">!</span>
-              <p class="followers-caution-copy">
+            <div class="followers-notice" data-tone="warning" role="note">
+              <span class="followers-notice-mark" aria-hidden="true">!</span>
+              <p class="followers-notice-copy">
                 Use with caution: blocking many accounts at once may look suspicious to X/Twitter.
                 <span class="followers-caution-help">
                   <button id="followers-caution-help" class="followers-caution-help-button" type="button" aria-label="Why use caution with mass blocking?" aria-describedby="followers-caution-tooltip">?</button>
@@ -191,7 +223,7 @@
               </div>
             </div>
             <div class="setting-row">
-              <label class="field-label setting-label" for="followers-scan-limit">Scan up to</label>
+              <label class="field-label setting-label" for="followers-scan-limit">Find up to</label>
               <div class="delay-control">
                 <input id="followers-scan-limit" class="delay-input" type="number" min="1" max="500" step="1" inputmode="numeric">
                 <span class="delay-unit">users</span>
@@ -215,18 +247,28 @@
               <p id="followers-progress-detail" class="block-progress-detail">Preview accounts first, then start blocking.</p>
             </section>
             <pre id="followers-preview" class="followers-preview"></pre>
+            <div id="followers-run-warning" class="followers-notice" data-tone="danger" role="note" hidden>
+              <span class="followers-notice-mark" aria-hidden="true">!</span>
+              <p class="followers-notice-copy"><b>Keep the popup open until blocking is complete.</b> Closing or canceling may cause already blocked accounts to be processed again.</p>
+            </div>
             <div class="actions-row actions-row-wrap">
               <button id="add-followers-to-list" class="ghost-button" type="button" disabled>
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                 Add to list
               </button>
-              <button id="block-follower-candidates" class="primary-button" type="button">
+              <button id="block-follower-candidates" class="danger-button" type="button">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
-                Block
+                <span id="block-follower-candidates-label">Block</span>
               </button>
               <button id="cancel-followers-run" class="danger-button" type="button" disabled>
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect></svg>
                 Cancel
+              </button>
+            </div>
+            <div class="actions-row followers-reset-row">
+              <button id="reset-follower-scan-session" class="ghost-button" type="button" disabled>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.2 16.5a9 9 0 1 0 1.8-11.2"></path><polyline points="3 4 3 10 9 10"></polyline></svg>
+                Reset scan
               </button>
             </div>
           </section>

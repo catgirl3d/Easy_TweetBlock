@@ -8,8 +8,6 @@ const {
   normalizeIdentityKeyListAll
 } = require('../src/shared/follower-candidates.js');
 const {
-  normalizeFollowersBlockLimit,
-  normalizeFollowersScanLimit,
   normalizeFollowersSource
 } = require('../src/shared/followers.js');
 const {
@@ -190,7 +188,7 @@ test('getActiveFollowerScanSession rejects expired sessions', () => {
   assert.equal(getActiveFollowerScanSession({ activeSession }, activeSession.key)?.key, activeSession.key);
 });
 
-test('createFollowerScanSessionKey is stable for normalized profile and limit inputs', () => {
+test('createFollowerScanSessionKey is stable for a normalized profile regardless of limits', () => {
   assert.equal(
     createFollowerScanSessionKey({
       targetScreenName: '@TargetUser',
@@ -201,13 +199,13 @@ test('createFollowerScanSessionKey is stable for normalized profile and limit in
     createFollowerScanSessionKey({
       targetScreenName: ' targetuser ',
       source: 'unknown',
-      blockLimit: 50,
-      scanLimit: 120
+      blockLimit: 1,
+      scanLimit: 500
     })
   );
 });
 
-test('createFollowerScanSessionKey stays aligned with shared followers normalization', () => {
+test('createFollowerScanSessionKey stays aligned with source normalization and excludes mutable limits', () => {
   const targetScreenName = ' @TargetUser ';
   const source = 'unexpected-source';
   const blockLimit = 9999;
@@ -222,11 +220,19 @@ test('createFollowerScanSessionKey stays aligned with shared followers normaliza
     }),
     [
       normalizeFollowersSource(source),
-      'targetuser',
-      normalizeFollowersBlockLimit(blockLimit),
-      normalizeFollowersScanLimit(scanLimit)
+      'targetuser'
     ].join(':')
   );
+});
+
+test('normalizeFollowerScanSession migrates legacy limit-bound session keys', () => {
+  const normalizedSession = normalizeFollowerScanSession(createSession({
+    key: 'followers:targetuser:50:120'
+  }));
+
+  assert.equal(normalizedSession.key, 'followers:targetuser');
+  assert.equal(normalizedSession.blockLimit, 50);
+  assert.equal(normalizedSession.scanLimit, 120);
 });
 
 test('normalizeFollowerScanSession rounds positive timestamps and zeroes invalid ones', () => {
