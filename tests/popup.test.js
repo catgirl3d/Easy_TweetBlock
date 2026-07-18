@@ -126,11 +126,27 @@ test('followers tool includes a caution note with a keyboard-accessible tooltip'
   const popupHtml = fs.readFileSync(path.join(__dirname, '..', 'src', 'popup', 'popup.html'), 'utf8');
   const popupCss = fs.readFileSync(path.join(__dirname, '..', 'src', 'popup', 'popup.css'), 'utf8');
 
-  assert.match(popupHtml, /class="followers-caution" role="note"/);
+  assert.match(popupHtml, /class="followers-notice" data-tone="warning" role="note"/);
   assert.match(popupHtml, /Use with caution: blocking many accounts at once may look suspicious to X\/Twitter\./);
   assert.match(popupHtml, /id="followers-caution-help"[\s\S]*aria-describedby="followers-caution-tooltip"/);
   assert.match(popupHtml, /id="followers-caution-tooltip" class="followers-caution-tooltip" role="tooltip"/);
   assert.match(popupCss, /\.followers-caution-help:hover \.followers-caution-tooltip,[\s\S]*\.followers-caution-help:focus-within \.followers-caution-tooltip/);
+});
+
+test('followers tool places a red run warning above the block actions', () => {
+  const popupHtml = fs.readFileSync(path.join(__dirname, '..', 'src', 'popup', 'popup.html'), 'utf8');
+  const popupCss = fs.readFileSync(path.join(__dirname, '..', 'src', 'popup', 'popup.css'), 'utf8');
+  const warningIndex = popupHtml.indexOf('id="followers-run-warning"');
+  const blockActionIndex = popupHtml.indexOf('id="block-follower-candidates"');
+
+  assert.equal(warningIndex < blockActionIndex, true);
+  assert.match(popupHtml, /id="followers-run-warning" class="followers-notice" data-tone="danger" role="note" hidden/);
+  assert.match(popupHtml, /Keep the popup open until blocking is complete\.<\/b> Closing or canceling can cause already blocked accounts to be processed again\./);
+  assert.match(popupCss, /\.followers-notice\s*\{[\s\S]*?border-radius: 10px;/);
+  assert.match(popupCss, /\.followers-notice\[hidden\]\s*\{[\s\S]*?display: none;/);
+  assert.match(popupCss, /\.followers-notice\[data-tone="warning"\]\s*\{[\s\S]*?border: 1px solid #f59e0b59;/);
+  assert.match(popupCss, /\.followers-notice\[data-tone="danger"\]\s*\{[\s\S]*?border: 1px solid #ef444470;/);
+  assert.doesNotMatch(popupCss, /\.followers-caution\s*\{|\.followers-run-warning\s*\{/);
 });
 
 test('followers tool does not render the popup debug log UI', () => {
@@ -433,6 +449,7 @@ function createPopupDocument() {
     'followers-progress-fill': createPopupElement(),
     'followers-progress-label': createPopupElement(),
     'followers-preview': createPopupElement(),
+    'followers-run-warning': createPopupElement({ hidden: true }),
     'followers-scan-limit': createPopupElement(),
     'followers-source-followers': createPopupElement(),
     'followers-source-following': createPopupElement(),
@@ -2666,6 +2683,7 @@ test('init scans followers in the active tab and blocks only the ready preview c
   assert.equal(getToastText(elements), 'Preview ready: 2 followers can be blocked from @targetuser.');
   assert.equal(elements['followers-summary'].textContent, 'Inspected 5 followers from @targetuser. Already blocked: 2. Blocked this session: 0. Ready: 2. More followers remain beyond this preview.');
   assert.equal(elements['followers-preview'].textContent, '@alice\n@bob');
+  assert.equal(elements['followers-run-warning'].hidden, false);
   assert.equal(elements['block-follower-candidates'].disabled, false);
 
   elements['block-follower-candidates'].click();
@@ -2689,6 +2707,7 @@ test('init scans followers in the active tab and blocks only the ready preview c
   assert.equal(elements['followers-progress-detail'].textContent, 'Blocked 2/2. Failed: 0. Delay used: 1100 ms between requests.');
   assert.equal(elements['followers-summary'].textContent, 'Inspected 5 followers from @targetuser. Already blocked: 2. Blocked this session: 2. Ready: 0. More followers remain beyond this preview.');
   assert.equal(elements['followers-preview'].textContent, 'No block-ready followers are queued right now. Continue scanning for the next batch.');
+  assert.equal(elements['followers-run-warning'].hidden, true);
   assert.equal(messages.length, 2);
   assert.equal(messages[0].tabId, 41);
   assert.deepEqual(messages[0].message.options, {

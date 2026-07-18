@@ -876,6 +876,7 @@
     const followersScanLimitElement = documentRef.getElementById('followers-scan-limit');
     const followersSummaryElement = documentRef.getElementById('followers-summary');
     const followersPreviewElement = documentRef.getElementById('followers-preview');
+    const followersRunWarningElement = documentRef.getElementById('followers-run-warning');
     const followersBlockProgressElement = documentRef.getElementById('followers-block-progress');
     const followersProgressCountElement = documentRef.getElementById('followers-progress-count');
     const followersProgressDetailElement = documentRef.getElementById('followers-progress-detail');
@@ -969,7 +970,7 @@
       return;
     }
 
-    if (!blocklist || !followers || !settings || !extensionApi || !shellElement || !statusElement || !toastRegionElement || !textareaElement || !usernameListSelectLabelElement || !usernameListSelectElement || !usernameListOptionsElement || !newUsernameListButton || !renameUsernameListButton || !deleteUsernameListButton || !importUsernamesButton || !importUsernamesFileInput || !delayInputElement || !pageButtonStyleTweetIconElement || !pageButtonStyleTweetTextElement || !pageButtonStyleProfileIconElement || !pageButtonStyleProfileTextElement || !pageButtonStyleUserCellIconElement || !pageButtonStyleUserCellTextElement || !showUserCellAddButtonElement || !openSettingsButton || !openFollowersButton || !backToMainButton || !backFromFollowersButton || !saveButton || !saveSettingsButton || !blockNowButton || !cancelFollowersRunButton || !countElement || !followersBlockLimitElement || !followersScanLimitElement || !followersSummaryElement || !followersPreviewElement || !followersBlockProgressElement || !followersProgressCountElement || !followersProgressDetailElement || !followersProgressFillElement || !followersProgressLabelElement || !followersSourceFollowersElement || !followersSourceFollowingElement || !scanFollowersButton || !scanFollowersButtonLabelElement || !blockFollowerCandidatesButton || !blockFollowerCandidatesButtonLabelElement || !resetFollowerScanSessionButton || !addFollowersToListButton || !clearListButton) {
+    if (!blocklist || !followers || !settings || !extensionApi || !shellElement || !statusElement || !toastRegionElement || !textareaElement || !usernameListSelectLabelElement || !usernameListSelectElement || !usernameListOptionsElement || !newUsernameListButton || !renameUsernameListButton || !deleteUsernameListButton || !importUsernamesButton || !importUsernamesFileInput || !delayInputElement || !pageButtonStyleTweetIconElement || !pageButtonStyleTweetTextElement || !pageButtonStyleProfileIconElement || !pageButtonStyleProfileTextElement || !pageButtonStyleUserCellIconElement || !pageButtonStyleUserCellTextElement || !showUserCellAddButtonElement || !openSettingsButton || !openFollowersButton || !backToMainButton || !backFromFollowersButton || !saveButton || !saveSettingsButton || !blockNowButton || !cancelFollowersRunButton || !countElement || !followersBlockLimitElement || !followersScanLimitElement || !followersSummaryElement || !followersPreviewElement || !followersRunWarningElement || !followersBlockProgressElement || !followersProgressCountElement || !followersProgressDetailElement || !followersProgressFillElement || !followersProgressLabelElement || !followersSourceFollowersElement || !followersSourceFollowingElement || !scanFollowersButton || !scanFollowersButtonLabelElement || !blockFollowerCandidatesButton || !blockFollowerCandidatesButtonLabelElement || !resetFollowerScanSessionButton || !addFollowersToListButton || !clearListButton) {
       return;
     }
 
@@ -1904,8 +1905,13 @@
       currentFollowersPreview = null;
       setFollowersSummary(summary);
       followersPreviewElement.textContent = '';
+      renderFollowersRunWarning();
       renderFollowersBlockButton();
       persistCurrentPopupState();
+    }
+
+    function renderFollowersRunWarning() {
+      followersRunWarningElement.hidden = !currentFollowersPreview?.candidates?.length;
     }
 
     function renderFollowersPreview(preview, { preserveProgress = false } = {}) {
@@ -1949,6 +1955,7 @@
           : { phase: 'idle' });
       }
 
+      renderFollowersRunWarning();
       renderFollowersBlockButton();
       persistCurrentPopupState();
     }

@@ -66,11 +66,11 @@
                   New
                 </button>
                 <button id="rename-username-list" class="ghost-button ghost-button-small" type="button">
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
                   Rename
                 </button>
                 <button id="delete-username-list" class="danger-button danger-button-small" type="button">
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
                   Delete
                 </button>
               </div>
@@ -198,9 +198,9 @@
               <h2>Followers Tool</h2>
             </div>
             <p class="settings-copy">Use the active X profile tab as the source, preview followers or following, then block only accounts that are not already blocked.</p>
-            <div class="followers-caution" role="note">
-              <span class="followers-caution-mark" aria-hidden="true">!</span>
-              <p class="followers-caution-copy">
+            <div class="followers-notice" data-tone="warning" role="note">
+              <span class="followers-notice-mark" aria-hidden="true">!</span>
+              <p class="followers-notice-copy">
                 Use with caution: blocking many accounts at once may look suspicious to X/Twitter.
                 <span class="followers-caution-help">
                   <button id="followers-caution-help" class="followers-caution-help-button" type="button" aria-label="Why use caution with mass blocking?" aria-describedby="followers-caution-tooltip">?</button>
@@ -247,6 +247,10 @@
               <p id="followers-progress-detail" class="block-progress-detail">Preview accounts first, then start blocking.</p>
             </section>
             <pre id="followers-preview" class="followers-preview"></pre>
+            <div id="followers-run-warning" class="followers-notice" data-tone="danger" role="note" hidden>
+              <span class="followers-notice-mark" aria-hidden="true">!</span>
+              <p class="followers-notice-copy"><b>Keep the popup open until blocking is complete.</b> Closing or canceling may cause already blocked accounts to be processed again.</p>
+            </div>
             <div class="actions-row actions-row-wrap">
               <button id="add-followers-to-list" class="ghost-button" type="button" disabled>
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
@@ -263,7 +267,7 @@
             </div>
             <div class="actions-row followers-reset-row">
               <button id="reset-follower-scan-session" class="ghost-button" type="button" disabled>
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"></path><polyline points="3 4 3 10 9 10"></polyline></svg>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.2 16.5a9 9 0 1 0 1.8-11.2"></path><polyline points="3 4 3 10 9 10"></polyline></svg>
                 Reset scan
               </button>
             </div>
