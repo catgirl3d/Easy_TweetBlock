@@ -262,30 +262,55 @@ function insertChildBefore(parent, child, referenceNode) {
 function createDocumentStub() {
   const styles = new Map();
   const createdElements = [];
-  const documentRef = {
+  let documentRef;
+
+  function createElementForDocument(tagName, trackElement) {
+    const element = createDomElement({
+      nodeType: 1,
+      ownerDocument: documentRef,
+      tagName
+    });
+
+    element.children = [];
+    Object.defineProperty(element, 'firstElementChild', {
+      get() {
+        return element.children[0] || null;
+      }
+    });
+    element.appendChild = (child) => {
+      insertChildBefore(element, child, null);
+    };
+    element.insertBefore = (child, referenceNode) => {
+      insertChildBefore(element, child, referenceNode);
+    };
+    element.replaceChildren = (...children) => {
+      for (const child of element.children) {
+        child.parentElement = null;
+      }
+
+      element.children = [];
+      element.textContent = '';
+
+      for (const child of children) {
+        insertChildBefore(element, child, null);
+      }
+    };
+
+    if (trackElement) {
+      createdElements.push(element);
+    }
+
+    return element;
+  }
+
+  documentRef = {
     body: {},
     nodeType: 9,
     createElement(tagName) {
-      const element = createDomElement({
-        nodeType: 1,
-        tagName
-      });
-
-      element.children = [];
-      Object.defineProperty(element, 'firstElementChild', {
-        get() {
-          return element.children[0] || null;
-        }
-      });
-      element.appendChild = (child) => {
-        insertChildBefore(element, child, null);
-      };
-      element.insertBefore = (child, referenceNode) => {
-        insertChildBefore(element, child, referenceNode);
-      };
-
-      createdElements.push(element);
-      return element;
+      return createElementForDocument(tagName, true);
+    },
+    createElementNS(_namespace, tagName) {
+      return createElementForDocument(tagName, false);
     },
     getElementById(id) {
       return styles.get(id) || null;
@@ -312,6 +337,23 @@ function createDocumentStub() {
     createdElements,
     documentRef
   };
+}
+
+function createButtonElementStub({ attributes = {}, dataset = {} } = {}) {
+  const { documentRef } = createDocumentStub();
+  const button = documentRef.createElement('button');
+
+  Object.assign(button.dataset, dataset);
+
+  for (const [name, value] of Object.entries(attributes)) {
+    button.setAttribute(name, value);
+  }
+
+  return button;
+}
+
+function getRenderedButtonIconPath(button) {
+  return button.children?.[0]?.children?.[0]?.getAttribute?.('d') || null;
 }
 
 function createStorageExtensionApi(initialStore = {}) {
@@ -924,46 +966,34 @@ test('setButtonState renders save-to-list labels and keeps listed buttons clicka
 });
 
 test('setButtonState renders save-to-list icons (plus and checkmark) in icon mode', (t) => {
-  const attributes = {
-    'data-easy-tweetblock-action': BUTTON_ACTIONS.saveToList
-  };
   setCurrentUserCellAddButtonStyle(PAGE_BLOCK_BUTTON_STYLES.icon);
   t.after(() => {
     setCurrentUserCellAddButtonStyle(DEFAULT_USER_CELL_ADD_BUTTON_STYLE);
   });
-  const button = {
+  const button = createButtonElementStub({
+    attributes: {
+      [BUTTON_ACTION_ATTRIBUTE]: BUTTON_ACTIONS.saveToList
+    },
     dataset: {
       easyTweetblockAction: BUTTON_ACTIONS.saveToList,
       surface: 'user-cell'
-    },
-    disabled: false,
-    getAttribute(name) {
-      return attributes[name] || null;
-    },
-    innerHTML: '',
-    textContent: '',
-    title: '',
-    setAttribute(name, value) {
-      attributes[name] = value;
     }
-  };
+  });
 
   setButtonState(button, 'idle', 'Felixmfdo');
-  assert.equal(button.innerHTML.includes('M11.25 4.75'), true); // ADD_ICON_SVG path
-  assert.equal(button.innerHTML.includes('M9.55 16.94'), false); // CHECK_ICON_SVG path not present yet
+  assert.match(getRenderedButtonIconPath(button), /^M11\.25 4\.75/);
 
   setButtonState(button, 'listed', 'Felixmfdo');
-  assert.equal(button.innerHTML.includes('M11.25 4.75'), false); // ADD_ICON_SVG path should not be present
-  assert.equal(button.innerHTML.includes('M9.55 16.94'), true); // CHECK_ICON_SVG path present
+  assert.match(getRenderedButtonIconPath(button), /^M9\.55 16\.94/);
 
   setButtonState(button, 'running-remove', 'Felixmfdo');
-  assert.equal(button.innerHTML.includes('M9.55 16.94'), true); // CHECK_ICON_SVG path remains present while removing
+  assert.match(getRenderedButtonIconPath(button), /^M9\.55 16\.94/);
 
   setButtonState(button, 'error-remove', 'Felixmfdo');
-  assert.equal(button.innerHTML.includes('M9.55 16.94'), true); // CHECK_ICON_SVG path remains present for remove retry
+  assert.match(getRenderedButtonIconPath(button), /^M9\.55 16\.94/);
 
   setButtonState(button, 'success', 'Felixmfdo');
-  assert.equal(button.innerHTML.includes('M9.55 16.94'), true); // CHECK_ICON_SVG path present
+  assert.match(getRenderedButtonIconPath(button), /^M9\.55 16\.94/);
 });
 
 test('setButtonState keeps the block icon for user-cell success states in icon mode', (t) => {
@@ -974,26 +1004,21 @@ test('setButtonState keeps the block icon for user-cell success states in icon m
   t.after(() => {
     setCurrentNativeButtonStyles(DEFAULT_PAGE_BLOCK_BUTTON_STYLES);
   });
-  const button = {
+  const button = createButtonElementStub({
     dataset: {
       kind: BUTTON_KINDS.native,
       surface: 'user-cell'
-    },
-    disabled: false,
-    innerHTML: '',
-    textContent: '',
-    title: '',
-    setAttribute() {}
-  };
+    }
+  });
 
   setButtonState(button, 'idle', 'Felixmfdo');
-  assert.equal(button.innerHTML.includes('M12 3.75'), true);
+  assert.match(getRenderedButtonIconPath(button), /^M12 3\.75/);
 
   setButtonState(button, 'success', 'Felixmfdo');
-  assert.equal(button.innerHTML.includes('M12 3.75'), true);
+  assert.match(getRenderedButtonIconPath(button), /^M12 3\.75/);
 
   setButtonState(button, 'blocked', 'Felixmfdo');
-  assert.equal(button.innerHTML.includes('M12 3.75'), true);
+  assert.match(getRenderedButtonIconPath(button), /^M12 3\.75/);
 });
 
 test('setButtonState keeps the block icon for non-list native buttons after success', (t) => {
@@ -1004,21 +1029,15 @@ test('setButtonState keeps the block icon for non-list native buttons after succ
   t.after(() => {
     setCurrentNativeButtonStyles(DEFAULT_PAGE_BLOCK_BUTTON_STYLES);
   });
-  const button = {
+  const button = createButtonElementStub({
     dataset: {
       kind: BUTTON_KINDS.native,
       surface: 'tweet'
-    },
-    disabled: false,
-    innerHTML: '',
-    textContent: '',
-    title: '',
-    setAttribute() {}
-  };
+    }
+  });
 
   setButtonState(button, 'success', 'Felixmfdo');
-  assert.equal(button.innerHTML.includes('M12 3.75'), true);
-  assert.equal(button.innerHTML.includes('M9.55 16.94'), false);
+  assert.match(getRenderedButtonIconPath(button), /^M12 3\.75/);
 });
 
 test('setButtonState recalculates display style from current settings instead of cached dataset', (t) => {
@@ -1032,18 +1051,13 @@ test('setButtonState recalculates display style from current settings instead of
     [PAGE_BUTTON_STYLE_SURFACES.tweet]: PAGE_BLOCK_BUTTON_STYLES.text
   });
 
-  const nativeButton = {
+  const nativeButton = createButtonElementStub({
     dataset: {
       displayStyle: PAGE_BLOCK_BUTTON_STYLES.icon,
       kind: BUTTON_KINDS.native,
       surface: PAGE_BUTTON_STYLE_SURFACES.tweet
-    },
-    disabled: false,
-    innerHTML: '',
-    textContent: '',
-    title: '',
-    setAttribute() {}
-  };
+    }
+  });
 
   setButtonState(nativeButton, 'idle', 'Felixmfdo');
   assert.equal(nativeButton.dataset.displayStyle, PAGE_BLOCK_BUTTON_STYLES.text);
@@ -1055,34 +1069,24 @@ test('setButtonState recalculates display style from current settings instead of
   });
   setButtonState(nativeButton, 'error', 'Felixmfdo');
   assert.equal(nativeButton.dataset.displayStyle, PAGE_BLOCK_BUTTON_STYLES.icon);
-  assert.equal(nativeButton.innerHTML.includes('M12 3.75'), true);
+  assert.match(getRenderedButtonIconPath(nativeButton), /^M12 3\.75/);
 
   setCurrentUserCellAddButtonStyle(PAGE_BLOCK_BUTTON_STYLES.icon);
 
-  const listAttributes = {
-    [BUTTON_ACTION_ATTRIBUTE]: BUTTON_ACTIONS.saveToList
-  };
-  const listButton = {
+  const listButton = createButtonElementStub({
+    attributes: {
+      [BUTTON_ACTION_ATTRIBUTE]: BUTTON_ACTIONS.saveToList
+    },
     dataset: {
       displayStyle: PAGE_BLOCK_BUTTON_STYLES.text,
       easyTweetblockAction: BUTTON_ACTIONS.saveToList,
       surface: PAGE_BUTTON_STYLE_SURFACES.userCell
-    },
-    disabled: false,
-    getAttribute(name) {
-      return listAttributes[name] || null;
-    },
-    innerHTML: '',
-    textContent: '',
-    title: '',
-    setAttribute(name, value) {
-      listAttributes[name] = value;
     }
-  };
+  });
 
   setButtonState(listButton, 'idle', 'Felixmfdo');
   assert.equal(listButton.dataset.displayStyle, PAGE_BLOCK_BUTTON_STYLES.icon);
-  assert.equal(listButton.innerHTML.includes('M11.25 4.75'), true);
+  assert.match(getRenderedButtonIconPath(listButton), /^M11\.25 4\.75/);
 
   setCurrentUserCellAddButtonStyle(PAGE_BLOCK_BUTTON_STYLES.text);
   setButtonState(listButton, 'listed', 'Felixmfdo');
@@ -3027,7 +3031,7 @@ test('normalizePageBlockButtonStyle defaults to icon and accepts the text varian
 
 test('syncStoredPageButtonStyle and observeStoredPageButtonStyle apply saved native button styles per surface', async () => {
   const listeners = [];
-  const tweetButton = createDomElement({
+  const tweetButton = createButtonElementStub({
     dataset: {
       kind: BUTTON_KINDS.native,
       surface: PAGE_BUTTON_STYLE_SURFACES.tweet,
@@ -3035,7 +3039,7 @@ test('syncStoredPageButtonStyle and observeStoredPageButtonStyle apply saved nat
       state: 'idle'
     }
   });
-  const profileButton = createDomElement({
+  const profileButton = createButtonElementStub({
     dataset: {
       kind: BUTTON_KINDS.native,
       surface: PAGE_BUTTON_STYLE_SURFACES.profile,
@@ -3043,7 +3047,7 @@ test('syncStoredPageButtonStyle and observeStoredPageButtonStyle apply saved nat
       state: 'idle'
     }
   });
-  const userCellButton = createDomElement({
+  const userCellButton = createButtonElementStub({
     dataset: {
       kind: BUTTON_KINDS.native,
       surface: PAGE_BUTTON_STYLE_SURFACES.userCell,
@@ -3089,7 +3093,7 @@ test('syncStoredPageButtonStyle and observeStoredPageButtonStyle apply saved nat
   assert.equal(tweetButton.dataset.displayStyle, PAGE_BLOCK_BUTTON_STYLES.text);
   assert.equal(tweetButton.textContent, 'Block');
   assert.equal(profileButton.dataset.displayStyle, PAGE_BLOCK_BUTTON_STYLES.icon);
-  assert.equal(profileButton.innerHTML.includes('<svg'), true);
+  assert.match(getRenderedButtonIconPath(profileButton), /^M12 3\.75/);
   assert.equal(userCellButton.dataset.displayStyle, PAGE_BLOCK_BUTTON_STYLES.text);
   assert.equal(userCellButton.textContent, 'Block');
 
@@ -3105,16 +3109,16 @@ test('syncStoredPageButtonStyle and observeStoredPageButtonStyle apply saved nat
   }, 'local');
 
   assert.equal(tweetButton.dataset.displayStyle, PAGE_BLOCK_BUTTON_STYLES.icon);
-  assert.equal(tweetButton.innerHTML.includes('<svg'), true);
+  assert.match(getRenderedButtonIconPath(tweetButton), /^M12 3\.75/);
   assert.equal(profileButton.dataset.displayStyle, PAGE_BLOCK_BUTTON_STYLES.text);
   assert.equal(profileButton.textContent, 'Block');
   assert.equal(userCellButton.dataset.displayStyle, PAGE_BLOCK_BUTTON_STYLES.icon);
-  assert.equal(userCellButton.innerHTML.includes('<svg'), true);
+  assert.match(getRenderedButtonIconPath(userCellButton), /^M12 3\.75/);
 });
 
 test('syncStoredUserCellAddButtonVisibility and observeStoredUserCellAddButtonVisibility hide and show Add buttons', async () => {
   const listeners = [];
-  const button = createDomElement({
+  const button = createButtonElementStub({
     dataset: {
       action: BUTTON_ACTIONS.saveToList,
       easyTweetblockAction: BUTTON_ACTIONS.saveToList,
@@ -3165,7 +3169,7 @@ test('syncStoredUserCellAddButtonVisibility and observeStoredUserCellAddButtonVi
 
 test('syncStoredUserCellAddButtonStyle and observeStoredUserCellAddButtonStyle update Add buttons', async () => {
   const listeners = [];
-  const button = createDomElement({
+  const button = createButtonElementStub({
     dataset: {
       action: BUTTON_ACTIONS.saveToList,
       easyTweetblockAction: BUTTON_ACTIONS.saveToList,
@@ -3214,7 +3218,7 @@ test('syncStoredUserCellAddButtonStyle and observeStoredUserCellAddButtonStyle u
   }, 'local');
 
   assert.equal(button.dataset.displayStyle, PAGE_BLOCK_BUTTON_STYLES.icon);
-  assert.equal(button.innerHTML.includes('<svg'), true);
+  assert.match(getRenderedButtonIconPath(button), /^M11\.25 4\.75/);
 });
 
 test('stored setting observers ignore unrelated changes and unsubscribe listeners', () => {
@@ -3307,7 +3311,7 @@ test('attachButtonToTweet inserts the native button into the first action wrappe
   assert.equal(parentElement.children[0], leadingAction);
   assert.equal(leadingAction.children[0].dataset.kind, BUTTON_KINDS.native);
   assert.equal(leadingAction.children[0].dataset.displayStyle, PAGE_BLOCK_BUTTON_STYLES.icon);
-  assert.equal(leadingAction.children[0].innerHTML.includes('<svg'), true);
+  assert.match(getRenderedButtonIconPath(leadingAction.children[0]), /^M12 3\.75/);
   assert.equal(leadingAction.children[1], leadingActionButton);
   assert.equal(parentElement.children[1].querySelector('button'), caretButton);
   assert.equal(localButtonGroup.children[0], caretButton);
@@ -3440,7 +3444,7 @@ test('new native block buttons use the configured style for each surface on crea
   assert.equal(tweetButton.dataset.displayStyle, PAGE_BLOCK_BUTTON_STYLES.text);
   assert.equal(tweetButton.textContent, 'Block');
   assert.equal(profileButton.dataset.displayStyle, PAGE_BLOCK_BUTTON_STYLES.icon);
-  assert.equal(profileButton.innerHTML.includes('<svg'), true);
+  assert.match(getRenderedButtonIconPath(profileButton), /^M12 3\.75/);
   assert.equal(userCellButton.dataset.displayStyle, PAGE_BLOCK_BUTTON_STYLES.text);
   assert.equal(userCellButton.textContent, 'Block');
 });
@@ -3513,7 +3517,7 @@ test('createUserCellListButton uses the configured Add button icon on creation a
 
   assert.equal(button.dataset.displayStyle, PAGE_BLOCK_BUTTON_STYLES.icon);
   assert.equal(button.textContent, '');
-  assert.equal(button.innerHTML.includes('M11.25 4.75'), true);
+  assert.match(getRenderedButtonIconPath(button), /^M11\.25 4\.75/);
 
   button.click();
   await flushAsyncWork();
@@ -3521,7 +3525,7 @@ test('createUserCellListButton uses the configured Add button icon on creation a
 
   assert.deepEqual(extensionApi.store[sharedBlocklist.USERNAME_LISTS_STORAGE_KEY][0].usernames, ['milana62234788']);
   assert.equal(button.dataset.state, 'listed');
-  assert.equal(button.innerHTML.includes('M9.55 16.94'), true);
+  assert.match(getRenderedButtonIconPath(button), /^M9\.55 16\.94/);
 });
 
 test('createUserCellListButton keeps an unlisted button idle while hydrating the active list', async (t) => {
@@ -3552,7 +3556,7 @@ test('createUserCellListButton keeps an unlisted button idle while hydrating the
 
   assert.equal(button.dataset.state, 'idle');
   assert.equal(button.title, 'Add @Aungko1531435 to the active list');
-  assert.equal(button.innerHTML.includes('M11.25 4.75'), true);
+  assert.match(getRenderedButtonIconPath(button), /^M11\.25 4\.75/);
 });
 
 test('createUserCellListButton keeps remove retry semantics when removal fails', async (t) => {

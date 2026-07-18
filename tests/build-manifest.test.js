@@ -22,6 +22,7 @@ test("buildManifest merges the Chrome overlay into the base manifest", () => {
 
   assert.equal(manifest.manifest_version, 3);
   assert.equal(manifest.name, "Easy TweetBlock");
+  assert.equal("browser_specific_settings" in manifest, false);
   assert.equal(manifest.background.service_worker, "src/background/background-chrome.js");
   assert.deepEqual(manifest.host_permissions, [
     "https://abs.twimg.com/*",
@@ -140,6 +141,15 @@ test("buildManifest merges the Firefox overlay into the base manifest", () => {
 
   assert.equal(manifest.manifest_version, 3);
   assert.equal(manifest.browser_specific_settings.gecko.id, "easy-tweetblock@local.dev");
+  assert.equal(manifest.browser_specific_settings.gecko.strict_min_version, "142.0");
+  assert.deepEqual(manifest.browser_specific_settings.gecko.data_collection_permissions, {
+    required: [
+      "authenticationInfo",
+      "websiteActivity",
+      "websiteContent"
+    ]
+  });
+  assert.equal("gecko_android" in manifest.browser_specific_settings, false);
   assert.deepEqual(manifest.background.scripts, ["src/background/background-firefox.js"]);
 });
 

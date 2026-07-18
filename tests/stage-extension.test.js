@@ -48,6 +48,15 @@ test("stageExtension prepares a Firefox stage with the Firefox manifest overlay"
 
     assert.equal(stageDir, path.join(distDir, "firefox-package"));
     assert.equal(manifest.browser_specific_settings.gecko.id, "easy-tweetblock@local.dev");
+    assert.equal(manifest.browser_specific_settings.gecko.strict_min_version, "142.0");
+    assert.deepEqual(manifest.browser_specific_settings.gecko.data_collection_permissions, {
+      required: [
+        "authenticationInfo",
+        "websiteActivity",
+        "websiteContent"
+      ]
+    });
+    assert.equal("gecko_android" in manifest.browser_specific_settings, false);
     assert.deepEqual(manifest.background.scripts, ["src/background/background-firefox.js"]);
   } finally {
     fs.rmSync(distDir, { recursive: true, force: true });

@@ -118,9 +118,19 @@ test("packageExtension creates deterministic Chrome ZIP and Firefox XPI archives
       assert.equal(entryNames.includes("assets/extension/16.png"), true);
       assert.equal(entryNames.includes("src/popup/popup.html"), true);
       assert.equal(entryNames.includes("src/content/main.js"), true);
+      assert.equal(entryNames.some((entryName) => entryName.startsWith("docs/")), false);
 
       if (target === "firefox") {
         assert.deepEqual(manifest.background.scripts, ["src/background/background-firefox.js"]);
+        assert.deepEqual(manifest.browser_specific_settings.gecko.data_collection_permissions, {
+          required: [
+            "authenticationInfo",
+            "websiteActivity",
+            "websiteContent"
+          ]
+        });
+        assert.equal(manifest.browser_specific_settings.gecko.strict_min_version, "142.0");
+        assert.equal("gecko_android" in manifest.browser_specific_settings, false);
       } else {
         assert.equal(manifest.background.service_worker, "src/background/background-chrome.js");
       }
