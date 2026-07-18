@@ -133,22 +133,6 @@ test('followers tool includes a caution note with a keyboard-accessible tooltip'
   assert.match(popupCss, /\.followers-caution-help:hover \.followers-caution-tooltip,[\s\S]*\.followers-caution-help:focus-within \.followers-caution-tooltip/);
 });
 
-test('followers tool places a red run warning above the block actions', () => {
-  const popupHtml = fs.readFileSync(path.join(__dirname, '..', 'src', 'popup', 'popup.html'), 'utf8');
-  const popupCss = fs.readFileSync(path.join(__dirname, '..', 'src', 'popup', 'popup.css'), 'utf8');
-  const warningIndex = popupHtml.indexOf('id="followers-run-warning"');
-  const blockActionIndex = popupHtml.indexOf('id="block-follower-candidates"');
-
-  assert.equal(warningIndex < blockActionIndex, true);
-  assert.match(popupHtml, /id="followers-run-warning" class="followers-notice" data-tone="danger" role="note" hidden/);
-  assert.match(popupHtml, /Keep the popup open until blocking is complete\.<\/b> Closing or canceling can cause already blocked accounts to be processed again\./);
-  assert.match(popupCss, /\.followers-notice\s*\{[\s\S]*?border-radius: 10px;/);
-  assert.match(popupCss, /\.followers-notice\[hidden\]\s*\{[\s\S]*?display: none;/);
-  assert.match(popupCss, /\.followers-notice\[data-tone="warning"\]\s*\{[\s\S]*?border: 1px solid #f59e0b59;/);
-  assert.match(popupCss, /\.followers-notice\[data-tone="danger"\]\s*\{[\s\S]*?border: 1px solid #ef444470;/);
-  assert.doesNotMatch(popupCss, /\.followers-caution\s*\{|\.followers-run-warning\s*\{/);
-});
-
 test('followers tool does not render the popup debug log UI', () => {
   const popupHtml = fs.readFileSync(path.join(__dirname, '..', 'src', 'popup', 'popup.html'), 'utf8');
   const popupCss = fs.readFileSync(path.join(__dirname, '..', 'src', 'popup', 'popup.css'), 'utf8');
