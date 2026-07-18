@@ -11,6 +11,16 @@
     "build:manifest:chrome": "node scripts/build-manifest.js chrome dist/chrome-package",
     "stage:firefox": "node scripts/stage-extension.js firefox",
     "stage:chrome": "node scripts/stage-extension.js chrome",
-    "build": "npm test && npm run stage:firefox && npm run stage:chrome"
+    "package:firefox": "node scripts/package-extension.js firefox",
+    "package:chrome": "node scripts/package-extension.js chrome",
+    "package": "npm run package:firefox && npm run package:chrome",
+    "build:production:firefox": "npm run package:firefox",
+    "build:production:chrome": "npm run package:chrome",
+    "build:production": "npm test && npm run package",
+    "build": "npm run build:production"
+  },
+  "devDependencies": {
+    "yauzl": "3.4.0",
+    "yazl": "3.3.1"
   }
 }
