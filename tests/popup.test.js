@@ -55,8 +55,10 @@ test('popup header uses the packaged extension icon', () => {
 test('popup save and import buttons use distinct semantic hover colors', () => {
   const popupCss = fs.readFileSync(path.join(__dirname, '..', 'src', 'popup', 'popup.css'), 'utf8');
 
-  assert.match(popupCss, /#save-blocklist:hover:not\(:disabled\)[\s\S]*?rgba\(16, 185, 129, 0\.14\)/);
-  assert.match(popupCss, /#import-usernames:hover:not\(:disabled\)[\s\S]*?rgba\(59, 130, 246, 0\.14\)/);
+  assert.match(popupCss, /--accent-green-alpha-14:\s*#10b98124;/);
+  assert.match(popupCss, /--accent-import-alpha-14:\s*#3b82f624;/);
+  assert.match(popupCss, /#save-blocklist:hover:not\(:disabled\)[\s\S]*?var\(--accent-green-alpha-14\)/);
+  assert.match(popupCss, /#import-usernames:hover:not\(:disabled\)[\s\S]*?var\(--accent-import-alpha-14\)/);
 });
 
 test('followers tool includes a caution note with a keyboard-accessible tooltip', () => {

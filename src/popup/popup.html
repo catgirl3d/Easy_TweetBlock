@@ -31,9 +31,21 @@
     <div class="view-window">
       <div class="view-track">
         <section class="view-panel view-panel-stack" data-view-panel="main">
-          <section class="card">
+          <section class="card main-tool-card username-lists-card">
             <div class="card-heading">
-              <h2>Username Lists</h2>
+              <div class="card-title">
+                <span class="card-title-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="8" y1="6" x2="21" y2="6"></line>
+                    <line x1="8" y1="12" x2="21" y2="12"></line>
+                    <line x1="8" y1="18" x2="21" y2="18"></line>
+                    <line x1="3" y1="6" x2="3.01" y2="6"></line>
+                    <line x1="3" y1="12" x2="3.01" y2="12"></line>
+                    <line x1="3" y1="18" x2="3.01" y2="18"></line>
+                  </svg>
+                </span>
+                <h2>Username Lists</h2>
+              </div>
               <span id="username-count" class="count-pill">0 usernames</span>
             </div>
             <div class="list-toolbar">
@@ -80,9 +92,19 @@
             </div>
           </section>
 
-          <section class="card">
+          <section class="card main-tool-card followers-launch-card">
             <div class="card-heading">
-              <h2>Followers Tool</h2>
+              <div class="card-title">
+                <span class="card-title-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
+                    <circle cx="9" cy="7" r="4"></circle>
+                    <path d="M22 21v-2a4 4 0 0 0-3-3.87"></path>
+                    <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                  </svg>
+                </span>
+                <h2>Followers Tool</h2>
+              </div>
             </div>
             <p class="settings-copy">Scan followers from the active X profile tab, skip users already blocked, and send only a limited batch to the block API.</p>
             <div class="actions-row">

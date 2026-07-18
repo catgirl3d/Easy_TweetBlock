@@ -1,3 +1,8 @@
+:root {
+  --etb-primary: #007cff;
+  --etb-primary-rgb: 0, 124, 255;
+}
+
 [data-easy-tweetblock-button] {
   align-items: center;
   appearance: none;
@@ -101,8 +106,8 @@
 
 [data-easy-tweetblock-button][data-easy-tweetblock-action="save-to-list"][data-surface="user-cell"] {
   box-sizing: border-box;
-  border: 1px solid rgba(29, 155, 240, 0.45);
-  color: rgb(29, 155, 240);
+  border: 1px solid rgba(var(--etb-primary-rgb), 0.45);
+  color: var(--etb-primary);
   flex-shrink: 0;
   font-family: "TwitterChirp", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   font-size: 14px;
@@ -117,7 +122,7 @@
 
 [data-easy-tweetblock-button][data-easy-tweetblock-action="save-to-list"][data-surface="user-cell"][data-display-style="icon"] {
   align-items: center;
-  border: 1px solid rgba(29, 155, 240, 0.45);
+  border: 1px solid rgba(var(--etb-primary-rgb), 0.45);
   border-radius: 9999px;
   flex: 0 0 32px;
   height: 32px;
@@ -220,9 +225,9 @@
 }
 
 [data-easy-tweetblock-button][data-easy-tweetblock-action="save-to-list"][data-surface="user-cell"]:hover:not(:disabled) {
-  background: rgba(29, 155, 240, 0.1);
-  border-color: rgba(29, 155, 240, 0.6);
-  color: rgb(29, 155, 240);
+  background: rgba(var(--etb-primary-rgb), 0.1);
+  border-color: rgba(var(--etb-primary-rgb), 0.6);
+  color: var(--etb-primary);
 }
 
 [data-easy-tweetblock-button][data-state="running"],
