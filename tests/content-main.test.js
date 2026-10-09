@@ -1037,6 +1037,16 @@ test('content styles define X dark theme colors for outline icon buttons', () =>
   assert.match(contentCss, /color:\s*rgb\(239, 243, 244\);/);
 });
 
+test('content styles enforce row flex layout on user cell actions with !important', () => {
+  const contentCss = fs.readFileSync(path.join(__dirname, '..', 'src', 'content', 'main.css'), 'utf8');
+
+  assert.match(contentCss, /\[data-easy-tweetblock-user-cell-actions\]\s*\{[^}]*align-items:\s*center\s*!important;/s);
+  assert.match(contentCss, /\[data-easy-tweetblock-user-cell-actions\]\s*\{[^}]*display:\s*inline-flex\s*!important;/s);
+  assert.match(contentCss, /\[data-easy-tweetblock-user-cell-actions\]\s*\{[^}]*flex-direction:\s*row\s*!important;/s);
+  assert.match(contentCss, /\[data-easy-tweetblock-user-cell-actions\]\s*\{[^}]*flex-shrink:\s*0\s*!important;/s);
+  assert.match(contentCss, /\[data-easy-tweetblock-user-cell-actions\]\s*\{[^}]*justify-content:\s*flex-end\s*!important;/s);
+});
+
 test('setButtonState uses API-specific labels and titles for the experimental button', () => {
   const attributes = {};
   const button = {

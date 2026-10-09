@@ -74,11 +74,11 @@
 }
 
 [data-easy-tweetblock-user-cell-actions] {
-  align-items: center;
-  display: inline-flex;
-  flex-direction: row;
-  flex-shrink: 0;
-  justify-content: flex-end;
+  align-items: center !important;
+  display: inline-flex !important;
+  flex-direction: row !important;
+  flex-shrink: 0 !important;
+  justify-content: flex-end !important;
 }
 
 [data-easy-tweetblock-button][data-kind="native"][data-surface="profile"] {
