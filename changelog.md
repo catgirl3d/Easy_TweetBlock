@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.3.0 - 2026-10-09
+
+Adds an ad block history view, plus fixes for buttons injected into X.
+
+### Key Changes
+
+- Added an ad block history: successful auto-blocks from Hide + block mode are saved locally, and a new link with a counter in Settings → Ad filtering opens a newest-first list with profile links and dates. Re-blocking an account updates its entry; unblocking it on X does not remove it. The list refreshes while the popup is open.
+- Fixed the block button falling out of the tweet header action bar on tweets that have body buttons (such as "Show more") or footer actions.
+- Fixed the block button placement on non-English X interfaces by detecting the Grok button through its label text.
+- Fixed the action buttons in user rows stacking vertically in Chrome after X re-rendered a row; they now stay in one horizontal row.
+- Updated the extension description used in stores to reflect promoted post filtering and username list management.
+- Simplified the Settings description.
+
 ## v0.2.1 - 2026-10-09
 
 Trust and permission fixes for the Firefox install and update flow.
