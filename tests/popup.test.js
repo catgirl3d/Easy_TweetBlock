@@ -52,6 +52,16 @@ test('popup header uses the packaged extension icon', () => {
   assert.doesNotMatch(popupHtml, /class="logo-shield"/);
 });
 
+test('popup declares a dark canvas so Firefox paints the extension panel dark', () => {
+  const popupHtml = fs.readFileSync(path.join(__dirname, '..', 'src', 'popup', 'popup.html'), 'utf8');
+  const popupCss = fs.readFileSync(path.join(__dirname, '..', 'src', 'popup', 'popup.css'), 'utf8');
+
+  assert.match(popupHtml, /<meta name="color-scheme" content="dark">/);
+  assert.match(popupCss, /--bg-canvas:\s*#05060a;/);
+  assert.match(popupCss, /--bg-radial:\s*radial-gradient\(circle at 50% 0%, #171c30 0%, var\(--bg-canvas\) 100%\);/);
+  assert.match(popupCss, /body\s*\{[\s\S]*?background-color:\s*var\(--bg-canvas\);/);
+});
+
 test('settings view replaces its topbar action with back navigation', () => {
   const popupHtml = fs.readFileSync(path.join(__dirname, '..', 'src', 'popup', 'popup.html'), 'utf8');
   const popupCss = fs.readFileSync(path.join(__dirname, '..', 'src', 'popup', 'popup.css'), 'utf8');

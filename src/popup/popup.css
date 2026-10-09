@@ -1,6 +1,7 @@
 :root {
   --bg-primary: #0a0b14;
-  --bg-radial: radial-gradient(circle at 50% 0%, #171c30 0%, #05060a 100%);
+  --bg-canvas: #05060a;
+  --bg-radial: radial-gradient(circle at 50% 0%, #171c30 0%, var(--bg-canvas) 100%);
   --bg-card: #151b308c;
   --bg-card-solid: #111526;
   --bg-input: #07080f;
@@ -54,6 +55,7 @@ body {
   margin: 0;
   font-family: var(--font-sans);
   background: var(--bg-radial);
+  background-color: var(--bg-canvas);
   color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
