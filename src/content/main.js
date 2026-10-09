@@ -52,6 +52,7 @@
     PAGE_BLOCK_BUTTON_STYLES,
     PAGE_BLOCK_BUTTON_STYLES_STORAGE_KEY,
     PAGE_BUTTON_STYLE_SURFACES,
+    PAGE_THEME_ATTRIBUTE,
     RESERVED_PATH_SEGMENTS,
     SELECTORS,
     USER_BY_SCREEN_NAME_FIELD_TOGGLES,
@@ -245,6 +246,8 @@
     if (surface) {
       button.dataset.surface = surface;
     }
+
+    namespace.applyButtonTheme(button);
 
     namespace.setButtonState(button, 'idle', screenName, kind || BUTTON_KINDS.native);
 
@@ -774,6 +777,18 @@
     }
   }
 
+  function applyPageThemeToDocument(documentRef = document) {
+    if (!documentRef || typeof documentRef.querySelectorAll !== 'function') {
+      return;
+    }
+
+    const buttons = Array.from(documentRef.querySelectorAll(`[${BLOCK_BUTTON_ATTRIBUTE}]`));
+
+    for (const button of buttons) {
+      namespace.applyButtonTheme(button, documentRef);
+    }
+  }
+
   async function syncStoredPageButtonStyle(globalRef = globalThis) {
     const styles = await namespace.getStoredPageButtonStyles(globalRef);
     namespace.setCurrentNativeButtonStyles(styles);
@@ -1047,14 +1062,32 @@
     }
 
     const observer = new globalRef.MutationObserver((mutations) => {
+      let pageThemeChanged = false;
+
       for (const mutation of mutations) {
+        if (mutation.type === 'attributes') {
+          pageThemeChanged = true;
+          continue;
+        }
+
         for (const node of mutation.addedNodes) {
           if (node?.nodeType === 1) {
             processNode(node, globalRef.document);
           }
         }
       }
+
+      if (pageThemeChanged) {
+        applyPageThemeToDocument(globalRef.document);
+      }
     });
+
+    if (globalRef.document.documentElement) {
+      observer.observe(globalRef.document.documentElement, {
+        attributes: true,
+        attributeFilter: [PAGE_THEME_ATTRIBUTE]
+      });
+    }
 
     observer.observe(globalRef.document.body, {
       childList: true,
@@ -1064,6 +1097,7 @@
 
   Object.assign(namespace, {
     applyCurrentNativeButtonStyleToDocument,
+    applyPageThemeToDocument,
     cancelFollowerRun,
     createApiBlockButton,
     createNativeBlockButton,
@@ -1191,7 +1225,10 @@
       runProfileNativeBlockFlow,
       runNativeBlockFlow,
       scanFollowersForBlocking: namespace.scanFollowersForBlocking,
+      applyButtonTheme: namespace.applyButtonTheme,
+      detectPageTheme: namespace.detectPageTheme,
       applyCurrentNativeButtonStyleToDocument,
+      applyPageThemeToDocument,
       setCurrentNativeButtonStyle: namespace.setCurrentNativeButtonStyle,
       setCurrentNativeButtonStyles: namespace.setCurrentNativeButtonStyles,
       setCurrentUserCellAddButtonStyle,

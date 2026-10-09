@@ -1,4 +1,6 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
 
 const sharedBlocklist = require('../src/shared/blocklist.js');
@@ -32,7 +34,9 @@ const {
   USER_CELL_ADD_BUTTON_STYLE_STORAGE_KEY,
   SELECTORS,
   USER_BY_SCREEN_NAME_QUERY_IDS,
+  applyButtonTheme,
   applyCurrentNativeButtonStyleToDocument,
+  applyPageThemeToDocument,
   attachButtonToProfilePage,
   attachButtonToTweet,
   attachButtonToUserCell,
@@ -54,6 +58,7 @@ const {
   createUserCellBlockButton,
   createUserCellListButton,
   discoverGraphqlQueryIds,
+  detectPageTheme,
   extractGraphqlQueryIdsFromScriptText,
   extractXClientTransactionIndicesFromScriptText,
   extractXClientTransactionKeyFromDocument,
@@ -846,6 +851,121 @@ test('setButtonState updates the visible label and accessibility metadata', (t) 
   assert.equal(button.dataset.state, 'success');
   assert.equal(button.textContent, 'Blocked');
   assert.equal(getButtonTitle(BUTTON_KINDS.native, 'Felixmfdo', 'success'), 'Blocked @Felixmfdo using X menu flow');
+});
+
+test('detectPageTheme follows the X data-theme attribute on the document root', () => {
+  assert.equal(
+    detectPageTheme({ documentElement: { getAttribute: (name) => (name === 'data-theme' ? 'dark' : null) } }),
+    'dark'
+  );
+  assert.equal(
+    detectPageTheme({ documentElement: { getAttribute: (name) => (name === 'data-theme' ? 'light' : null) } }),
+    'light'
+  );
+});
+
+function createFallbackThemeDocument({ backgroundColor, colorScheme = 'normal' }) {
+  return {
+    body: { getAttribute: () => null },
+    documentElement: { getAttribute: () => null },
+    defaultView: {
+      getComputedStyle() {
+        return { backgroundColor, colorScheme };
+      }
+    }
+  };
+}
+
+test('detectPageTheme falls back to the computed canvas colors and color scheme', () => {
+  assert.equal(
+    detectPageTheme(createFallbackThemeDocument({ backgroundColor: 'rgb(21, 32, 43)' })),
+    'dark'
+  );
+  assert.equal(
+    detectPageTheme(createFallbackThemeDocument({ backgroundColor: 'rgb(255, 255, 255)' })),
+    'light'
+  );
+  assert.equal(
+    detectPageTheme(createFallbackThemeDocument({ backgroundColor: 'rgb(255, 255, 255)', colorScheme: 'dark' })),
+    'dark'
+  );
+});
+
+test('detectPageTheme memoizes the fallback theme per document', () => {
+  let styleReads = 0;
+  const documentRef = {
+    body: { getAttribute: () => null },
+    documentElement: { getAttribute: () => null },
+    defaultView: {
+      getComputedStyle() {
+        styleReads += 1;
+        return { backgroundColor: 'rgb(0, 0, 0)', colorScheme: 'normal' };
+      }
+    }
+  };
+
+  assert.equal(detectPageTheme(documentRef), 'dark');
+  const readsAfterFirstCall = styleReads;
+
+  assert.equal(detectPageTheme(documentRef), 'dark');
+  assert.equal(styleReads, readsAfterFirstCall);
+});
+
+test('detectPageTheme falls back to the prefers-color-scheme media query', () => {
+  const documentRef = {
+    documentElement: { getAttribute: () => null },
+    defaultView: {
+      matchMedia: () => ({ matches: true })
+    }
+  };
+
+  assert.equal(detectPageTheme(documentRef), 'dark');
+});
+
+test('applyButtonTheme records the detected page theme on managed buttons', () => {
+  const { documentRef } = createDocumentStub();
+  documentRef.documentElement = { getAttribute: (name) => (name === 'data-theme' ? 'dark' : null) };
+  const button = documentRef.createElement('button');
+
+  assert.equal(applyButtonTheme(button, documentRef), 'dark');
+  assert.equal(button.dataset.theme, 'dark');
+});
+
+test('applyPageThemeToDocument refreshes the theme on every managed button', () => {
+  const buttons = [{ dataset: {} }, { dataset: {} }];
+  const documentRef = {
+    documentElement: { getAttribute: () => 'dark' },
+    querySelectorAll(selector) {
+      assert.equal(selector, `[${BLOCK_BUTTON_ATTRIBUTE}]`);
+      return buttons;
+    }
+  };
+
+  applyPageThemeToDocument(documentRef);
+
+  assert.equal(buttons[0].dataset.theme, 'dark');
+  assert.equal(buttons[1].dataset.theme, 'dark');
+});
+
+test('new managed buttons pick up the X theme on creation', (t) => {
+  const { documentRef } = createDocumentStub();
+  const { tweetNode } = createTweetNode('TweetUser');
+
+  documentRef.documentElement = { getAttribute: (name) => (name === 'data-theme' ? 'dark' : null) };
+  useGlobalOverrides(t, { document: documentRef });
+
+  const button = createNativeBlockButton(tweetNode, documentRef);
+
+  assert.equal(button.dataset.theme, 'dark');
+});
+
+test('content styles define X dark theme colors for outline icon buttons', () => {
+  const contentCss = fs.readFileSync(path.join(__dirname, '..', 'src', 'content', 'main.css'), 'utf8');
+
+  assert.match(contentCss, /\[data-theme="dark"\][^{]*\[data-surface="profile"\][^{]*\[data-display-style="icon"\]/);
+  assert.match(contentCss, /\[data-theme="dark"\][^{]*\[data-surface="user-cell"\][^{]*\[data-display-style="icon"\]/);
+  assert.match(contentCss, /border-color:\s*rgb\(83, 100, 113\);/);
+  assert.match(contentCss, /color:\s*rgb\(239, 243, 244\);/);
 });
 
 test('setButtonState uses API-specific labels and titles for the experimental button', () => {

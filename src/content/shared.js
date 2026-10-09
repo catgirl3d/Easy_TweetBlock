@@ -497,6 +497,149 @@
     button.replaceChildren(svg);
   }
 
+  const PAGE_THEME_ATTRIBUTE = 'data-theme';
+  const PAGE_THEME_FALLBACK_TTL_MS = 1000;
+  const pageThemeFallbackCache = new WeakMap();
+
+  function normalizePageThemeValue(value) {
+    const normalized = String(value ?? '').trim().toLowerCase();
+
+    return normalized === 'dark' || normalized === 'light' ? normalized : null;
+  }
+
+  function normalizeColorSchemeValue(value) {
+    const tokens = String(value ?? '').toLowerCase().split(/\s+/).filter(Boolean);
+
+    if (tokens.includes('dark') && !tokens.includes('light')) {
+      return 'dark';
+    }
+
+    if (tokens.includes('light') && !tokens.includes('dark')) {
+      return 'light';
+    }
+
+    return null;
+  }
+
+  function getBackgroundLuminance(colorValue) {
+    const match = /^rgba?\(\s*([^)]*)\)$/i.exec(String(colorValue ?? '').trim());
+
+    if (!match) {
+      return null;
+    }
+
+    const components = match[1].replace(/\//g, ' ').split(/[\s,]+/).filter(Boolean);
+
+    if (components.length < 3) {
+      return null;
+    }
+
+    const [red, green, blue] = components.slice(0, 3).map((component) => Number.parseFloat(component));
+
+    if ([red, green, blue].some((component) => !Number.isFinite(component))) {
+      return null;
+    }
+
+    const alphaComponent = components[3];
+    const alpha = alphaComponent === undefined
+      ? 1
+      : alphaComponent.endsWith('%')
+        ? Number.parseFloat(alphaComponent) / 100
+        : Number.parseFloat(alphaComponent);
+
+    if (!(alpha > 0.5)) {
+      return null;
+    }
+
+    return (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255;
+  }
+
+  function resolvePageThemeFallback(documentRef) {
+    const root = documentRef?.documentElement || null;
+    const body = documentRef?.body || null;
+    const view = documentRef?.defaultView || null;
+    const getComputedStyleFn = typeof view?.getComputedStyle === 'function'
+      ? view.getComputedStyle.bind(view)
+      : null;
+
+    if (getComputedStyleFn) {
+      const schemeElement = root || body;
+
+      if (schemeElement) {
+        const computedScheme = normalizeColorSchemeValue(getComputedStyleFn(schemeElement)?.colorScheme);
+
+        if (computedScheme) {
+          return computedScheme;
+        }
+      }
+
+      for (const element of [body, root]) {
+        if (!element) {
+          continue;
+        }
+
+        const luminance = getBackgroundLuminance(getComputedStyleFn(element)?.backgroundColor);
+
+        if (luminance !== null) {
+          return luminance < 0.5 ? 'dark' : 'light';
+        }
+      }
+    }
+
+    if (typeof view?.matchMedia === 'function') {
+      try {
+        if (view.matchMedia('(prefers-color-scheme: dark)').matches) {
+          return 'dark';
+        }
+      } catch {
+        // Fall through to the light default when the media query cannot be evaluated.
+      }
+    }
+
+    return 'light';
+  }
+
+  function detectPageTheme(documentRef) {
+    const root = documentRef?.documentElement || null;
+    const body = documentRef?.body || null;
+    const explicitTheme = normalizePageThemeValue(root?.getAttribute?.(PAGE_THEME_ATTRIBUTE))
+      || normalizePageThemeValue(body?.getAttribute?.(PAGE_THEME_ATTRIBUTE));
+
+    if (explicitTheme) {
+      return explicitTheme;
+    }
+
+    const cacheableDocument = documentRef && typeof documentRef === 'object' ? documentRef : null;
+
+    if (cacheableDocument) {
+      const cachedTheme = pageThemeFallbackCache.get(cacheableDocument);
+
+      if (cachedTheme && cachedTheme.expiresAt > Date.now()) {
+        return cachedTheme.theme;
+      }
+    }
+
+    const theme = resolvePageThemeFallback(documentRef);
+
+    if (cacheableDocument) {
+      pageThemeFallbackCache.set(cacheableDocument, {
+        expiresAt: Date.now() + PAGE_THEME_FALLBACK_TTL_MS,
+        theme
+      });
+    }
+
+    return theme;
+  }
+
+  function applyButtonTheme(button, documentRef = button?.ownerDocument) {
+    if (!button?.dataset) {
+      return null;
+    }
+
+    button.dataset.theme = detectPageTheme(documentRef || globalThis.document);
+    return button.dataset.theme;
+  }
+
   function setButtonState(button, state, screenName, kind = button?.dataset?.kind || BUTTON_KINDS.native) {
     const action = getButtonAction(button);
     const surface = button?.dataset?.surface || null;
@@ -551,14 +694,17 @@
     PAGE_BLOCK_BUTTON_STYLES,
     PAGE_BLOCK_BUTTON_STYLES_STORAGE_KEY,
     PAGE_BUTTON_STYLE_SURFACES,
+    PAGE_THEME_ATTRIBUTE,
     USER_CELL_ADD_BUTTON_STYLE_STORAGE_KEY,
     USER_CELL_ADD_BUTTON_VISIBILITY_STORAGE_KEY,
     RESERVED_PATH_SEGMENTS,
     SELECTORS,
     WAIT_INTERVAL_MS,
     WAIT_TIMEOUT_MS,
+    applyButtonTheme,
     createUsernameSet,
     createAbortError,
+    detectPageTheme,
     extractScreenNameFromHref,
     getButtonLabel,
     getButtonAction,
