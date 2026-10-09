@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.2.1 - 2026-10-09
+
+Trust and permission fixes for the Firefox install and update flow.
+
+### Key Changes
+
+- The extension now declares that it does not collect or transmit any data. The Firefox install page used to claim it collects authentication information, website activity, and website content, even though everything stays on your device.
+- Removed the unused abs.twimg.com permission, so Firefox now asks for access to two sites instead of three.
+- Added a warning with an "Enable access" button in the popup: if access to X/Twitter is disabled (for example, after an update added a new host, or you revoked it yourself), you can restore it in one click.
+
 ## v0.2.0 - 2026-10-09
 
 Feature update with promoted post filtering, a refreshed popup, and dark theme fixes.

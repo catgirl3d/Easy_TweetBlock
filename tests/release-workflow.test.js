@@ -16,10 +16,10 @@ test("normalizeTagName accepts version tags with and without v prefix", () => {
 });
 
 test("validateReleaseTag matches the manifest version", () => {
-  assert.deepEqual(validateReleaseTag("v0.2.0"), {
-    manifestVersion: "0.2.0",
-    normalizedTag: "0.2.0",
-    tagName: "v0.2.0"
+  assert.deepEqual(validateReleaseTag("v0.2.1"), {
+    manifestVersion: "0.2.1",
+    normalizedTag: "0.2.1",
+    tagName: "v0.2.1"
   });
   assert.throws(() => validateReleaseTag("v0.1.1"), /does not match/);
 });
