@@ -50,6 +50,8 @@
     || (typeof module !== 'undefined' && module.exports ? require('../shared/username-lists.js') : null);
   const xPlatformApi = globalThis.EasyTweetBlockXPlatform
     || (typeof module !== 'undefined' && module.exports ? require('../shared/x-platform.js') : null);
+  const hostPermissionsApi = globalThis.EasyTweetBlockHostPermissions
+    || (typeof module !== 'undefined' && module.exports ? require('../shared/host-permissions.js') : null);
 
   if (!popupDebugApi) {
     throw new Error('Missing Easy TweetBlock popup debug API.');
@@ -107,6 +109,11 @@
 
   if (!xPlatformApi) {
     renderFatalPopupError(new Error('Missing Easy TweetBlock x-platform API.'));
+    return;
+  }
+
+  if (!hostPermissionsApi) {
+    renderFatalPopupError(new Error('Missing Easy TweetBlock host permissions API.'));
     return;
   }
 
@@ -861,6 +868,8 @@
     const userCellAddButtonStyleIconElement = documentRef.getElementById('user-cell-add-button-style-icon');
     const userCellAddButtonStyleTextElement = documentRef.getElementById('user-cell-add-button-style-text');
     const showUserCellAddButtonElement = documentRef.getElementById('show-user-cell-add-button');
+    const hostPermissionsNoticeElement = documentRef.getElementById('host-permissions-notice');
+    const enableHostPermissionsButton = documentRef.getElementById('enable-host-permissions');
     const settingsUnsavedBarElement = documentRef.getElementById('settings-unsaved-bar');
     const saveSettingsTopButton = documentRef.getElementById('save-settings-top');
     const adFilterModeOffElement = documentRef.getElementById('ad-filter-mode-off');
@@ -995,7 +1004,7 @@
       return;
     }
 
-    if (!blocklist || !followers || !settings || !extensionApi || !shellElement || !statusElement || !toastRegionElement || !textareaElement || !usernameListSelectLabelElement || !usernameListSelectElement || !usernameListOptionsElement || !newUsernameListButton || !renameUsernameListButton || !deleteUsernameListButton || !importUsernamesButton || !importUsernamesFileInput || !delayInputElement || !pageButtonStyleTweetIconElement || !pageButtonStyleTweetTextElement || !pageButtonStyleProfileIconElement || !pageButtonStyleProfileTextElement || !pageButtonStyleUserCellIconElement || !pageButtonStyleUserCellTextElement || !showUserCellAddButtonElement || !settingsUnsavedBarElement || !saveSettingsTopButton || !adFilterModeOffElement || !adFilterModeHideElement || !adFilterModeHideBlockElement || !openSettingsButton || !openFollowersButton || !backToMainButton || !backFromFollowersButton || !saveButton || !saveSettingsButton || !blockNowButton || !cancelFollowersRunButton || !countElement || !followersBlockLimitElement || !followersScanLimitElement || !followersSummaryElement || !followersPreviewElement || !followersRunWarningElement || !followersBlockProgressElement || !followersProgressCountElement || !followersProgressDetailElement || !followersProgressFillElement || !followersProgressLabelElement || !followersSourceFollowersElement || !followersSourceFollowingElement || !scanFollowersButton || !scanFollowersButtonLabelElement || !blockFollowerCandidatesButton || !blockFollowerCandidatesButtonLabelElement || !resetFollowerScanSessionRow || !resetFollowerScanSessionButton || !addFollowersToListButton || !clearListButton) {
+    if (!blocklist || !followers || !settings || !extensionApi || !shellElement || !statusElement || !toastRegionElement || !textareaElement || !usernameListSelectLabelElement || !usernameListSelectElement || !usernameListOptionsElement || !newUsernameListButton || !renameUsernameListButton || !deleteUsernameListButton || !importUsernamesButton || !importUsernamesFileInput || !delayInputElement || !pageButtonStyleTweetIconElement || !pageButtonStyleTweetTextElement || !pageButtonStyleProfileIconElement || !pageButtonStyleProfileTextElement || !pageButtonStyleUserCellIconElement || !pageButtonStyleUserCellTextElement || !showUserCellAddButtonElement || !hostPermissionsNoticeElement || !enableHostPermissionsButton || !settingsUnsavedBarElement || !saveSettingsTopButton || !adFilterModeOffElement || !adFilterModeHideElement || !adFilterModeHideBlockElement || !openSettingsButton || !openFollowersButton || !backToMainButton || !backFromFollowersButton || !saveButton || !saveSettingsButton || !blockNowButton || !cancelFollowersRunButton || !countElement || !followersBlockLimitElement || !followersScanLimitElement || !followersSummaryElement || !followersPreviewElement || !followersRunWarningElement || !followersBlockProgressElement || !followersProgressCountElement || !followersProgressDetailElement || !followersProgressFillElement || !followersProgressLabelElement || !followersSourceFollowersElement || !followersSourceFollowingElement || !scanFollowersButton || !scanFollowersButtonLabelElement || !blockFollowerCandidatesButton || !blockFollowerCandidatesButtonLabelElement || !resetFollowerScanSessionRow || !resetFollowerScanSessionButton || !addFollowersToListButton || !clearListButton) {
       return;
     }
 
@@ -1026,6 +1035,8 @@
     }
 
     void emitPopupOpenDebug(extensionApi);
+
+    void refreshHostPermissionsNotice();
 
     function isPopupBusy() {
       return isHydratingPopupState || isSaving || isBlocking || isFollowersScanning || isFollowersBlocking || isFollowersSessionUpdating;
@@ -2204,6 +2215,38 @@
         });
     }
 
+    function refreshHostPermissionsNotice() {
+      return hostPermissionsApi.hasRequiredHostPermissions(extensionApi)
+        .then((granted) => {
+          hostPermissionsNoticeElement.hidden = granted;
+        })
+        .catch((error) => {
+          logPopupError('Failed to check host permissions.', error);
+        });
+    }
+
+    function handleEnableHostPermissionsClick() {
+      enableHostPermissionsButton.disabled = true;
+
+      hostPermissionsApi.requestRequiredHostPermissions(extensionApi)
+        .then((granted) => {
+          if (!granted) {
+            setStatus('Access to X/Twitter is still disabled.', { tone: 'warning' });
+            return;
+          }
+
+          hostPermissionsNoticeElement.hidden = true;
+          setStatus('Site access enabled. Reload open X tabs to see the buttons.', { tone: 'success' });
+        })
+        .catch((error) => {
+          logPopupError('Failed to request host permissions.', error);
+          setStatus(error instanceof Error ? error.message : String(error), { tone: 'error' });
+        })
+        .finally(() => {
+          enableHostPermissionsButton.disabled = false;
+        });
+    }
+
     async function cancelActiveFollowerRun() {
       const activeRunId = currentFollowersBlockRunId || currentFollowersScanRunId;
       const activeTabId = currentFollowerRunTabId;
@@ -3055,6 +3098,8 @@
     saveButton.addEventListener('click', () => {
       handleAsyncPopupAction('saveBlocklist', saveBlocklist);
     });
+
+    enableHostPermissionsButton.addEventListener('click', handleEnableHostPermissionsClick);
 
     saveSettingsButton.addEventListener('click', () => {
       handleAsyncPopupAction('saveSettings', saveSettings);

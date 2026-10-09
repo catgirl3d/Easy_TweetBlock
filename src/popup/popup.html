@@ -39,6 +39,15 @@
       <div class="view-track">
         <section class="view-panel view-panel-stack" data-view-panel="main">
           <section class="card main-tool-card username-lists-card">
+            <div id="host-permissions-notice" class="settings-unsaved-bar" hidden>
+              <div class="followers-notice settings-unsaved-notice" data-tone="warning" role="note">
+                <span class="followers-notice-mark" aria-hidden="true">!</span>
+                <p class="followers-notice-copy">Easy TweetBlock needs access to X/Twitter to block accounts.</p>
+              </div>
+              <button id="enable-host-permissions" class="toolbar-button" type="button">
+                <span>Enable access</span>
+              </button>
+            </div>
             <div class="card-heading">
               <div class="card-title">
                 <span class="card-title-icon" aria-hidden="true">
@@ -321,6 +330,7 @@
   <script src="../shared/usernames.js"></script>
   <script src="../shared/identity.js"></script>
   <script src="../shared/x-platform.js"></script>
+  <script src="../shared/host-permissions.js"></script>
   <script src="../shared/follower-candidates.js"></script>
   <script src="../shared/username-lists.js"></script>
   <script src="../shared/blocklist.js"></script>

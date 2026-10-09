@@ -164,6 +164,15 @@ test('followers tool includes a caution note with a keyboard-accessible tooltip'
   assert.match(popupCss, /\.followers-caution-help:hover \.followers-caution-tooltip,[\s\S]*\.followers-caution-help:focus-within \.followers-caution-tooltip/);
 });
 
+test('popup surfaces missing site access through the shared notice component', () => {
+  const popupHtml = fs.readFileSync(path.join(__dirname, '..', 'src', 'popup', 'popup.html'), 'utf8');
+
+  assert.match(popupHtml, /<div id="host-permissions-notice" class="settings-unsaved-bar" hidden>/);
+  assert.match(popupHtml, /class="followers-notice settings-unsaved-notice" data-tone="warning" role="note"/);
+  assert.match(popupHtml, /id="host-permissions-notice"[\s\S]*?id="enable-host-permissions" class="toolbar-button" type="button"/);
+  assert.match(popupHtml, /<script src="\.\.\/shared\/host-permissions\.js"><\/script>/);
+});
+
 test('followers tool does not render the popup debug log UI', () => {
   const popupHtml = fs.readFileSync(path.join(__dirname, '..', 'src', 'popup', 'popup.html'), 'utf8');
   const popupCss = fs.readFileSync(path.join(__dirname, '..', 'src', 'popup', 'popup.css'), 'utf8');
@@ -474,6 +483,8 @@ function createPopupDocument() {
     'followers-source-following': createPopupElement(),
     'followers-summary': createPopupElement(),
     'delete-username-list': createPopupElement(),
+    'enable-host-permissions': createPopupElement(),
+    'host-permissions-notice': createPopupElement({ hidden: true }),
     'import-usernames': createPopupElement(),
     'import-usernames-file': createPopupElement({ files: [] }),
     'new-username-list': createPopupElement(),
@@ -3501,4 +3512,120 @@ test('init renders fatal popup text when the initial popup load rejects', async 
 
   assert.equal(documentRef.body.textContent.includes('storage exploded'), true);
   assert.equal(documentRef.body.textContent.includes('Easy TweetBlock popup failed to load.'), true);
+});
+
+test('init surfaces revoked site access and re-enables it through the shared notice action', async () => {
+  const calls = [];
+  const grantedOrigins = new Set();
+  const extensionApi = {
+    ...createStorageExtensionApi(),
+    permissions: {
+      contains(details) {
+        calls.push({ details, method: 'contains' });
+        return Promise.resolve(details.origins.every((origin) => grantedOrigins.has(origin)));
+      },
+      request(details) {
+        calls.push({ details, method: 'request' });
+
+        for (const origin of details.origins) {
+          grantedOrigins.add(origin);
+        }
+
+        return Promise.resolve(true);
+      }
+    }
+  };
+  const { documentRef, elements } = createPopupDocument();
+
+  init(documentRef, extensionApi, sharedBlocklist, sharedFollowers, sharedSettings, sharedFollowerScanSessions);
+  await flushAsyncWork();
+
+  assert.equal(elements['host-permissions-notice'].hidden, false);
+
+  elements['enable-host-permissions'].click();
+
+  assert.equal(elements['enable-host-permissions'].disabled, true);
+  assert.deepEqual(calls.filter(({ method }) => method === 'request'), [{
+    details: { origins: ['https://x.com/*', 'https://twitter.com/*'] },
+    method: 'request'
+  }]);
+
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  assert.equal(elements['enable-host-permissions'].disabled, false);
+  assert.equal(elements['host-permissions-notice'].hidden, true);
+  assert.equal(getToastText(elements), 'Site access enabled. Reload open X tabs to see the buttons.');
+});
+
+test('init keeps the site access notice hidden while every required origin is granted', async () => {
+  const extensionApi = {
+    ...createStorageExtensionApi(),
+    permissions: {
+      contains() {
+        return Promise.resolve(true);
+      },
+      request() {
+        throw new Error('request must not be called when nothing is missing');
+      }
+    }
+  };
+  const { documentRef, elements } = createPopupDocument();
+
+  init(documentRef, extensionApi, sharedBlocklist, sharedFollowers, sharedSettings, sharedFollowerScanSessions);
+  await flushAsyncWork();
+
+  assert.equal(elements['host-permissions-notice'].hidden, true);
+});
+
+test('init keeps the site access notice visible when the enable request is denied', async () => {
+  const extensionApi = {
+    ...createStorageExtensionApi(),
+    permissions: {
+      contains() {
+        return Promise.resolve(false);
+      },
+      request() {
+        return Promise.resolve(false);
+      }
+    }
+  };
+  const { documentRef, elements } = createPopupDocument();
+
+  init(documentRef, extensionApi, sharedBlocklist, sharedFollowers, sharedSettings, sharedFollowerScanSessions);
+  await flushAsyncWork();
+
+  assert.equal(elements['host-permissions-notice'].hidden, false);
+
+  elements['enable-host-permissions'].click();
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  assert.equal(elements['host-permissions-notice'].hidden, false);
+  assert.equal(getToastText(elements), 'Access to X/Twitter is still disabled.');
+});
+
+test('init reports a failed site access request without hiding the notice', async () => {
+  const extensionApi = {
+    ...createStorageExtensionApi(),
+    permissions: {
+      contains() {
+        return Promise.resolve(false);
+      },
+      request() {
+        return Promise.reject(new Error('site access request exploded'));
+      }
+    }
+  };
+  const { documentRef, elements } = createPopupDocument();
+
+  init(documentRef, extensionApi, sharedBlocklist, sharedFollowers, sharedSettings, sharedFollowerScanSessions);
+  await flushAsyncWork();
+
+  elements['enable-host-permissions'].click();
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  assert.equal(elements['host-permissions-notice'].hidden, false);
+  assert.equal(getToastText(elements), 'site access request exploded');
 });
