@@ -86,6 +86,25 @@ test('settings card uses the shared title icon markup', () => {
   assert.match(settingsPanel, /class="settings-header">\s*<div class="card-title">[\s\S]*?class="card-title-icon"[\s\S]*?<h2>Settings<\/h2>/);
 });
 
+test('ad filtering uses a three-way segmented control', () => {
+  const popupHtml = fs.readFileSync(path.join(__dirname, '..', 'src', 'popup', 'popup.html'), 'utf8');
+  const popupCss = fs.readFileSync(path.join(__dirname, '..', 'src', 'popup', 'popup.css'), 'utf8');
+
+  assert.match(popupHtml, /<button id="ad-filter-mode-off" class="segment-button" type="button">Off<\/button>/);
+  assert.match(popupHtml, /<button id="ad-filter-mode-hide" class="segment-button" type="button">Hide<\/button>/);
+  assert.match(popupHtml, /<button id="ad-filter-mode-hide-block" class="segment-button" type="button">Hide \+ block<\/button>/);
+  assert.match(popupCss, /\.segmented-control-ad-filter\s*\{[\s\S]*?grid-template-columns: repeat\(3, minmax\(0, 1fr\)\);/);
+  assert.match(popupCss, /\.segmented-control-ad-filter:has\(\.segment-button\[data-active="true"\]:nth-child\(3\)\)::before\s*\{[\s\S]*?transform: translateX\(calc\(200% \+ 6px\)\);/);
+});
+
+test('settings expose an unsaved changes notice with a top save action', () => {
+  const popupHtml = fs.readFileSync(path.join(__dirname, '..', 'src', 'popup', 'popup.html'), 'utf8');
+
+  assert.match(popupHtml, /<div id="settings-unsaved-bar" class="settings-unsaved-bar" hidden>/);
+  assert.match(popupHtml, /id="settings-unsaved-bar"[\s\S]*?data-tone="warning"[\s\S]*?Unsaved changes[\s\S]*?id="save-settings-top"/);
+  assert.match(popupHtml, /<button id="save-settings-top" class="toolbar-button" type="button">/);
+});
+
 test('segmented controls use the shared blue-gray surface', () => {
   const popupCss = fs.readFileSync(path.join(__dirname, '..', 'src', 'popup', 'popup.css'), 'utf8');
 
@@ -429,6 +448,9 @@ function createPopupElement(overrides = {}) {
 
 function createPopupDocument() {
   const elements = {
+    'ad-filter-mode-hide': createPopupElement({ setAttribute() {} }),
+    'ad-filter-mode-hide-block': createPopupElement({ setAttribute() {} }),
+    'ad-filter-mode-off': createPopupElement({ setAttribute() {} }),
     'add-followers-to-list': createPopupElement(),
     'back-to-main': createPopupElement(),
     'back-from-followers': createPopupElement(),
@@ -471,6 +493,8 @@ function createPopupDocument() {
     'scan-followers-preview-label': createPopupElement({ textContent: 'Scan' }),
     'save-blocklist': createPopupElement(),
     'save-settings': createPopupElement(),
+    'save-settings-top': createPopupElement(),
+    'settings-unsaved-bar': createPopupElement({ hidden: true }),
     'user-cell-add-button-style-icon': createPopupElement({ setAttribute() {} }),
     'user-cell-add-button-style-text': createPopupElement({ setAttribute() {} }),
     'show-user-cell-add-button': createPopupElement({ checked: false }),
@@ -1251,6 +1275,9 @@ test('init loads stored popup state and supports settings navigation', async () 
     },
     async getStoredUserCellAddButtonVisibility() {
       return false;
+    },
+    async getStoredAdFilterMode() {
+      return sharedSettings.AD_FILTER_MODES.hideAndBlock;
     }
   };
 
@@ -1273,6 +1300,9 @@ test('init loads stored popup state and supports settings navigation', async () 
   assert.equal(elements['user-cell-add-button-style-icon'].dataset.active, 'true');
   assert.equal(elements['user-cell-add-button-style-text'].dataset.active, 'false');
   assert.equal(elements['show-user-cell-add-button'].checked, false);
+  assert.equal(elements['ad-filter-mode-hide-block'].dataset.active, 'true');
+  assert.equal(elements['ad-filter-mode-hide'].dataset.active, 'false');
+  assert.equal(elements['ad-filter-mode-off'].dataset.active, 'false');
   assert.equal(elements.status.textContent, 'Save usernames for later, or block the whole list immediately through any open X tab.');
 
   elements['open-settings'].click();
@@ -1284,6 +1314,9 @@ test('init loads stored popup state and supports settings navigation', async () 
   elements['page-button-style-tweet-icon'].click();
   assert.equal(elements['page-button-style-tweet-icon'].dataset.active, 'true');
   assert.equal(elements['page-button-style-tweet-text'].dataset.active, 'false');
+  elements['ad-filter-mode-off'].click();
+  assert.equal(elements['ad-filter-mode-off'].dataset.active, 'true');
+  assert.equal(elements['ad-filter-mode-hide-block'].dataset.active, 'false');
 
   elements['back-to-main'].click();
   assert.equal(elements['popup-shell'].dataset.view, POPUP_VIEWS.main);
@@ -1293,11 +1326,192 @@ test('init loads stored popup state and supports settings navigation', async () 
   assert.equal(elements['page-button-style-user-cell-text'].dataset.active, 'true');
   assert.equal(elements['user-cell-add-button-style-icon'].dataset.active, 'true');
   assert.equal(elements['show-user-cell-add-button'].checked, false);
+  assert.equal(elements['ad-filter-mode-hide-block'].dataset.active, 'true');
 
   elements['open-followers'].click();
   assert.equal(elements['popup-shell'].dataset.view, POPUP_VIEWS.followers);
   elements['back-from-followers'].click();
   assert.equal(elements['popup-shell'].dataset.view, POPUP_VIEWS.main);
+});
+
+function createSettingsInitBlocklist() {
+  return {
+    ...sharedBlocklist,
+    async getStoredUsernameListState() {
+      return {
+        activeList: {
+          id: 'blocklist',
+          name: 'Blocklist',
+          usernames: []
+        },
+        activeListId: 'blocklist',
+        lists: [{
+          id: 'blocklist',
+          name: 'Blocklist',
+          usernames: []
+        }]
+      };
+    }
+  };
+}
+
+function createSettingsInitSettings(overrides = {}) {
+  return {
+    ...sharedSettings,
+    async getStoredBatchBlockDelayMs() {
+      return 1400;
+    },
+    async getStoredPageBlockButtonStyles() {
+      return sharedSettings.DEFAULT_PAGE_BLOCK_BUTTON_STYLES;
+    },
+    async getStoredUserCellAddButtonStyle() {
+      return sharedSettings.DEFAULT_USER_CELL_ADD_BUTTON_STYLE;
+    },
+    async getStoredUserCellAddButtonVisibility() {
+      return true;
+    },
+    async getStoredAdFilterMode() {
+      return sharedSettings.AD_FILTER_MODES.hide;
+    },
+    ...overrides
+  };
+}
+
+test('settings flag segmented and toggle drafts as unsaved and clear them when reverted', async () => {
+  const { documentRef, elements } = createPopupDocument();
+
+  init(documentRef, { runtime: {}, tabs: {} }, createSettingsInitBlocklist(), sharedFollowers, createSettingsInitSettings());
+  await flushAsyncWork();
+
+  elements['open-settings'].click();
+  assert.equal(elements['settings-unsaved-bar'].hidden, true);
+
+  elements['ad-filter-mode-hide-block'].click();
+  assert.equal(elements['settings-unsaved-bar'].hidden, false);
+  elements['ad-filter-mode-hide'].click();
+  assert.equal(elements['settings-unsaved-bar'].hidden, true);
+
+  elements['page-button-style-tweet-text'].click();
+  assert.equal(elements['settings-unsaved-bar'].hidden, false);
+  elements['page-button-style-tweet-icon'].click();
+  assert.equal(elements['settings-unsaved-bar'].hidden, true);
+
+  elements['show-user-cell-add-button'].checked = false;
+  elements['show-user-cell-add-button'].change();
+  assert.equal(elements['settings-unsaved-bar'].hidden, false);
+  elements['show-user-cell-add-button'].checked = true;
+  elements['show-user-cell-add-button'].change();
+  assert.equal(elements['settings-unsaved-bar'].hidden, true);
+
+  elements['back-to-main'].click();
+  elements['open-settings'].click();
+  assert.equal(elements['settings-unsaved-bar'].hidden, true);
+});
+
+test('settings flag an edited delay as unsaved until it is reverted', async () => {
+  const { documentRef, elements } = createPopupDocument();
+
+  init(documentRef, { runtime: {}, tabs: {} }, createSettingsInitBlocklist(), sharedFollowers, createSettingsInitSettings());
+  await flushAsyncWork();
+
+  elements['open-settings'].click();
+  elements['batch-block-delay-ms'].value = '2500';
+  elements['batch-block-delay-ms'].change();
+  assert.equal(elements['settings-unsaved-bar'].hidden, false);
+
+  elements['batch-block-delay-ms'].value = '1400';
+  elements['batch-block-delay-ms'].change();
+  assert.equal(elements['settings-unsaved-bar'].hidden, true);
+});
+
+test('the settings bar saves drafts through the shared settings storage', async () => {
+  const { documentRef, elements } = createPopupDocument();
+  const savedAdFilterModes = [];
+  const deferredAdFilterModeSave = createDeferred();
+  const settings = createSettingsInitSettings({
+    async setStoredBatchBlockDelayMs(value) {
+      return sharedSettings.normalizeBatchBlockDelayMs(value);
+    },
+    async setStoredPageBlockButtonStyles(value) {
+      return sharedSettings.normalizePageBlockButtonStyles(value);
+    },
+    async setStoredUserCellAddButtonStyle(value) {
+      return sharedSettings.normalizePageBlockButtonStyle(value);
+    },
+    async setStoredUserCellAddButtonVisibility(value) {
+      return sharedSettings.normalizeUserCellAddButtonVisibility(value);
+    },
+    setStoredAdFilterMode(value) {
+      savedAdFilterModes.push(value);
+      return deferredAdFilterModeSave.promise;
+    }
+  });
+
+  init(documentRef, { runtime: {}, tabs: {} }, createSettingsInitBlocklist(), sharedFollowers, settings);
+  await flushAsyncWork();
+
+  elements['open-settings'].click();
+  elements['ad-filter-mode-hide-block'].click();
+  assert.equal(elements['settings-unsaved-bar'].hidden, false);
+
+  elements['save-settings-top'].click();
+  await flushAsyncWork();
+
+  assert.equal(JSON.stringify(savedAdFilterModes), JSON.stringify([sharedSettings.AD_FILTER_MODES.hideAndBlock]));
+  assert.equal(elements['save-settings-top'].disabled, true);
+  assert.equal(elements['settings-unsaved-bar'].hidden, false);
+
+  deferredAdFilterModeSave.resolve(sharedSettings.AD_FILTER_MODES.hideAndBlock);
+  await flushAsyncWork();
+
+  assert.equal(elements['popup-shell'].dataset.view, POPUP_VIEWS.main);
+  assert.equal(elements['settings-unsaved-bar'].hidden, true);
+  assert.equal(elements['save-settings-top'].disabled, false);
+});
+
+test('saving locks the settings controls until storage finishes', async () => {
+  const { documentRef, elements } = createPopupDocument();
+  const deferredAdFilterModeSave = createDeferred();
+  const settings = createSettingsInitSettings({
+    async setStoredBatchBlockDelayMs(value) {
+      return sharedSettings.normalizeBatchBlockDelayMs(value);
+    },
+    async setStoredPageBlockButtonStyles(value) {
+      return sharedSettings.normalizePageBlockButtonStyles(value);
+    },
+    async setStoredUserCellAddButtonStyle(value) {
+      return sharedSettings.normalizePageBlockButtonStyle(value);
+    },
+    async setStoredUserCellAddButtonVisibility(value) {
+      return sharedSettings.normalizeUserCellAddButtonVisibility(value);
+    },
+    setStoredAdFilterMode(value) {
+      return deferredAdFilterModeSave.promise.then(() => value);
+    }
+  });
+
+  init(documentRef, { runtime: {}, tabs: {} }, createSettingsInitBlocklist(), sharedFollowers, settings);
+  await flushAsyncWork();
+
+  elements['open-settings'].click();
+  elements['ad-filter-mode-hide-block'].click();
+  elements['save-settings-top'].click();
+  await flushAsyncWork();
+
+  assert.equal(elements['ad-filter-mode-off'].disabled, true);
+  assert.equal(elements['page-button-style-tweet-icon'].disabled, true);
+  assert.equal(elements['user-cell-add-button-style-text'].disabled, true);
+  assert.equal(elements['show-user-cell-add-button'].disabled, true);
+  assert.equal(elements['batch-block-delay-ms'].disabled, true);
+
+  deferredAdFilterModeSave.resolve(sharedSettings.AD_FILTER_MODES.hideAndBlock);
+  await flushAsyncWork();
+
+  assert.equal(elements['ad-filter-mode-off'].disabled, false);
+  assert.equal(elements['page-button-style-tweet-icon'].disabled, false);
+  assert.equal(elements['user-cell-add-button-style-text'].disabled, false);
+  assert.equal(elements['show-user-cell-add-button'].disabled, false);
+  assert.equal(elements['batch-block-delay-ms'].disabled, false);
 });
 
 test('init renders a fatal error when the injected follower scan session API is missing', () => {
@@ -2433,10 +2647,12 @@ test('init saves settings, updates the active delay, and returns to the main vie
   const deferredStylesSave = createDeferred();
   const deferredAddStyleSave = createDeferred();
   const deferredVisibilitySave = createDeferred();
+  const deferredAdModeSave = createDeferred();
   const savedDelayInputs = [];
   const savedStyles = [];
   const savedAddStyles = [];
   const savedVisibilityInputs = [];
+  const savedAdFilterModes = [];
   const blocklist = sharedBlocklist;
   const settings = {
     ...sharedSettings,
@@ -2456,6 +2672,9 @@ test('init saves settings, updates the active delay, and returns to the main vie
     async getStoredUserCellAddButtonVisibility() {
       return true;
     },
+    async getStoredAdFilterMode() {
+      return sharedSettings.AD_FILTER_MODES.hide;
+    },
     setStoredBatchBlockDelayMs(delayMs) {
       savedDelayInputs.push(delayMs);
       return deferredDelaySave.promise;
@@ -2471,6 +2690,10 @@ test('init saves settings, updates the active delay, and returns to the main vie
     setStoredUserCellAddButtonVisibility(isVisible) {
       savedVisibilityInputs.push(isVisible);
       return deferredVisibilitySave.promise;
+    },
+    setStoredAdFilterMode(mode) {
+      savedAdFilterModes.push(mode);
+      return deferredAdModeSave.promise;
     }
   };
 
@@ -2484,6 +2707,7 @@ test('init saves settings, updates the active delay, and returns to the main vie
   elements['page-button-style-user-cell-icon'].click();
   elements['user-cell-add-button-style-text'].click();
   elements['show-user-cell-add-button'].checked = false;
+  elements['ad-filter-mode-hide-block'].click();
   elements['save-settings'].click();
   await flushAsyncWork();
 
@@ -2495,6 +2719,7 @@ test('init saves settings, updates the active delay, and returns to the main vie
   }]));
   assert.equal(JSON.stringify(savedAddStyles), JSON.stringify([sharedSettings.PAGE_BLOCK_BUTTON_STYLES.text]));
   assert.equal(JSON.stringify(savedVisibilityInputs), JSON.stringify([false]));
+  assert.equal(JSON.stringify(savedAdFilterModes), JSON.stringify([sharedSettings.AD_FILTER_MODES.hideAndBlock]));
   assert.equal(elements.status.textContent, 'Save usernames for later, or block the whole list immediately through any open X tab.');
   assert.equal(getToastText(elements), 'Saving settings...');
   assert.equal(elements['save-blocklist'].disabled, true);
@@ -2509,6 +2734,7 @@ test('init saves settings, updates the active delay, and returns to the main vie
   });
   deferredAddStyleSave.resolve(sharedSettings.PAGE_BLOCK_BUTTON_STYLES.text);
   deferredVisibilitySave.resolve(false);
+  deferredAdModeSave.resolve(sharedSettings.AD_FILTER_MODES.hideAndBlock);
   await flushAsyncWork();
 
   assert.equal(elements['popup-shell'].dataset.view, POPUP_VIEWS.main);
@@ -2518,6 +2744,7 @@ test('init saves settings, updates the active delay, and returns to the main vie
   assert.equal(elements['page-button-style-user-cell-icon'].dataset.active, 'true');
   assert.equal(elements['user-cell-add-button-style-text'].dataset.active, 'true');
   assert.equal(elements['show-user-cell-add-button'].checked, false);
+  assert.equal(elements['ad-filter-mode-hide-block'].dataset.active, 'true');
   assert.equal(elements.status.textContent, 'Save usernames for later, or block the whole list immediately through any open X tab.');
   assert.equal(getToastText(elements), 'Saved settings. Delay: 1900 ms.');
   assert.equal(elements['save-blocklist'].disabled, false);
@@ -2531,6 +2758,7 @@ test('init saves settings, updates the active delay, and returns to the main vie
   assert.equal(elements['page-button-style-user-cell-icon'].dataset.active, 'true');
   assert.equal(elements['user-cell-add-button-style-text'].dataset.active, 'true');
   assert.equal(elements['show-user-cell-add-button'].checked, false);
+  assert.equal(elements['ad-filter-mode-hide-block'].dataset.active, 'true');
 });
 
 test('init blocks the saved list through an open X tab and reports failures with the saved delay', async () => {

@@ -9,11 +9,18 @@
   const { callStorageGet, callStorageSet, getExtensionApi } = storageApi;
 
   const BATCH_BLOCK_DELAY_MS_STORAGE_KEY = 'batchBlockDelayMs';
+  const AD_FILTER_MODE_STORAGE_KEY = 'adFilterMode';
   const PAGE_BLOCK_BUTTON_STYLES_STORAGE_KEY = 'pageBlockButtonStyles';
   const USER_CELL_ADD_BUTTON_STYLE_STORAGE_KEY = 'userCellAddButtonStyle';
   const USER_CELL_ADD_BUTTON_VISIBILITY_STORAGE_KEY = 'showUserCellAddButton';
   const DEFAULT_BATCH_BLOCK_DELAY_MS = 1000;
   const DEFAULT_PAGE_BLOCK_BUTTON_STYLE = 'icon';
+  const AD_FILTER_MODES = Object.freeze({
+    hide: 'hide',
+    hideAndBlock: 'hide-and-block',
+    off: 'off'
+  });
+  const DEFAULT_AD_FILTER_MODE = AD_FILTER_MODES.hide;
   const PAGE_BUTTON_STYLE_SURFACES = Object.freeze({
     profile: 'profile',
     tweet: 'tweet',
@@ -79,6 +86,31 @@
 
   function normalizeUserCellAddButtonVisibility(value) {
     return value !== false;
+  }
+
+  function normalizeAdFilterMode(value) {
+    if (value === AD_FILTER_MODES.off || value === AD_FILTER_MODES.hideAndBlock) {
+      return value;
+    }
+
+    return DEFAULT_AD_FILTER_MODE;
+  }
+
+  async function getStoredAdFilterMode(extensionApi = getExtensionApi()) {
+    const storageArea = extensionApi?.storage?.local;
+    const storedValues = await callStorageGet(storageArea, [AD_FILTER_MODE_STORAGE_KEY], extensionApi);
+    return normalizeAdFilterMode(storedValues?.[AD_FILTER_MODE_STORAGE_KEY]);
+  }
+
+  async function setStoredAdFilterMode(mode, extensionApi = getExtensionApi()) {
+    const normalizedMode = normalizeAdFilterMode(mode);
+    const storageArea = extensionApi?.storage?.local;
+
+    await callStorageSet(storageArea, {
+      [AD_FILTER_MODE_STORAGE_KEY]: normalizedMode
+    }, extensionApi);
+
+    return normalizedMode;
   }
 
   async function getStoredBatchBlockDelayMs(extensionApi = getExtensionApi()) {
@@ -150,7 +182,10 @@
   }
 
   const settingsApi = {
+    AD_FILTER_MODE_STORAGE_KEY,
+    AD_FILTER_MODES,
     BATCH_BLOCK_DELAY_MS_STORAGE_KEY,
+    DEFAULT_AD_FILTER_MODE,
     DEFAULT_BATCH_BLOCK_DELAY_MS,
     DEFAULT_PAGE_BLOCK_BUTTON_STYLE,
     DEFAULT_PAGE_BLOCK_BUTTON_STYLES,
@@ -163,15 +198,18 @@
     PAGE_BUTTON_STYLE_SURFACES,
     USER_CELL_ADD_BUTTON_STYLE_STORAGE_KEY,
     USER_CELL_ADD_BUTTON_VISIBILITY_STORAGE_KEY,
+    getStoredAdFilterMode,
     getStoredBatchBlockDelayMs,
     getStoredPageBlockButtonStyles,
     getStoredUserCellAddButtonStyle,
     getStoredUserCellAddButtonVisibility,
+    normalizeAdFilterMode,
     normalizeBatchBlockDelayMs,
     normalizePageBlockButtonStyle,
     normalizePageBlockButtonStyles,
     normalizePageButtonStyleSurface,
     normalizeUserCellAddButtonVisibility,
+    setStoredAdFilterMode,
     setStoredBatchBlockDelayMs,
     setStoredPageBlockButtonStyles,
     setStoredUserCellAddButtonStyle,

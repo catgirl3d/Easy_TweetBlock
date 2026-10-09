@@ -14,10 +14,14 @@ const sharedSettings = require('../src/shared/settings.js');
 const contentFeatures = require('../src/content/features.js');
 
 const {
+  AD_FILTER_MODE_STORAGE_KEY,
+  AD_FILTER_MODES,
+  AD_HIDDEN_ATTRIBUTE,
   BLOCK_BUTTON_ATTRIBUTE,
   BUTTON_ACTION_ATTRIBUTE,
   BUTTON_ACTIONS,
   BUTTON_KINDS,
+  DEFAULT_AD_FILTER_MODE,
   DEFAULT_BATCH_BLOCK_DELAY_MS,
   DEFAULT_PAGE_BLOCK_BUTTON_STYLE,
   DEFAULT_PAGE_BLOCK_BUTTON_STYLES,
@@ -34,6 +38,7 @@ const {
   USER_CELL_ADD_BUTTON_STYLE_STORAGE_KEY,
   SELECTORS,
   USER_BY_SCREEN_NAME_QUERY_IDS,
+  applyAdFilterToDocument,
   applyButtonTheme,
   applyCurrentNativeButtonStyleToDocument,
   applyPageThemeToDocument,
@@ -73,11 +78,13 @@ const {
   finishFollowerRun,
   FOLLOWER_RUN_PORT_PREFIX,
   init,
+  isAdTweet,
   lookupUserRestId,
   normalizeBatchBlockDelayMs,
   normalizePageBlockButtonStyle,
   normalizePageBlockButtonStyles,
   normalizeUsername,
+  observeStoredAdFilterMode,
   observeStoredPageButtonStyle,
   observeStoredUserCellAddButtonStyle,
   observeStoredUserCellAddButtonVisibility,
@@ -93,6 +100,7 @@ const {
   runProfileNativeBlockFlow,
   runNativeBlockFlow,
   scanFollowersForBlocking,
+  setCurrentAdFilterMode,
   setCurrentNativeButtonStyle,
   setCurrentNativeButtonStyles,
   setCurrentUserCellAddButtonStyle,
@@ -428,6 +436,20 @@ function createTweetNode(screenName = 'Felixmfdo', options = {}) {
       return selector === 'button' || selector === SELECTORS.caretButton;
     }
   });
+  const adLabelNode = options.adLabel
+    ? createDomElement({
+      nodeType: 1,
+      tagName: 'DIV',
+      textContent: options.adLabelText || 'Ad'
+    })
+    : null;
+  const bodyTextNode = options.bodyText
+    ? createDomElement({
+      nodeType: 1,
+      tagName: 'DIV',
+      textContent: options.bodyText
+    })
+    : null;
   const metadataColumn = {
     nodeType: 1,
     children: [],
@@ -457,7 +479,7 @@ function createTweetNode(screenName = 'Felixmfdo', options = {}) {
   };
   const trailingAction = {
     nodeType: 1,
-    children: [localButtonGroupWrapper],
+    children: adLabelNode ? [adLabelNode, localButtonGroupWrapper] : [localButtonGroupWrapper],
     querySelector(selector) {
       return selector === 'button' ? caretButton : null;
     }
@@ -492,6 +514,15 @@ function createTweetNode(screenName = 'Felixmfdo', options = {}) {
       return null;
     }
   };
+  const contentColumn = bodyTextNode
+    ? {
+      nodeType: 1,
+      children: [headerRow, bodyTextNode],
+      querySelector() {
+        return null;
+      }
+    }
+    : null;
 
   metadataColumn.parentElement = headerRow;
   leadingAction.parentElement = parentElement;
@@ -502,10 +533,25 @@ function createTweetNode(screenName = 'Felixmfdo', options = {}) {
   caretButton.parentElement = localButtonGroup;
   parentElement.parentElement = headerRow;
 
+  if (adLabelNode) {
+    adLabelNode.parentElement = trailingAction;
+  }
+
+  const attributes = {};
   const tweetNode = {
     nodeType: 1,
+    attributes,
     matches(selector) {
       return selector === SELECTORS.tweet;
+    },
+    getAttribute(name) {
+      return Object.prototype.hasOwnProperty.call(attributes, name) ? attributes[name] : null;
+    },
+    setAttribute(name, value) {
+      attributes[name] = String(value);
+    },
+    removeAttribute(name) {
+      delete attributes[name];
     },
     querySelector(selector) {
       if (selector === `[${BLOCK_BUTTON_ATTRIBUTE}]`) {
@@ -523,11 +569,17 @@ function createTweetNode(screenName = 'Felixmfdo', options = {}) {
           return null;
         }
 
+        const permalinkScreenName = options.permalinkScreenName || screenName;
+
         return {
           getAttribute(name) {
-            return name === 'href' ? `/${screenName}/status/1` : null;
+            return name === 'href' ? `/${permalinkScreenName}/status/1` : null;
           }
         };
+      }
+
+      if (selector === SELECTORS.tweetText) {
+        return bodyTextNode;
       }
 
       if (selector === SELECTORS.profileLink) {
@@ -543,10 +595,15 @@ function createTweetNode(screenName = 'Felixmfdo', options = {}) {
     querySelectorAll() {
       return [];
     },
-    children: [headerRow]
+    children: contentColumn ? [contentColumn] : [headerRow]
   };
 
-  headerRow.parentElement = tweetNode;
+  headerRow.parentElement = contentColumn || tweetNode;
+
+  if (contentColumn) {
+    contentColumn.parentElement = tweetNode;
+    bodyTextNode.parentElement = contentColumn;
+  }
 
   return {
     caretButton,
@@ -555,6 +612,14 @@ function createTweetNode(screenName = 'Felixmfdo', options = {}) {
     localButtonGroup,
     parentElement,
     tweetNode
+  };
+}
+
+function createAuthorLink(screenName) {
+  return {
+    getAttribute(name) {
+      return name === 'href' ? `/${screenName}` : null;
+    }
   };
 }
 
@@ -4619,7 +4684,7 @@ test('init installs styles, registers runtime messaging, and observes added twee
       target: documentRef.body
     });
     assert.equal(runtimeListeners.length, 1);
-    assert.equal(storageListeners.length, 4);
+    assert.equal(storageListeners.length, 5);
 
     observerCallback([{ addedNodes: [tweetNode] }]);
 
@@ -5116,4 +5181,482 @@ test('scanFollowersForBlocking stops scanning and limits request count when it h
   assert.equal(preview.scannedCount, 0);
   assert.equal(preview.hasMorePages, true);
   assert.equal(requestedTimelineUrls.length, 2);
+});
+
+function installAdBlockRecorder(t) {
+  const blockCalls = [];
+  const originalBlockUserByScreenNameViaApi = globalThis.EasyTweetBlockContent.blockUserByScreenNameViaApi;
+
+  globalThis.EasyTweetBlockContent.blockUserByScreenNameViaApi = async (screenName) => {
+    blockCalls.push(screenName);
+    return { restId: '101', screenName };
+  };
+
+  t.after(() => {
+    globalThis.EasyTweetBlockContent.blockUserByScreenNameViaApi = originalBlockUserByScreenNameViaApi;
+    setCurrentAdFilterMode(DEFAULT_AD_FILTER_MODE);
+  });
+
+  return blockCalls;
+}
+
+test('isAdTweet detects the Ad label rendered next to the tweet caret', () => {
+  const { tweetNode: adTweet } = createTweetNode('AdAuthor', { adLabel: true });
+  const { tweetNode: regularTweet } = createTweetNode('RegularAuthor');
+
+  assert.equal(isAdTweet(adTweet), true);
+  assert.equal(isAdTweet(regularTweet), false);
+});
+
+test('isAdTweet detects localized ad labels used by X in other interface languages', () => {
+  const labels = [
+    'Ad',
+    'Anzeige',
+    'Реклама',
+    'Gesponsert',
+    'Publicité',
+    'Promocionado',
+    'Promoted',
+    'プロモーション',
+    '推广'
+  ];
+
+  for (const label of labels) {
+    const { tweetNode } = createTweetNode('LocalizedAdAuthor', { adLabel: true, adLabelText: label });
+
+    assert.equal(isAdTweet(tweetNode), true, `expected "${label}" to be detected as an ad label`);
+  }
+});
+
+test('isAdTweet ignores the exact word Ad rendered in the post body', async (t) => {
+  const { documentRef } = createDocumentStub();
+  const { tweetNode } = createTweetNode('AdBodyAuthor', { bodyText: 'Ad' });
+
+  useGlobalOverrides(t, { document: documentRef });
+  const blockCalls = installAdBlockRecorder(t);
+  setCurrentAdFilterMode(AD_FILTER_MODES.hideAndBlock);
+
+  assert.equal(isAdTweet(tweetNode), false);
+
+  processNode(tweetNode, documentRef);
+  await flushAsyncWork();
+
+  assert.equal(tweetNode.getAttribute(AD_HIDDEN_ATTRIBUTE), null);
+  assert.deepEqual(blockCalls, []);
+});
+
+test('the packaged content stylesheet hides tweets marked as ads', () => {
+  const contentCss = fs.readFileSync(path.join(__dirname, '..', 'src', 'content', 'main.css'), 'utf8');
+
+  assert.match(contentCss, /\[data-easy-tweetblock-ad-hidden="true"\]\s*\{[\s\S]*?display: none !important;/);
+});
+
+test('processNode hides an ad tweet and leaves regular tweets untouched in hide mode', (t) => {
+  const { documentRef } = createDocumentStub();
+  const { tweetNode: adTweet } = createTweetNode('AdHideAuthor', { adLabel: true });
+  const { tweetNode: regularTweet } = createTweetNode('RegularHideAuthor');
+
+  useGlobalOverrides(t, { document: documentRef });
+  const blockCalls = installAdBlockRecorder(t);
+  setCurrentAdFilterMode(AD_FILTER_MODES.hide);
+
+  processNode(adTweet, documentRef);
+  processNode(regularTweet, documentRef);
+
+  assert.equal(adTweet.getAttribute(AD_HIDDEN_ATTRIBUTE), 'true');
+  assert.equal(regularTweet.getAttribute(AD_HIDDEN_ATTRIBUTE), null);
+  assert.deepEqual(blockCalls, []);
+});
+
+test('processNode removes the ad hidden marker when ad filtering is off', (t) => {
+  const { documentRef } = createDocumentStub();
+  const { tweetNode } = createTweetNode('AdOffAuthor', { adLabel: true });
+
+  useGlobalOverrides(t, { document: documentRef });
+  t.after(() => {
+    setCurrentAdFilterMode(DEFAULT_AD_FILTER_MODE);
+  });
+  setCurrentAdFilterMode(AD_FILTER_MODES.off);
+  tweetNode.setAttribute(AD_HIDDEN_ATTRIBUTE, 'true');
+
+  processNode(tweetNode, documentRef);
+
+  assert.equal(tweetNode.getAttribute(AD_HIDDEN_ATTRIBUTE), null);
+});
+
+test('init leaves ad tweets untouched until the stored ad filter mode loads', async (t) => {
+  const { documentRef } = createDocumentStub();
+  const { tweetNode } = createTweetNode('AdPendingMode', { adLabel: true });
+  let observerCallback = null;
+  let resolveAdFilterMode;
+
+  documentRef.querySelectorAll = (selector) => (selector === SELECTORS.tweet ? [tweetNode] : []);
+  useGlobalOverrides(t, { document: documentRef });
+
+  class FakeMutationObserver {
+    constructor(callback) {
+      observerCallback = callback;
+    }
+
+    observe() {}
+  }
+
+  const globalRef = {
+    MutationObserver: FakeMutationObserver,
+    chrome: {
+      runtime: {
+        onMessage: {
+          addListener() {}
+        }
+      },
+      storage: {
+        local: {
+          get(keys, callback) {
+            if (Array.isArray(keys) && keys.includes(AD_FILTER_MODE_STORAGE_KEY)) {
+              return new Promise((resolve) => {
+                resolveAdFilterMode = resolve;
+              });
+            }
+
+            callback({});
+          }
+        },
+        onChanged: {
+          addListener() {},
+          removeListener() {}
+        }
+      }
+    },
+    document: documentRef
+  };
+
+  init(globalRef);
+  observerCallback([{ addedNodes: [tweetNode] }]);
+
+  assert.equal(tweetNode.getAttribute(AD_HIDDEN_ATTRIBUTE), null);
+
+  resolveAdFilterMode({ [AD_FILTER_MODE_STORAGE_KEY]: AD_FILTER_MODES.hide });
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  assert.equal(tweetNode.getAttribute(AD_HIDDEN_ATTRIBUTE), 'true');
+});
+
+test('a stored ad filter change that arrives during init is not overwritten by the initial read', async (t) => {
+  const { documentRef } = createDocumentStub();
+  const { tweetNode } = createTweetNode('AdInitRace', { adLabel: true });
+  let resolveInitialRead;
+  const storageListeners = [];
+
+  documentRef.querySelectorAll = (selector) => (selector === SELECTORS.tweet ? [tweetNode] : []);
+  useGlobalOverrides(t, { document: documentRef });
+
+  class FakeMutationObserver {
+    observe() {}
+  }
+
+  const globalRef = {
+    MutationObserver: FakeMutationObserver,
+    chrome: {
+      runtime: {
+        onMessage: {
+          addListener() {}
+        }
+      },
+      storage: {
+        local: {
+          get(keys, callback) {
+            if (Array.isArray(keys) && keys.includes(AD_FILTER_MODE_STORAGE_KEY)) {
+              return new Promise((resolve) => {
+                resolveInitialRead = resolve;
+              });
+            }
+
+            callback({});
+          }
+        },
+        onChanged: {
+          addListener(listener) {
+            storageListeners.push(listener);
+          },
+          removeListener(listener) {
+            const index = storageListeners.indexOf(listener);
+
+            if (index !== -1) {
+              storageListeners.splice(index, 1);
+            }
+          }
+        }
+      }
+    },
+    document: documentRef
+  };
+
+  init(globalRef);
+
+  for (const listener of storageListeners) {
+    listener({ [AD_FILTER_MODE_STORAGE_KEY]: { newValue: AD_FILTER_MODES.hideAndBlock } }, 'local');
+  }
+
+  await flushAsyncWork();
+  assert.equal(tweetNode.getAttribute(AD_HIDDEN_ATTRIBUTE), 'true');
+
+  resolveInitialRead({ [AD_FILTER_MODE_STORAGE_KEY]: AD_FILTER_MODES.off });
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  assert.equal(tweetNode.getAttribute(AD_HIDDEN_ATTRIBUTE), 'true');
+});
+
+test('a failed initial ad filter read does not reset a stored change applied by the observer', async (t) => {
+  const { documentRef } = createDocumentStub();
+  const { tweetNode } = createTweetNode('AdFallbackKeep', { adLabel: true });
+  const storageListeners = [];
+
+  documentRef.querySelectorAll = (selector) => (selector === SELECTORS.tweet ? [tweetNode] : []);
+  useGlobalOverrides(t, { document: documentRef });
+
+  class FakeMutationObserver {
+    observe() {}
+  }
+
+  const globalRef = {
+    MutationObserver: FakeMutationObserver,
+    chrome: {
+      runtime: {
+        onMessage: {
+          addListener() {}
+        }
+      },
+      storage: {
+        local: {
+          get(keys, callback) {
+            if (Array.isArray(keys) && keys.includes(AD_FILTER_MODE_STORAGE_KEY)) {
+              return Promise.reject(new Error('storage unavailable'));
+            }
+
+            callback({});
+          }
+        },
+        onChanged: {
+          addListener(listener) {
+            storageListeners.push(listener);
+          },
+          removeListener(listener) {
+            const index = storageListeners.indexOf(listener);
+
+            if (index !== -1) {
+              storageListeners.splice(index, 1);
+            }
+          }
+        }
+      }
+    },
+    document: documentRef
+  };
+
+  init(globalRef);
+
+  for (const listener of storageListeners) {
+    listener({ [AD_FILTER_MODE_STORAGE_KEY]: { newValue: AD_FILTER_MODES.hideAndBlock } }, 'local');
+  }
+
+  await flushAsyncWork();
+  await flushAsyncWork();
+
+  assert.equal(globalThis.EasyTweetBlockContent.getCurrentAdFilterMode(), AD_FILTER_MODES.hideAndBlock);
+});
+
+test('processNode blocks an ad author only once across repeated processing in hide-and-block mode', async (t) => {
+  const { documentRef } = createDocumentStub();
+  const { tweetNode } = createTweetNode('AdBlockOnce', {
+    adLabel: true,
+    profileLink: createAuthorLink('AdBlockOnce')
+  });
+
+  useGlobalOverrides(t, { document: documentRef });
+  const blockCalls = installAdBlockRecorder(t);
+  setCurrentAdFilterMode(AD_FILTER_MODES.hideAndBlock);
+
+  processNode(tweetNode, documentRef);
+  processNode(tweetNode, documentRef);
+  await flushAsyncWork();
+
+  assert.deepEqual(blockCalls, ['adblockonce']);
+  assert.equal(tweetNode.getAttribute(AD_HIDDEN_ATTRIBUTE), 'true');
+});
+
+test('a failed ad author block keeps the tweet hidden and never retries', async (t) => {
+  const { documentRef } = createDocumentStub();
+  const { tweetNode } = createTweetNode('AdBlockFail', {
+    adLabel: true,
+    profileLink: createAuthorLink('AdBlockFail')
+  });
+  const blockCalls = [];
+
+  useGlobalOverrides(t, {
+    document: documentRef,
+    console: {
+      ...console,
+      error() {}
+    }
+  });
+  const originalBlockUserByScreenNameViaApi = globalThis.EasyTweetBlockContent.blockUserByScreenNameViaApi;
+
+  globalThis.EasyTweetBlockContent.blockUserByScreenNameViaApi = async (screenName) => {
+    blockCalls.push(screenName);
+    throw new Error('ad block failed');
+  };
+
+  t.after(() => {
+    globalThis.EasyTweetBlockContent.blockUserByScreenNameViaApi = originalBlockUserByScreenNameViaApi;
+    setCurrentAdFilterMode(DEFAULT_AD_FILTER_MODE);
+  });
+  setCurrentAdFilterMode(AD_FILTER_MODES.hideAndBlock);
+
+  processNode(tweetNode, documentRef);
+  processNode(tweetNode, documentRef);
+  await flushAsyncWork();
+
+  assert.deepEqual(blockCalls, ['adblockfail']);
+  assert.equal(tweetNode.getAttribute(AD_HIDDEN_ATTRIBUTE), 'true');
+});
+
+test('processNode hides an ad tweet without blocking when no author can be resolved', async (t) => {
+  const { documentRef } = createDocumentStub();
+  const { tweetNode } = createTweetNode('AdNoAuthor', {
+    adLabel: true,
+    includePermalink: false,
+    profileLink: null
+  });
+
+  useGlobalOverrides(t, { document: documentRef });
+  const blockCalls = installAdBlockRecorder(t);
+  setCurrentAdFilterMode(AD_FILTER_MODES.hideAndBlock);
+
+  processNode(tweetNode, documentRef);
+  await flushAsyncWork();
+
+  assert.equal(tweetNode.getAttribute(AD_HIDDEN_ATTRIBUTE), 'true');
+  assert.deepEqual(blockCalls, []);
+});
+
+test('processNode never blocks a quoted author when the tweet permalink points elsewhere', async (t) => {
+  const { documentRef } = createDocumentStub();
+  const { tweetNode } = createTweetNode('AdOwner', {
+    adLabel: true,
+    permalinkScreenName: 'QuotedUser',
+    profileLink: createAuthorLink('AdOwner')
+  });
+
+  useGlobalOverrides(t, { document: documentRef });
+  const blockCalls = installAdBlockRecorder(t);
+  setCurrentAdFilterMode(AD_FILTER_MODES.hideAndBlock);
+
+  processNode(tweetNode, documentRef);
+  await flushAsyncWork();
+
+  assert.equal(tweetNode.getAttribute(AD_HIDDEN_ATTRIBUTE), 'true');
+  assert.deepEqual(blockCalls, []);
+});
+
+test('applyAdFilterToDocument applies hide-and-block to tweets already loaded in the feed', async (t) => {
+  const { tweetNode: adTweet } = createTweetNode('AdAlreadyLoaded', {
+    adLabel: true,
+    profileLink: createAuthorLink('AdAlreadyLoaded')
+  });
+  const { tweetNode: regularTweet } = createTweetNode('RegularAlreadyLoaded');
+  const documentRef = {
+    querySelectorAll(selector) {
+      return selector === SELECTORS.tweet ? [adTweet, regularTweet] : [];
+    }
+  };
+
+  const blockCalls = installAdBlockRecorder(t);
+  setCurrentAdFilterMode(AD_FILTER_MODES.hideAndBlock);
+
+  applyAdFilterToDocument(documentRef);
+  await flushAsyncWork();
+
+  assert.equal(adTweet.getAttribute(AD_HIDDEN_ATTRIBUTE), 'true');
+  assert.equal(regularTweet.getAttribute(AD_HIDDEN_ATTRIBUTE), null);
+  assert.deepEqual(blockCalls, ['adalreadyloaded']);
+});
+
+test('processNode removes a stale ad marker when a tweet is no longer recognized as an ad', (t) => {
+  const { documentRef } = createDocumentStub();
+  const { tweetNode } = createTweetNode('AdReusedAuthor');
+
+  useGlobalOverrides(t, { document: documentRef });
+  t.after(() => {
+    setCurrentAdFilterMode(DEFAULT_AD_FILTER_MODE);
+  });
+  setCurrentAdFilterMode(AD_FILTER_MODES.hide);
+  tweetNode.setAttribute(AD_HIDDEN_ATTRIBUTE, 'true');
+
+  processNode(tweetNode, documentRef);
+
+  assert.equal(tweetNode.getAttribute(AD_HIDDEN_ATTRIBUTE), null);
+});
+
+test('a stored ad filter change applies the new mode to tweets already in the feed', async (t) => {
+  const { tweetNode } = createTweetNode('AdStoredChange', {
+    adLabel: true,
+    profileLink: createAuthorLink('AdStoredChange')
+  });
+  const documentRef = {
+    querySelectorAll(selector) {
+      return selector === SELECTORS.tweet ? [tweetNode] : [];
+    }
+  };
+  const storageListeners = [];
+  const globalRef = {
+    chrome: {
+      storage: {
+        local: {},
+        onChanged: {
+          addListener(listener) {
+            storageListeners.push(listener);
+          },
+          removeListener() {}
+        }
+      }
+    },
+    document: documentRef
+  };
+  const blockCalls = [];
+  const originalBlockUserByScreenNameViaApi = globalThis.EasyTweetBlockContent.blockUserByScreenNameViaApi;
+
+  globalThis.EasyTweetBlockContent.blockUserByScreenNameViaApi = async (screenName) => {
+    blockCalls.push(screenName);
+    return { restId: '101', screenName };
+  };
+
+  t.after(() => {
+    globalThis.EasyTweetBlockContent.blockUserByScreenNameViaApi = originalBlockUserByScreenNameViaApi;
+    setCurrentAdFilterMode(DEFAULT_AD_FILTER_MODE);
+  });
+
+  const stopObservation = observeStoredAdFilterMode(globalRef);
+  assert.equal(storageListeners.length, 1);
+
+  storageListeners[0]({
+    [AD_FILTER_MODE_STORAGE_KEY]: {
+      newValue: AD_FILTER_MODES.hideAndBlock
+    }
+  }, 'local');
+  await flushAsyncWork();
+
+  assert.equal(tweetNode.getAttribute(AD_HIDDEN_ATTRIBUTE), 'true');
+  assert.deepEqual(blockCalls, ['adstoredchange']);
+
+  stopObservation();
+
+  storageListeners[0]({
+    [AD_FILTER_MODE_STORAGE_KEY]: {
+      newValue: AD_FILTER_MODES.off
+    }
+  }, 'local');
+
+  assert.equal(tweetNode.getAttribute(AD_HIDDEN_ATTRIBUTE), null);
 });

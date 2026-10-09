@@ -861,6 +861,11 @@
     const userCellAddButtonStyleIconElement = documentRef.getElementById('user-cell-add-button-style-icon');
     const userCellAddButtonStyleTextElement = documentRef.getElementById('user-cell-add-button-style-text');
     const showUserCellAddButtonElement = documentRef.getElementById('show-user-cell-add-button');
+    const settingsUnsavedBarElement = documentRef.getElementById('settings-unsaved-bar');
+    const saveSettingsTopButton = documentRef.getElementById('save-settings-top');
+    const adFilterModeOffElement = documentRef.getElementById('ad-filter-mode-off');
+    const adFilterModeHideElement = documentRef.getElementById('ad-filter-mode-hide');
+    const adFilterModeHideBlockElement = documentRef.getElementById('ad-filter-mode-hide-block');
     const openSettingsButton = documentRef.getElementById('open-settings');
     const openFollowersButton = documentRef.getElementById('open-followers');
     const backToMainButton = documentRef.getElementById('back-to-main');
@@ -926,6 +931,23 @@
       icon: userCellAddButtonStyleIconElement,
       text: userCellAddButtonStyleTextElement
     };
+    const adFilterModes = settings?.AD_FILTER_MODES || {
+      hide: 'hide',
+      hideAndBlock: 'hide-and-block',
+      off: 'off'
+    };
+    const normalizeAdFilterModeValue = (value) => {
+      if (typeof settings?.normalizeAdFilterMode === 'function') {
+        return settings.normalizeAdFilterMode(value);
+      }
+
+      return value === adFilterModes.off || value === adFilterModes.hideAndBlock ? value : adFilterModes.hide;
+    };
+    const adFilterModeControls = {
+      [adFilterModes.hideAndBlock]: adFilterModeHideBlockElement,
+      [adFilterModes.hide]: adFilterModeHideElement,
+      [adFilterModes.off]: adFilterModeOffElement
+    };
     let isSaving = false;
     let isBlocking = false;
     let isFollowersScanning = false;
@@ -938,6 +960,7 @@
     );
     let currentUserCellAddButtonStyle = settings?.DEFAULT_USER_CELL_ADD_BUTTON_STYLE || settings?.DEFAULT_PAGE_BLOCK_BUTTON_STYLE || settings?.PAGE_BLOCK_BUTTON_STYLES?.icon || 'icon';
     let currentShowUserCellAddButton = settings?.DEFAULT_USER_CELL_ADD_BUTTON_VISIBILITY;
+    let currentAdFilterMode = normalizeAdFilterModeValue(settings?.DEFAULT_AD_FILTER_MODE);
     let currentFollowersBlockLimit = followers?.DEFAULT_FOLLOWERS_BLOCK_LIMIT;
     let currentFollowersBlockRunId = null;
     let currentFollowerScanSession = null;
@@ -951,6 +974,7 @@
     let currentFollowersSource = followers?.DEFAULT_FOLLOWERS_SOURCE;
     let draftPageButtonStyles = { ...currentPageButtonStyles };
     let draftUserCellAddButtonStyle = currentUserCellAddButtonStyle;
+    let draftAdFilterMode = currentAdFilterMode;
     const storedPopupState = loadStoredPopupState();
     let currentUsernameLists = [];
     let currentActiveUsernameList = null;
@@ -971,7 +995,7 @@
       return;
     }
 
-    if (!blocklist || !followers || !settings || !extensionApi || !shellElement || !statusElement || !toastRegionElement || !textareaElement || !usernameListSelectLabelElement || !usernameListSelectElement || !usernameListOptionsElement || !newUsernameListButton || !renameUsernameListButton || !deleteUsernameListButton || !importUsernamesButton || !importUsernamesFileInput || !delayInputElement || !pageButtonStyleTweetIconElement || !pageButtonStyleTweetTextElement || !pageButtonStyleProfileIconElement || !pageButtonStyleProfileTextElement || !pageButtonStyleUserCellIconElement || !pageButtonStyleUserCellTextElement || !showUserCellAddButtonElement || !openSettingsButton || !openFollowersButton || !backToMainButton || !backFromFollowersButton || !saveButton || !saveSettingsButton || !blockNowButton || !cancelFollowersRunButton || !countElement || !followersBlockLimitElement || !followersScanLimitElement || !followersSummaryElement || !followersPreviewElement || !followersRunWarningElement || !followersBlockProgressElement || !followersProgressCountElement || !followersProgressDetailElement || !followersProgressFillElement || !followersProgressLabelElement || !followersSourceFollowersElement || !followersSourceFollowingElement || !scanFollowersButton || !scanFollowersButtonLabelElement || !blockFollowerCandidatesButton || !blockFollowerCandidatesButtonLabelElement || !resetFollowerScanSessionRow || !resetFollowerScanSessionButton || !addFollowersToListButton || !clearListButton) {
+    if (!blocklist || !followers || !settings || !extensionApi || !shellElement || !statusElement || !toastRegionElement || !textareaElement || !usernameListSelectLabelElement || !usernameListSelectElement || !usernameListOptionsElement || !newUsernameListButton || !renameUsernameListButton || !deleteUsernameListButton || !importUsernamesButton || !importUsernamesFileInput || !delayInputElement || !pageButtonStyleTweetIconElement || !pageButtonStyleTweetTextElement || !pageButtonStyleProfileIconElement || !pageButtonStyleProfileTextElement || !pageButtonStyleUserCellIconElement || !pageButtonStyleUserCellTextElement || !showUserCellAddButtonElement || !settingsUnsavedBarElement || !saveSettingsTopButton || !adFilterModeOffElement || !adFilterModeHideElement || !adFilterModeHideBlockElement || !openSettingsButton || !openFollowersButton || !backToMainButton || !backFromFollowersButton || !saveButton || !saveSettingsButton || !blockNowButton || !cancelFollowersRunButton || !countElement || !followersBlockLimitElement || !followersScanLimitElement || !followersSummaryElement || !followersPreviewElement || !followersRunWarningElement || !followersBlockProgressElement || !followersProgressCountElement || !followersProgressDetailElement || !followersProgressFillElement || !followersProgressLabelElement || !followersSourceFollowersElement || !followersSourceFollowingElement || !scanFollowersButton || !scanFollowersButtonLabelElement || !blockFollowerCandidatesButton || !blockFollowerCandidatesButtonLabelElement || !resetFollowerScanSessionRow || !resetFollowerScanSessionButton || !addFollowersToListButton || !clearListButton) {
       return;
     }
 
@@ -1626,6 +1650,7 @@
 
     function renderDelay(delayMs) {
       delayInputElement.value = String(settings.normalizeBatchBlockDelayMs(delayMs));
+      updateUnsavedSettingsState();
     }
 
     function readPageButtonStyles() {
@@ -1644,6 +1669,8 @@
         controls.icon.setAttribute('aria-pressed', String(style === settings.PAGE_BLOCK_BUTTON_STYLES.icon));
         controls.text.setAttribute('aria-pressed', String(style === settings.PAGE_BLOCK_BUTTON_STYLES.text));
       }
+
+      updateUnsavedSettingsState();
     }
 
     function setDraftPageButtonStyle(surface, style) {
@@ -1663,6 +1690,7 @@
       userCellAddButtonStyleControls.text.dataset.active = String(draftUserCellAddButtonStyle === settings.PAGE_BLOCK_BUTTON_STYLES.text);
       userCellAddButtonStyleControls.icon.setAttribute('aria-pressed', String(draftUserCellAddButtonStyle === settings.PAGE_BLOCK_BUTTON_STYLES.icon));
       userCellAddButtonStyleControls.text.setAttribute('aria-pressed', String(draftUserCellAddButtonStyle === settings.PAGE_BLOCK_BUTTON_STYLES.text));
+      updateUnsavedSettingsState();
     }
 
     function readShowUserCellAddButton() {
@@ -1671,6 +1699,35 @@
 
     function renderShowUserCellAddButton(isVisible) {
       showUserCellAddButtonElement.checked = settings.normalizeUserCellAddButtonVisibility(isVisible);
+      updateUnsavedSettingsState();
+    }
+
+    function readAdFilterMode() {
+      return normalizeAdFilterModeValue(draftAdFilterMode);
+    }
+
+    function renderAdFilterMode(mode) {
+      draftAdFilterMode = normalizeAdFilterModeValue(mode);
+
+      for (const [modeValue, control] of Object.entries(adFilterModeControls)) {
+        const isActive = draftAdFilterMode === modeValue;
+        control.dataset.active = String(isActive);
+        control.setAttribute('aria-pressed', String(isActive));
+      }
+
+      updateUnsavedSettingsState();
+    }
+
+    function hasUnsavedSettingsChanges() {
+      return readDelayMs() !== currentDelayMs
+        || JSON.stringify(readPageButtonStyles()) !== JSON.stringify(currentPageButtonStyles)
+        || readUserCellAddButtonStyle() !== currentUserCellAddButtonStyle
+        || readShowUserCellAddButton() !== currentShowUserCellAddButton
+        || readAdFilterMode() !== currentAdFilterMode;
+    }
+
+    function updateUnsavedSettingsState() {
+      settingsUnsavedBarElement.hidden = !hasUnsavedSettingsChanges();
     }
 
     function readFollowersBlockLimit() {
@@ -1972,6 +2029,20 @@
       blockNowButton.disabled = isAnyBusy;
       clearListButton.disabled = isAnyBusy;
       saveSettingsButton.disabled = isAnyBusy;
+      saveSettingsTopButton.disabled = isAnyBusy;
+      delayInputElement.disabled = isAnyBusy;
+      showUserCellAddButtonElement.disabled = isAnyBusy;
+      userCellAddButtonStyleControls.icon.disabled = isAnyBusy;
+      userCellAddButtonStyleControls.text.disabled = isAnyBusy;
+
+      for (const controls of Object.values(pageButtonStyleControls)) {
+        controls.icon.disabled = isAnyBusy;
+        controls.text.disabled = isAnyBusy;
+      }
+
+      for (const control of Object.values(adFilterModeControls)) {
+        control.disabled = isAnyBusy;
+      }
       usernameListSelectElement.disabled = isAnyBusy;
       newUsernameListButton.disabled = isAnyBusy;
       renameUsernameListButton.disabled = isAnyBusy || !currentActiveUsernameList;
@@ -2162,13 +2233,14 @@
     }
 
     async function loadBlocklist() {
-      const [usernameListState, delayMs, pageButtonStyles, userCellAddButtonStyle, showUserCellAddButton, followerScanSessionStore] = await Promise.all([
+      const [usernameListState, delayMs, pageButtonStyles, userCellAddButtonStyle, showUserCellAddButton, followerScanSessionStore, adFilterMode] = await Promise.all([
         readUsernameListState(),
         settings.getStoredBatchBlockDelayMs(extensionApi),
         readStoredPageButtonStyles(),
         readStoredUserCellAddButtonStyle(),
         settings.getStoredUserCellAddButtonVisibility(extensionApi),
-        followerScanSessions.loadFollowerScanSessionStore(extensionApi)
+        followerScanSessions.loadFollowerScanSessionStore(extensionApi),
+        settings.getStoredAdFilterMode(extensionApi)
       ]);
       currentFollowerScanSessionStore = followerScanSessionStore;
 
@@ -2191,6 +2263,7 @@
       currentPageButtonStyles = pageButtonStyles;
       currentUserCellAddButtonStyle = userCellAddButtonStyle;
       currentShowUserCellAddButton = showUserCellAddButton;
+      currentAdFilterMode = normalizeAdFilterModeValue(adFilterMode);
       currentFollowersBlockLimit = followers.normalizeFollowersBlockLimit(
         activeFollowerScanSession?.blockLimit
           ?? storedPopupState.followersBlockLimit
@@ -2218,6 +2291,7 @@
       renderPageButtonStyles(pageButtonStyles);
       renderUserCellAddButtonStyle(userCellAddButtonStyle);
       renderShowUserCellAddButton(showUserCellAddButton);
+      renderAdFilterMode(currentAdFilterMode);
       if (currentFollowerScanSession?.source === currentFollowersSource) {
         renderFollowersPreviewFromSession(currentFollowerScanSession);
       } else {
@@ -2271,17 +2345,19 @@
       const pageButtonStyles = readPageButtonStyles();
       const userCellAddButtonStyle = readUserCellAddButtonStyle();
       const showUserCellAddButton = readShowUserCellAddButton();
+      const adFilterMode = readAdFilterMode();
 
       isSaving = true;
       setBusyState();
       setStatus('Saving settings...', { tone: 'info' });
 
       try {
-        const [savedDelayMs, savedPageButtonStyles, savedUserCellAddButtonStyle, savedShowUserCellAddButton] = await Promise.all([
+        const [savedDelayMs, savedPageButtonStyles, savedUserCellAddButtonStyle, savedShowUserCellAddButton, savedAdFilterMode] = await Promise.all([
           settings.setStoredBatchBlockDelayMs(delayMs, extensionApi),
           writeStoredPageButtonStyles(pageButtonStyles),
           writeStoredUserCellAddButtonStyle(userCellAddButtonStyle),
-          settings.setStoredUserCellAddButtonVisibility(showUserCellAddButton, extensionApi)
+          settings.setStoredUserCellAddButtonVisibility(showUserCellAddButton, extensionApi),
+          settings.setStoredAdFilterMode(adFilterMode, extensionApi)
         ]);
 
         currentDelayMs = savedDelayMs;
@@ -2292,6 +2368,8 @@
         renderUserCellAddButtonStyle(savedUserCellAddButtonStyle);
         currentShowUserCellAddButton = savedShowUserCellAddButton;
         renderShowUserCellAddButton(savedShowUserCellAddButton);
+        currentAdFilterMode = normalizeAdFilterModeValue(savedAdFilterMode);
+        renderAdFilterMode(currentAdFilterMode);
         setStatus(`Saved settings. Delay: ${savedDelayMs} ms.`, { tone: 'success' });
         showMainView();
       } catch (error) {
@@ -3066,6 +3144,7 @@
       renderPageButtonStyles(currentPageButtonStyles);
       renderUserCellAddButtonStyle(currentUserCellAddButtonStyle);
       renderShowUserCellAddButton(currentShowUserCellAddButton);
+      renderAdFilterMode(currentAdFilterMode);
       showSettingsView();
     });
 
@@ -3081,6 +3160,7 @@
       renderPageButtonStyles(currentPageButtonStyles);
       renderUserCellAddButtonStyle(currentUserCellAddButtonStyle);
       renderShowUserCellAddButton(currentShowUserCellAddButton);
+      renderAdFilterMode(currentAdFilterMode);
       showMainView();
     });
 
@@ -3123,6 +3203,18 @@
       renderUserCellAddButtonStyle(settings.PAGE_BLOCK_BUTTON_STYLES.text);
     });
 
+    adFilterModeOffElement.addEventListener('click', () => {
+      renderAdFilterMode(adFilterModes.off);
+    });
+
+    adFilterModeHideElement.addEventListener('click', () => {
+      renderAdFilterMode(adFilterModes.hide);
+    });
+
+    adFilterModeHideBlockElement.addEventListener('click', () => {
+      renderAdFilterMode(adFilterModes.hideAndBlock);
+    });
+
     followersSourceFollowersElement.addEventListener('click', () => {
       handleAsyncPopupAction('updateFollowersSourceFollowers', () => updateFollowersSource(followers.FOLLOWERS_SOURCES.followers));
     });
@@ -3133,6 +3225,14 @@
 
     delayInputElement.addEventListener('change', () => {
       renderDelay(readDelayMs());
+    });
+
+    delayInputElement.addEventListener('input', updateUnsavedSettingsState);
+
+    showUserCellAddButtonElement.addEventListener('change', updateUnsavedSettingsState);
+
+    saveSettingsTopButton.addEventListener('click', () => {
+      handleAsyncPopupAction('saveSettings', saveSettings);
     });
 
     textareaElement.addEventListener('input', persistUsernameDraft);

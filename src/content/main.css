@@ -3,6 +3,10 @@
   --etb-primary-rgb: 0, 124, 255;
 }
 
+[data-easy-tweetblock-ad-hidden="true"] {
+  display: none !important;
+}
+
 [data-easy-tweetblock-button] {
   align-items: center;
   appearance: none;

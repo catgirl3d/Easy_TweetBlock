@@ -7,9 +7,51 @@
   const {
     BLOCK_BUTTON_ATTRIBUTE,
     BUTTON_ACTIONS,
-    SELECTORS
+    SELECTORS,
+    extractScreenNameFromHref
   } = namespace;
   const USER_CELL_ACTIONS_ATTRIBUTE = 'data-easy-tweetblock-user-cell-actions';
+  const AD_HIDDEN_ATTRIBUTE = 'data-easy-tweetblock-ad-hidden';
+  const AD_LABEL_TEXTS = new Set([
+    'ad',
+    'advertisement',
+    'promoted',
+    'sponsored',
+    'anzeige',
+    'gesponsert',
+    'mainostettu',
+    'promocionado',
+    'promotert',
+    'promoveret',
+    'promovido',
+    'promovat',
+    'promowane',
+    'publicité',
+    'реклама',
+    'sponsorisé',
+    'sponsorizzato',
+    'sponsorlu',
+    'sponsrad',
+    'sponzorováno',
+    'uitgelicht',
+    'ajánlott',
+    'dipromosikan',
+    'được quảng bá',
+    'προωθημένο',
+    'מקודם',
+    'مُروَّج',
+    'تبلیغی',
+    'تشہیر شدہ',
+    'বিজ্ঞাপিত',
+    'प्रचारित',
+    'ประชาสัมพันธ์',
+    'プロモーション',
+    '推广',
+    '推廣',
+    '推荐',
+    '推薦',
+    '프로모션 중'
+  ]);
 
   function getElementChildren(node) {
     if (!node) {
@@ -189,6 +231,118 @@
     }
 
     return typeof node.matches === 'function' && node.matches('button');
+  }
+
+  function normalizeAdLabelText(value) {
+    return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().toLowerCase() : '';
+  }
+
+  function containsNode(ancestorNode, descendantNode) {
+    if (!ancestorNode || !descendantNode) {
+      return false;
+    }
+
+    if (typeof ancestorNode.contains === 'function') {
+      return ancestorNode.contains(descendantNode);
+    }
+
+    let current = descendantNode;
+
+    while (current) {
+      if (current === ancestorNode) {
+        return true;
+      }
+
+      current = current.parentElement || null;
+    }
+
+    return false;
+  }
+
+  function isAdLabelElement(node) {
+    if (!node || node.nodeType !== 1 || isButtonElement(node)) {
+      return false;
+    }
+
+    return AD_LABEL_TEXTS.has(normalizeAdLabelText(node.textContent));
+  }
+
+  function findTweetAdLabel(tweet) {
+    const caretButton = tweet?.querySelector?.(SELECTORS.caretButton);
+    const tweetText = tweet?.querySelector?.(SELECTORS.tweetText) || null;
+
+    if (!caretButton) {
+      return null;
+    }
+
+    let current = caretButton.parentElement || null;
+
+    while (current && current !== tweet) {
+      // The header area is searched only up to the container that owns the
+      // post body: a post whose text is exactly "Ad" must not look like a label.
+      if (containsNode(current, tweetText)) {
+        break;
+      }
+
+      for (const child of getElementChildren(current)) {
+        if (child === caretButton || isButtonElement(child) || containsNode(child, caretButton)) {
+          continue;
+        }
+
+        if (isAdLabelElement(child)) {
+          return child;
+        }
+      }
+
+      current = current.parentElement || null;
+    }
+
+    return null;
+  }
+
+  function isAdTweet(tweet) {
+    return Boolean(findTweetAdLabel(tweet));
+  }
+
+  function readTweetAuthorScreenName(tweet) {
+    const profileLink = tweet?.querySelector?.(SELECTORS.profileLink);
+    const profileAuthor = extractScreenNameFromHref(
+      profileLink?.getAttribute?.('href') || profileLink?.href || ''
+    );
+
+    if (!profileAuthor) {
+      return null;
+    }
+
+    const permalink = tweet?.querySelector?.(SELECTORS.permalink);
+    const permalinkAuthor = extractScreenNameFromHref(
+      permalink?.getAttribute?.('href') || permalink?.href || ''
+    );
+
+    if (permalinkAuthor && permalinkAuthor.toLowerCase() !== profileAuthor.toLowerCase()) {
+      return null;
+    }
+
+    return profileAuthor;
+  }
+
+  function setAdTweetHidden(tweet, isHidden) {
+    if (!tweet || typeof tweet.setAttribute !== 'function') {
+      return;
+    }
+
+    if (isHidden) {
+      tweet.setAttribute(AD_HIDDEN_ATTRIBUTE, 'true');
+      return;
+    }
+
+    if (typeof tweet.getAttribute === 'function' && tweet.getAttribute(AD_HIDDEN_ATTRIBUTE) === null) {
+      return;
+    }
+
+    if (typeof tweet.removeAttribute === 'function') {
+      tweet.removeAttribute(AD_HIDDEN_ATTRIBUTE);
+    }
   }
 
   function findDirectChildAncestor(ancestorNode, descendantNode) {
@@ -475,9 +629,21 @@
     for (const userCell of userCells) {
       attachButtonToUserCell(userCell, documentRef);
     }
+
+    const adTweets = tweets.slice();
+    const adAncestorTweet = findAncestorTweet(rootNode);
+
+    if (adAncestorTweet && !adTweets.includes(adAncestorTweet)) {
+      adTweets.push(adAncestorTweet);
+    }
+
+    for (const tweet of adTweets) {
+      namespace.applyAdFilterToTweet?.(tweet, { documentRef });
+    }
   }
 
   const domExports = {
+    AD_HIDDEN_ATTRIBUTE,
     attachButtonToProfilePage,
     attachButtonToTweet,
     attachButtonToUserCell,
@@ -489,6 +655,9 @@
     findActionRowContainer,
     findPrimaryActionWrapper,
     findUserCellActionBar,
+    isAdTweet,
+    readTweetAuthorScreenName,
+    setAdTweetHidden,
     USER_CELL_ACTIONS_ATTRIBUTE,
     getElementChildren,
     processNode,

@@ -39,10 +39,13 @@
 
   const namespace = globalThis.EasyTweetBlockContent || (globalThis.EasyTweetBlockContent = {});
   const {
+    AD_FILTER_MODE_STORAGE_KEY,
+    AD_FILTER_MODES,
     BLOCK_BUTTON_ATTRIBUTE,
     BUTTON_ACTION_ATTRIBUTE,
     BUTTON_ACTIONS,
     BUTTON_KINDS,
+    DEFAULT_AD_FILTER_MODE,
     DEFAULT_BATCH_BLOCK_DELAY_MS,
     DEFAULT_PAGE_BLOCK_BUTTON_STYLE,
     DEFAULT_PAGE_BLOCK_BUTTON_STYLES,
@@ -666,6 +669,131 @@
     });
   }
 
+  let isAdFilterModeResolved = false;
+  let adFilterModeRevision = 0;
+
+  function getAdAuthorBlockAttempts() {
+    if (!namespace.contentState) {
+      namespace.contentState = {};
+    }
+
+    if (!namespace.contentState.adAuthorBlockAttempts) {
+      namespace.contentState.adAuthorBlockAttempts = new Set();
+    }
+
+    return namespace.contentState.adAuthorBlockAttempts;
+  }
+
+  function getCurrentAdFilterMode() {
+    return typeof namespace.getCurrentAdFilterMode === 'function'
+      ? namespace.getCurrentAdFilterMode()
+      : DEFAULT_AD_FILTER_MODE;
+  }
+
+  function setCurrentAdFilterMode(mode) {
+    const nextMode = typeof namespace.setCurrentAdFilterMode === 'function'
+      ? namespace.setCurrentAdFilterMode(mode)
+      : DEFAULT_AD_FILTER_MODE;
+
+    adFilterModeRevision += 1;
+    isAdFilterModeResolved = true;
+    return nextMode;
+  }
+
+  function tryAutoBlockAdAuthor(tweet, options = {}) {
+    if (getCurrentAdFilterMode() !== AD_FILTER_MODES.hideAndBlock) {
+      return false;
+    }
+
+    // Block only an author confirmed by the tweet's own header, with the
+    // permalink as a cross-check, so quoted authors are never targeted.
+    const screenName = typeof namespace.readTweetAuthorScreenName === 'function'
+      ? namespace.readTweetAuthorScreenName(tweet)
+      : null;
+    const normalizedUsername = typeof screenName === 'string' ? namespace.normalizeUsername(screenName) : null;
+
+    if (!normalizedUsername) {
+      return false;
+    }
+
+    // One attempt per author per tab, including failed attempts: a failed
+    // request must not be retried by later mutations or re-renders.
+    const attempts = getAdAuthorBlockAttempts();
+
+    if (attempts.has(normalizedUsername)) {
+      return false;
+    }
+
+    attempts.add(normalizedUsername);
+
+    void namespace.blockUserByScreenNameViaApi(normalizedUsername, options.documentRef ? {
+      documentRef: options.documentRef
+    } : {})
+      .catch((error) => {
+        logContentError('Failed to auto-block the ad author.', error);
+      });
+
+    return true;
+  }
+
+  function applyAdFilterToTweet(tweet, options = {}) {
+    try {
+      if (!tweet || !isAdFilterModeResolved) {
+        return;
+      }
+
+      const mode = getCurrentAdFilterMode();
+
+      if (mode === AD_FILTER_MODES.off) {
+        namespace.setAdTweetHidden?.(tweet, false);
+        return;
+      }
+
+      const isAd = typeof namespace.isAdTweet === 'function' ? namespace.isAdTweet(tweet) : false;
+
+      if (!isAd) {
+        namespace.setAdTweetHidden?.(tweet, false);
+        return;
+      }
+
+      namespace.setAdTweetHidden?.(tweet, true);
+
+      if (mode === AD_FILTER_MODES.hideAndBlock) {
+        tryAutoBlockAdAuthor(tweet, options);
+      }
+    } catch (error) {
+      logContentError('Failed to apply the ad filter to a tweet.', error);
+    }
+  }
+
+  function applyAdFilterToDocument(documentRef = document, options = {}) {
+    for (const tweet of collectTweets(documentRef)) {
+      applyAdFilterToTweet(tweet, { ...options, documentRef });
+    }
+  }
+
+  async function syncStoredAdFilterMode(globalRef = globalThis) {
+    const revisionAtStart = adFilterModeRevision;
+    const storedMode = typeof namespace.getStoredAdFilterMode === 'function'
+      ? await namespace.getStoredAdFilterMode(globalRef)
+      : DEFAULT_AD_FILTER_MODE;
+
+    if (adFilterModeRevision !== revisionAtStart) {
+      return getCurrentAdFilterMode();
+    }
+
+    setCurrentAdFilterMode(storedMode);
+    applyAdFilterToDocument(globalRef.document);
+    return storedMode;
+  }
+
+  function observeStoredAdFilterMode(globalRef = globalThis) {
+    return observeStoredLocalChange(globalRef, AD_FILTER_MODE_STORAGE_KEY, (newValue) => {
+      setCurrentAdFilterMode(newValue);
+      applyAdFilterToDocument(globalRef.document);
+    });
+  }
+
   async function syncUserCellListButtonState(button, activeList = null, options = {}) {
     if (!button || button.dataset?.state === 'running' || button.dataset?.state === 'running-remove') {
       return;
@@ -1016,6 +1144,7 @@
     }
 
     globalRef.__easyTweetBlockInjected__ = true;
+    isAdFilterModeResolved = false;
 
     registerRuntimeConnectionListener(globalRef);
     registerRuntimeMessageListener(globalRef);
@@ -1025,7 +1154,8 @@
     void Promise.allSettled([
       syncStoredPageButtonStyle(globalRef),
       syncStoredUserCellAddButtonVisibility(globalRef),
-      syncStoredUserCellAddButtonStyle(globalRef)
+      syncStoredUserCellAddButtonStyle(globalRef),
+      syncStoredAdFilterMode(globalRef)
     ])
       .then((results) => {
         if (results[0]?.status === 'rejected') {
@@ -1039,6 +1169,10 @@
         if (results[2]?.status === 'rejected') {
           setCurrentUserCellAddButtonStyle(DEFAULT_USER_CELL_ADD_BUTTON_STYLE);
         }
+
+        if (results[3]?.status === 'rejected' && !isAdFilterModeResolved) {
+          setCurrentAdFilterMode(DEFAULT_AD_FILTER_MODE);
+        }
       })
       .finally(() => {
         processNode(globalRef.document, globalRef.document);
@@ -1049,12 +1183,14 @@
     const stopActiveListObservation = observeActiveUsernameList(globalRef);
     const stopUserCellAddButtonObservation = observeStoredUserCellAddButtonVisibility(globalRef);
     const stopUserCellAddButtonStyleObservation = observeStoredUserCellAddButtonStyle(globalRef);
+    const stopAdFilterObservation = observeStoredAdFilterMode(globalRef);
 
     if (typeof globalRef.addEventListener === 'function') {
       globalRef.addEventListener('unload', stopStyleObservation, { once: true });
       globalRef.addEventListener('unload', stopActiveListObservation, { once: true });
       globalRef.addEventListener('unload', stopUserCellAddButtonObservation, { once: true });
       globalRef.addEventListener('unload', stopUserCellAddButtonStyleObservation, { once: true });
+      globalRef.addEventListener('unload', stopAdFilterObservation, { once: true });
     }
 
     if (!globalRef.document.body || typeof globalRef.MutationObserver !== 'function') {
@@ -1096,6 +1232,8 @@
   }
 
   Object.assign(namespace, {
+    applyAdFilterToDocument,
+    applyAdFilterToTweet,
     applyCurrentNativeButtonStyleToDocument,
     applyPageThemeToDocument,
     cancelFollowerRun,
@@ -1109,6 +1247,7 @@
     getBlocklistSharedApi,
     init,
     observeActiveUsernameList,
+    observeStoredAdFilterMode,
     observeStoredPageButtonStyle,
     observeStoredUserCellAddButtonStyle,
     observeStoredUserCellAddButtonVisibility,
@@ -1127,10 +1266,14 @@
 
   if (typeof module !== 'undefined') {
     module.exports = {
+      AD_FILTER_MODE_STORAGE_KEY,
+      AD_FILTER_MODES,
+      AD_HIDDEN_ATTRIBUTE: namespace.AD_HIDDEN_ATTRIBUTE,
       BLOCK_BUTTON_ATTRIBUTE,
       BUTTON_ACTION_ATTRIBUTE,
       BUTTON_ACTIONS,
       BUTTON_KINDS,
+      DEFAULT_AD_FILTER_MODE,
       DEFAULT_BATCH_BLOCK_DELAY_MS,
       DEFAULT_PAGE_BLOCK_BUTTON_STYLE,
       DEFAULT_PAGE_BLOCK_BUTTON_STYLES,
@@ -1149,6 +1292,8 @@
       USER_BY_SCREEN_NAME_FEATURES,
       USER_BY_SCREEN_NAME_QUERY_IDS,
       WAIT_TIMEOUT_MS,
+      applyAdFilterToDocument,
+      applyAdFilterToTweet,
       attachButtonToProfilePage: namespace.attachButtonToProfilePage,
       attachButtonToTweet,
       attachButtonToUserCell: namespace.attachButtonToUserCell,
@@ -1205,6 +1350,7 @@
       normalizePageBlockButtonStyles: namespace.normalizePageBlockButtonStyles,
       normalizeUserCellAddButtonVisibility: namespace.normalizeUserCellAddButtonVisibility,
       normalizeUsername: namespace.normalizeUsername,
+      observeStoredAdFilterMode,
       observeStoredPageButtonStyle,
       observeStoredUserCellAddButtonStyle,
       observeStoredUserCellAddButtonVisibility,
@@ -1220,6 +1366,7 @@
       runImmediateBlockInPageContext: namespace.runImmediateBlockInPageContext,
       runApiBlockFlow: namespace.runApiBlockFlow,
       processNode: namespace.processNode,
+      isAdTweet: namespace.isAdTweet,
       isBlockedUserCellActionButton,
       readUserCellActionButtonText,
       runProfileNativeBlockFlow,
@@ -1229,6 +1376,7 @@
       detectPageTheme: namespace.detectPageTheme,
       applyCurrentNativeButtonStyleToDocument,
       applyPageThemeToDocument,
+      setCurrentAdFilterMode,
       setCurrentNativeButtonStyle: namespace.setCurrentNativeButtonStyle,
       setCurrentNativeButtonStyles: namespace.setCurrentNativeButtonStyles,
       setCurrentUserCellAddButtonStyle,

@@ -2,6 +2,9 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const {
+  AD_FILTER_MODE_STORAGE_KEY,
+  AD_FILTER_MODES,
+  DEFAULT_AD_FILTER_MODE,
   DEFAULT_BATCH_BLOCK_DELAY_MS,
   DEFAULT_PAGE_BLOCK_BUTTON_STYLE,
   DEFAULT_PAGE_BLOCK_BUTTON_STYLES,
@@ -12,15 +15,18 @@ const {
   PAGE_BLOCK_BUTTON_STYLES,
   PAGE_BLOCK_BUTTON_STYLES_STORAGE_KEY,
   PAGE_BUTTON_STYLE_SURFACES,
+  getStoredAdFilterMode,
   getStoredBatchBlockDelayMs,
   getStoredPageBlockButtonStyles,
   getStoredUserCellAddButtonStyle,
   getStoredUserCellAddButtonVisibility,
+  normalizeAdFilterMode,
   normalizeBatchBlockDelayMs,
   normalizePageBlockButtonStyle,
   normalizePageBlockButtonStyles,
   normalizePageButtonStyleSurface,
   normalizeUserCellAddButtonVisibility,
+  setStoredAdFilterMode,
   setStoredBatchBlockDelayMs,
   setStoredPageBlockButtonStyles,
   setStoredUserCellAddButtonStyle,
@@ -126,6 +132,28 @@ test('normalizeBatchBlockDelayMs clamps values into the supported range', () => 
   assert.equal(normalizeBatchBlockDelayMs(10500), MAX_BATCH_BLOCK_DELAY_MS);
 });
 
+test('normalizeAdFilterMode defaults to hide and only accepts known modes', () => {
+  assert.equal(DEFAULT_AD_FILTER_MODE, AD_FILTER_MODES.hide);
+  assert.equal(normalizeAdFilterMode(undefined), AD_FILTER_MODES.hide);
+  assert.equal(normalizeAdFilterMode('random'), AD_FILTER_MODES.hide);
+  assert.equal(normalizeAdFilterMode(AD_FILTER_MODES.off), AD_FILTER_MODES.off);
+  assert.equal(normalizeAdFilterMode(AD_FILTER_MODES.hide), AD_FILTER_MODES.hide);
+  assert.equal(normalizeAdFilterMode(AD_FILTER_MODES.hideAndBlock), AD_FILTER_MODES.hideAndBlock);
+});
+
+test('getStoredAdFilterMode defaults to hide and keeps an explicitly saved off mode', async () => {
+  const extensionApi = createExtensionApi();
+
+  assert.equal(await getStoredAdFilterMode(extensionApi), AD_FILTER_MODES.hide);
+
+  const savedMode = await setStoredAdFilterMode(AD_FILTER_MODES.off, extensionApi);
+  const loadedMode = await getStoredAdFilterMode(extensionApi);
+
+  assert.equal(savedMode, AD_FILTER_MODES.off);
+  assert.equal(loadedMode, AD_FILTER_MODES.off);
+  assert.equal(extensionApi.store[AD_FILTER_MODE_STORAGE_KEY], AD_FILTER_MODES.off);
+});
+
 test('getStoredUserCellAddButtonStyle defaults to icon and round-trips through storage', async () => {
   const extensionApi = createExtensionApi();
 
@@ -192,6 +220,8 @@ test('stored settings helpers also work with promise-based storage APIs', async 
   const loadedVisibility = await getStoredUserCellAddButtonVisibility(extensionApi);
   const savedAddStyle = await setStoredUserCellAddButtonStyle(PAGE_BLOCK_BUTTON_STYLES.text, extensionApi);
   const loadedAddStyle = await getStoredUserCellAddButtonStyle(extensionApi);
+  const savedAdMode = await setStoredAdFilterMode(AD_FILTER_MODES.hideAndBlock, extensionApi);
+  const loadedAdMode = await getStoredAdFilterMode(extensionApi);
 
   assert.equal(savedDelayMs, 1201);
   assert.equal(loadedDelayMs, 1201);
@@ -200,6 +230,8 @@ test('stored settings helpers also work with promise-based storage APIs', async 
   assert.equal(loadedVisibility, false);
   assert.equal(savedAddStyle, PAGE_BLOCK_BUTTON_STYLES.text);
   assert.equal(loadedAddStyle, PAGE_BLOCK_BUTTON_STYLES.text);
+  assert.equal(savedAdMode, AD_FILTER_MODES.hideAndBlock);
+  assert.equal(loadedAdMode, AD_FILTER_MODES.hideAndBlock);
 });
 
 test('settings storage helpers reject callback-style storage errors', async () => {

@@ -20,6 +20,9 @@
   const { createUsernameSet: createSharedUsernameSet, normalizeUsername, USERNAME_PATTERN } = usernamesApi;
   const { DEFAULT_X_ORIGIN } = xPlatformApi;
   const {
+    AD_FILTER_MODE_STORAGE_KEY,
+    AD_FILTER_MODES,
+    DEFAULT_AD_FILTER_MODE,
     DEFAULT_BATCH_BLOCK_DELAY_MS,
     DEFAULT_PAGE_BLOCK_BUTTON_STYLE,
     DEFAULT_PAGE_BLOCK_BUTTON_STYLES,
@@ -32,6 +35,7 @@
     PAGE_BUTTON_STYLE_SURFACES,
     USER_CELL_ADD_BUTTON_STYLE_STORAGE_KEY,
     USER_CELL_ADD_BUTTON_VISIBILITY_STORAGE_KEY,
+    normalizeAdFilterMode,
     normalizeBatchBlockDelayMs,
     normalizePageBlockButtonStyle,
     normalizePageBlockButtonStyles,
@@ -49,7 +53,8 @@
     blockConfirmButton: '[data-testid="confirmationSheetConfirm"]',
     permalink: 'a[href*="/status/"]',
     profileLink: '[data-testid="User-Name"] a[href^="/"]:not([href*="/status/"])',
-    avatarContainer: '[data-testid^="UserAvatar-Container-"]'
+    avatarContainer: '[data-testid^="UserAvatar-Container-"]',
+    tweetText: '[data-testid="tweetText"]'
   });
   const BUTTON_KINDS = Object.freeze({
     native: 'native',
@@ -76,11 +81,13 @@
   const CHECK_ICON_PATH = 'M9.55 16.94L5.3 12.7l1.41-1.41 2.84 2.83 7.84-7.84 1.41 1.41-9.25 9.25z';
 
   const contentState = namespace.contentState || {
+    currentAdFilterMode: DEFAULT_AD_FILTER_MODE,
     currentNativeButtonStyles: { ...DEFAULT_PAGE_BLOCK_BUTTON_STYLES },
     currentUserCellAddButtonStyle: DEFAULT_USER_CELL_ADD_BUTTON_STYLE,
     userRestIdCache: new Map()
   };
 
+  contentState.currentAdFilterMode = normalizeAdFilterMode(contentState.currentAdFilterMode);
   contentState.currentNativeButtonStyles = normalizePageBlockButtonStyles(
     contentState.currentNativeButtonStyles || DEFAULT_PAGE_BLOCK_BUTTON_STYLES
   );
@@ -238,6 +245,15 @@
     return contentState.currentUserCellAddButtonStyle;
   }
 
+  function getCurrentAdFilterMode() {
+    return normalizeAdFilterMode(contentState.currentAdFilterMode);
+  }
+
+  function setCurrentAdFilterMode(mode) {
+    contentState.currentAdFilterMode = normalizeAdFilterMode(mode);
+    return contentState.currentAdFilterMode;
+  }
+
   function getUserRestIdCache() {
     return contentState.userRestIdCache;
   }
@@ -245,6 +261,11 @@
   async function getStoredPageButtonStyles(globalRef = globalThis) {
     const extensionApi = getExtensionApi(globalRef);
     return settingsApi.getStoredPageBlockButtonStyles(extensionApi);
+  }
+
+  async function getStoredAdFilterMode(globalRef = globalThis) {
+    const extensionApi = getExtensionApi(globalRef);
+    return settingsApi.getStoredAdFilterMode(extensionApi);
   }
 
   async function getStoredUserCellAddButtonStyle(globalRef = globalThis) {
@@ -679,10 +700,13 @@
   }
 
   const sharedExports = {
+    AD_FILTER_MODE_STORAGE_KEY,
+    AD_FILTER_MODES,
     BLOCK_BUTTON_ATTRIBUTE,
     BUTTON_ACTION_ATTRIBUTE,
     BUTTON_ACTIONS,
     BUTTON_KINDS,
+    DEFAULT_AD_FILTER_MODE,
     DEFAULT_BATCH_BLOCK_DELAY_MS,
     DEFAULT_PAGE_BLOCK_BUTTON_STYLE,
     DEFAULT_PAGE_BLOCK_BUTTON_STYLES,
@@ -711,16 +735,19 @@
     getButtonTitle,
     getClientLanguage,
     getCsrfToken,
+    getCurrentAdFilterMode,
     getCurrentNativeButtonStyle,
     getCurrentNativeButtonStyles,
     getCurrentUserCellAddButtonStyle,
     getExtensionApi,
     makePrefixedLogger,
+    getStoredAdFilterMode,
     getStoredPageButtonStyles,
     getStoredUserCellAddButtonStyle,
     getStoredUserCellAddButtonVisibility,
     getUserRestIdCache,
     isAbortError,
+    normalizeAdFilterMode,
     normalizeBatchBlockDelayMs,
     normalizePageBlockButtonStyle,
     normalizePageBlockButtonStyles,
@@ -731,6 +758,7 @@
     readScreenNameFromProfilePage,
     readScreenNameFromTweet,
     setButtonState,
+    setCurrentAdFilterMode,
     setCurrentNativeButtonStyle,
     setCurrentNativeButtonStyles,
     setCurrentUserCellAddButtonStyle,
