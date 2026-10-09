@@ -1,5 +1,6 @@
 dist/
 node_modules/
+.kilo/
 .history/
-examples/*
 
+examples/*
