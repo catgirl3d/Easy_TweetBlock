@@ -145,14 +145,47 @@
     return findFirstManagedButton(rootNode, (node) => readManagedButtonAction(node) === action);
   }
 
+  function isTweetActionRowBoundary(node) {
+    if (!node || (node.nodeType !== 1 && node.nodeType !== 9)) {
+      return false;
+    }
+
+    if (
+      nodeMatchesOrContains(node, SELECTORS.tweetText)
+      || nodeMatchesOrContains(node, SELECTORS.profileLink)
+      || nodeMatchesOrContains(node, SELECTORS.avatarContainer)
+      || nodeMatchesOrContains(node, '[data-testid="User-Name"]')
+      || nodeMatchesOrContains(node, '[data-testid="reply"]')
+      || nodeMatchesOrContains(node, '[data-testid="tweet-text-show-more-link"]')
+    ) {
+      return true;
+    }
+
+    return Boolean(findFirstDescendant(node, (descendant) => (
+      typeof descendant.matches === 'function' && (
+        descendant.matches(SELECTORS.tweetText)
+        || descendant.matches(SELECTORS.profileLink)
+        || descendant.matches(SELECTORS.avatarContainer)
+        || descendant.matches('[data-testid="User-Name"]')
+        || descendant.matches('[data-testid="reply"]')
+        || descendant.matches('[data-testid="tweet-text-show-more-link"]')
+      )
+    )));
+  }
+
   function findActionRowContainer(caretButton, tweet) {
     let current = caretButton?.parentElement || null;
 
     while (current && current !== tweet) {
+      if (isTweetActionRowBoundary(current)) {
+        break;
+      }
+
       const childElements = getElementChildren(current);
 
       if (
         childElements.length > 1
+        && childElements.every((child) => !isTweetActionRowBoundary(child))
         && childElements.every((child) => subtreeContainsButton(child))
         && childElements.every((child) => child.tagName !== 'button' && child.tagName !== 'BUTTON')
       ) {
@@ -661,7 +694,8 @@
     USER_CELL_ACTIONS_ATTRIBUTE,
     getElementChildren,
     processNode,
-    subtreeContainsButton
+    subtreeContainsButton,
+    isTweetActionRowBoundary
   };
 
   Object.assign(namespace, domExports);

@@ -47,7 +47,7 @@
     tweet: 'article[data-testid="tweet"]',
     userCell: 'button[data-testid="UserCell"]',
     caretButton: 'button[data-testid="caret"]',
-    grokButton: 'button[aria-label="Grok actions"]',
+    grokButton: 'button[aria-label*="Grok"]',
     profileActionsButton: 'button[data-testid="userActions"]',
     blockMenuItem: '[data-testid="block"]',
     blockConfirmButton: '[data-testid="confirmationSheetConfirm"]',

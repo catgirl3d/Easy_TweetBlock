@@ -3577,6 +3577,70 @@ test('attachButtonToTweet moves an existing native button into the Grok action w
   assert.equal(localButtonGroup.children[0], caretButton);
 });
 
+test('attachButtonToTweet does not escape header actions when tweet body contains buttons and Grok is absent', (t) => {
+  const { createdElements, documentRef } = createDocumentStub();
+  const { caretButton, localButtonGroup, tweetNode } = createTweetNode('Felixmfdo', {
+    includeLeadingAction: false,
+    bodyText: 'Long tweet text'
+  });
+
+  const showMoreButton = createDomElement({
+    nodeType: 1,
+    tagName: 'BUTTON',
+    matches(selector) {
+      return selector === 'button' || selector === '[data-testid="tweet-text-show-more-link"]';
+    }
+  });
+  showMoreButton.setAttribute('data-testid', 'tweet-text-show-more-link');
+
+  const replyButton = createDomElement({
+    nodeType: 1,
+    tagName: 'BUTTON',
+    matches(selector) {
+      return selector === 'button' || selector === '[data-testid="reply"]';
+    }
+  });
+  replyButton.setAttribute('data-testid', 'reply');
+
+  const footerActions = {
+    nodeType: 1,
+    children: [replyButton],
+    matches() {
+      return false;
+    },
+    querySelector(selector) {
+      return selector === '[data-testid="reply"]' ? replyButton : null;
+    }
+  };
+
+  const bodyTextNode = tweetNode.querySelector(SELECTORS.tweetText);
+  bodyTextNode.children = [showMoreButton];
+  bodyTextNode.querySelector = (selector) => (
+    selector === '[data-testid="tweet-text-show-more-link"]' || selector === 'button' ? showMoreButton : null
+  );
+
+  const contentColumn = tweetNode.children[0];
+  contentColumn.children.push(footerActions);
+  contentColumn.querySelector = (selector) => {
+    if (selector === SELECTORS.tweetText) return bodyTextNode;
+    if (selector === '[data-testid="reply"]') return replyButton;
+    return null;
+  };
+
+  useGlobalOverrides(t, { document: documentRef });
+  setCurrentNativeButtonStyle(PAGE_BLOCK_BUTTON_STYLES.icon);
+
+  attachButtonToTweet(tweetNode);
+
+  assert.equal(createdElements.length, 1);
+  assert.equal(localButtonGroup.children[0], createdElements[0]);
+  assert.equal(localButtonGroup.children[1], caretButton);
+});
+
+test('SELECTORS.grokButton matches localized Grok buttons', () => {
+  assert.equal(SELECTORS.grokButton, 'button[aria-label*="Grok"]');
+});
+
 test('attachButtonToProfilePage inserts the native button before the profile actions trigger', (t) => {
   const { actionBar, createdElements, documentRef, moreButton, messageButton } = createProfilePageDocument('281v6s1b5z51');
 
