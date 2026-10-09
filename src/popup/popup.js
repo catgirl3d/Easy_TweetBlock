@@ -52,6 +52,8 @@
     || (typeof module !== 'undefined' && module.exports ? require('../shared/x-platform.js') : null);
   const hostPermissionsApi = globalThis.EasyTweetBlockHostPermissions
     || (typeof module !== 'undefined' && module.exports ? require('../shared/host-permissions.js') : null);
+  const adBlockHistoryApi = globalThis.EasyTweetBlockAdBlockHistory
+    || (typeof module !== 'undefined' && module.exports ? require('../shared/ad-block-history.js') : null);
 
   if (!popupDebugApi) {
     throw new Error('Missing Easy TweetBlock popup debug API.');
@@ -127,6 +129,7 @@
   const FOLLOWERS_SCAN_MESSAGE_TYPE = 'easy-tweetblock:scan-followers-for-block';
   const FOLLOWERS_RUN_PORT_PREFIX = 'easy-tweetblock:follower-run:';
   const POPUP_VIEWS = Object.freeze({
+    adHistory: 'ad-history',
     followers: 'followers',
     main: 'main',
     settings: 'settings'
@@ -135,7 +138,7 @@
   const CONTENT_SCRIPT_FILES = Object.freeze([...contentScriptFilesApi.CONTENT_SCRIPT_FILES]);
 
   function normalizePopupView(view) {
-    if (view === POPUP_VIEWS.settings || view === POPUP_VIEWS.followers) {
+    if (view === POPUP_VIEWS.settings || view === POPUP_VIEWS.followers || view === POPUP_VIEWS.adHistory) {
       return view;
     }
 
@@ -879,6 +882,12 @@
     const openFollowersButton = documentRef.getElementById('open-followers');
     const backToMainButton = documentRef.getElementById('back-to-main');
     const backFromFollowersButton = documentRef.getElementById('back-from-followers');
+    const openAdHistoryButton = documentRef.getElementById('open-ad-history');
+    const backFromAdHistoryButton = documentRef.getElementById('back-from-ad-history');
+    const adBlockHistoryCountElement = documentRef.getElementById('ad-block-history-count');
+    const adBlockHistoryListElement = documentRef.getElementById('ad-block-history-list');
+    const adBlockHistoryEmptyElement = documentRef.getElementById('ad-block-history-empty');
+    const adBlockHistoryErrorElement = documentRef.getElementById('ad-block-history-error');
     const saveButton = documentRef.getElementById('save-blocklist');
     const saveSettingsButton = documentRef.getElementById('save-settings');
     const blockNowButton = documentRef.getElementById('block-now');
@@ -998,9 +1007,16 @@
       ? { ...storedPopupState.usernameDrafts }
       : {};
     let isHydratingPopupState = true;
+    let adBlockHistoryLoadRevision = 0;
+    let hasLoadedAdBlockHistory = false;
+    let adBlockHistoryCount = 0;
 
     if (!followerScanSessions) {
       renderFatalPopupError(new Error('Missing Easy TweetBlock follower scan session API.'), documentRef);
+      return;
+    }
+
+    if (!adBlockHistoryApi || !openAdHistoryButton || !backFromAdHistoryButton || !adBlockHistoryCountElement || !adBlockHistoryListElement || !adBlockHistoryEmptyElement || !adBlockHistoryErrorElement) {
       return;
     }
 
@@ -1295,6 +1311,59 @@
 
     function renderCount(usernames) {
       countElement.textContent = `${usernames.length} username${usernames.length === 1 ? '' : 's'}`;
+    }
+
+    function renderAdBlockHistoryLink() {
+      openAdHistoryButton.hidden = draftAdFilterMode !== adFilterModes.hideAndBlock && adBlockHistoryCount === 0;
+    }
+
+    async function refreshAdBlockHistory() {
+      const revision = ++adBlockHistoryLoadRevision;
+
+      try {
+        const history = await adBlockHistoryApi.getStoredAdBlockHistory(extensionApi);
+
+        if (revision !== adBlockHistoryLoadRevision) {
+          return;
+        }
+
+        const rows = history.map((record) => {
+          const row = documentRef.createElement('li');
+          row.className = 'ad-history-entry';
+          const link = documentRef.createElement('a');
+          link.textContent = `@${record.username}`;
+          link.href = `${DEFAULT_X_ORIGIN}/i/user/${record.restId}`;
+          link.target = '_blank';
+          link.rel = 'noopener noreferrer';
+          const date = new Date(record.blockedAt);
+          const time = documentRef.createElement('time');
+          time.dateTime = date.toISOString();
+          time.textContent = date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+          row.replaceChildren(link, time);
+          return row;
+        });
+
+        adBlockHistoryListElement.replaceChildren(...rows);
+        adBlockHistoryCountElement.textContent = `${history.length} account${history.length === 1 ? '' : 's'}`;
+        adBlockHistoryEmptyElement.textContent = 'No ad auto-blocks recorded yet. New entries appear when Hide + block succeeds.';
+        adBlockHistoryEmptyElement.hidden = history.length > 0;
+        adBlockHistoryErrorElement.hidden = true;
+        hasLoadedAdBlockHistory = true;
+        adBlockHistoryCount = history.length;
+        renderAdBlockHistoryLink();
+      } catch (error) {
+        if (revision !== adBlockHistoryLoadRevision) {
+          return;
+        }
+
+        logPopupError('Failed to load ad block history.', error);
+        adBlockHistoryErrorElement.hidden = false;
+        adBlockHistoryEmptyElement.hidden = true;
+
+        if (!hasLoadedAdBlockHistory) {
+          adBlockHistoryCountElement.textContent = 'Unavailable';
+        }
+      }
     }
 
     function getActiveListStorageText(list = currentActiveUsernameList) {
@@ -1726,6 +1795,7 @@
         control.setAttribute('aria-pressed', String(isActive));
       }
 
+      renderAdBlockHistoryLink();
       updateUnsavedSettingsState();
     }
 
@@ -2061,6 +2131,8 @@
       importUsernamesButton.disabled = isAnyBusy;
       openSettingsButton.disabled = isAnyBusy;
       openFollowersButton.disabled = isAnyBusy;
+      openAdHistoryButton.disabled = isAnyBusy;
+      backFromAdHistoryButton.disabled = isAnyBusy;
       backToMainButton.disabled = isAnyBusy;
       backFromFollowersButton.disabled = isAnyBusy;
       followersSourceFollowersElement.disabled = isAnyBusy;
@@ -3200,6 +3272,14 @@
       showFollowersView();
     });
 
+    openAdHistoryButton.addEventListener('click', () => {
+      setPopupView(shellElement, POPUP_VIEWS.adHistory);
+      persistCurrentPopupState();
+      void refreshAdBlockHistory();
+    });
+
+    backFromAdHistoryButton.addEventListener('click', showSettingsView);
+
     backToMainButton.addEventListener('click', () => {
       renderDelay(currentDelayMs);
       renderPageButtonStyles(currentPageButtonStyles);
@@ -3332,6 +3412,12 @@
     }
 
     const stopUsernameListObservation = observePopupUsernameLists();
+    const handleAdBlockHistoryChange = (changes, areaName) => {
+      if (areaName === 'local' && adBlockHistoryApi.hasAdBlockHistoryStorageChange(changes)) {
+        void refreshAdBlockHistory();
+      }
+    };
+    extensionApi.storage?.onChanged?.addListener(handleAdBlockHistoryChange);
 
     const handleDocumentClick = (event) => {
       if (!isUsernameListDropdownOpen) {
@@ -3355,6 +3441,10 @@
     if (typeof globalThis.addEventListener === 'function') {
       globalThis.addEventListener('unload', stopUsernameListObservation, { once: true });
       globalThis.addEventListener('unload', () => {
+        adBlockHistoryLoadRevision += 1;
+        extensionApi.storage?.onChanged?.removeListener(handleAdBlockHistoryChange);
+      }, { once: true });
+      globalThis.addEventListener('unload', () => {
         if (typeof documentRef.removeEventListener === 'function') {
           documentRef.removeEventListener('click', handleDocumentClick);
         }
@@ -3373,6 +3463,7 @@
     void loadBlocklist().catch((error) => {
       renderFatalPopupError(error, documentRef);
     });
+    void refreshAdBlockHistory();
   }
 
   if (typeof module !== 'undefined') {

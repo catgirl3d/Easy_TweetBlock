@@ -163,6 +163,11 @@
                 <button id="ad-filter-mode-hide" class="segment-button" type="button">Hide</button>
                 <button id="ad-filter-mode-hide-block" class="segment-button" type="button">Hide + block</button>
               </div>
+              <button id="open-ad-history" class="ad-history-link" type="button" hidden>
+                <span>Ad block history</span>
+                <span id="ad-block-history-count" class="count-pill" aria-live="polite">Loading...</span>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 5 16 12 9 19"></polyline></svg>
+              </button>
             </div>
             <div class="settings-section">
               <h3 class="settings-section-title">Block button</h3>
@@ -310,6 +315,24 @@
             </div>
           </section>
         </section>
+        <section class="view-panel" data-view-panel="ad-history">
+          <section class="card settings-card">
+            <div class="settings-header">
+              <button id="back-from-ad-history" class="ghost-button" type="button">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+                Back
+              </button>
+              <h2>Ad block history</h2>
+            </div>
+            <p class="settings-copy">Successful ad auto-blocks, saved locally. Dates show the last recorded auto-block. Unblocking on X does not remove these records.</p>
+            <div id="ad-block-history-error" class="followers-notice" data-tone="danger" role="alert" hidden>
+              <span class="followers-notice-mark" aria-hidden="true">!</span>
+              <p class="followers-notice-copy">Could not load ad block history. Reopen this view to try again.</p>
+            </div>
+            <p id="ad-block-history-empty" class="settings-copy" role="status">Loading history...</p>
+            <ul id="ad-block-history-list" class="ad-history-list" aria-label="Recorded ad auto-blocks"></ul>
+          </section>
+        </section>
       </div>
     </div>
     <footer class="popup-footer">
@@ -329,6 +352,7 @@
   <script src="../shared/normalization.js"></script>
   <script src="../shared/usernames.js"></script>
   <script src="../shared/identity.js"></script>
+  <script src="../shared/ad-block-history.js"></script>
   <script src="../shared/x-platform.js"></script>
   <script src="../shared/host-permissions.js"></script>
   <script src="../shared/follower-candidates.js"></script>

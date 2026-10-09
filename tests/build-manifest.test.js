@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
+const vm = require("node:vm");
 
 const {
   CONTENT_SCRIPT_CSS_FILES,
@@ -148,6 +149,28 @@ test("buildManifest merges the Firefox overlay into the base manifest", () => {
   });
   assert.equal("gecko_android" in manifest.browser_specific_settings, false);
   assert.deepEqual(manifest.background.scripts, ["src/background/background-firefox.js"]);
+});
+
+test("both browser manifests load usable ad history storage without CommonJS dependencies", async () => {
+  for (const target of ["chrome", "firefox"]) {
+    const store = {};
+    const context = vm.createContext({
+      [target === "chrome" ? "chrome" : "browser"]: {
+        storage: { local: {
+          async get() { return store; },
+          async set(values) { Object.assign(store, values); }
+        } }
+      }
+    });
+    for (const file of buildManifest(target).content_scripts[0].js) {
+      vm.runInContext(fs.readFileSync(path.join(__dirname, "..", file), "utf8"), context, { filename: file });
+    }
+    assert.equal(typeof context.EasyTweetBlockAdBlockHistory?.recordAdBlock, "function");
+    await context.EasyTweetBlockAdBlockHistory.recordAdBlock({ restId: "101", username: "@Advertiser", blockedAt: 1000 });
+    assert.deepEqual(JSON.parse(JSON.stringify(await context.EasyTweetBlockAdBlockHistory.getStoredAdBlockHistory())), [
+      { restId: "101", username: "advertiser", blockedAt: 1000 }
+    ]);
+  }
 });
 
 test("applyDefaultContentScriptFiles fills omitted content script asset lists", () => {

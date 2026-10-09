@@ -9,6 +9,7 @@
     'src/shared/normalization.js',
     'src/shared/usernames.js',
     'src/shared/identity.js',
+    'src/shared/ad-block-history.js',
     'src/shared/x-platform.js',
     'src/shared/follower-candidates.js',
     'src/shared/username-lists.js',

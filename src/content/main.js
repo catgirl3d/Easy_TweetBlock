@@ -25,6 +25,7 @@
     require('../shared/followers.js');
     require('../shared/usernames.js');
     require('../shared/identity.js');
+    require('../shared/ad-block-history.js');
     require('../shared/x-platform.js');
     require('../shared/follower-candidates.js');
     require('../shared/username-lists.js');
@@ -38,6 +39,7 @@
   }
 
   const namespace = globalThis.EasyTweetBlockContent || (globalThis.EasyTweetBlockContent = {});
+  const adBlockHistoryApi = globalThis.EasyTweetBlockAdBlockHistory;
   const {
     AD_FILTER_MODE_STORAGE_KEY,
     AD_FILTER_MODES,
@@ -729,6 +731,13 @@
     void namespace.blockUserByScreenNameViaApi(normalizedUsername, options.documentRef ? {
       documentRef: options.documentRef
     } : {})
+      .then((result) => adBlockHistoryApi.recordAdBlock({
+        restId: result?.restId,
+        username: result?.screenName,
+        blockedAt: Date.now()
+      }).catch((error) => {
+        logContentError('Failed to save ad block history.', error);
+      }))
       .catch((error) => {
         logContentError('Failed to auto-block the ad author.', error);
       });

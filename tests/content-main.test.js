@@ -378,6 +378,10 @@ function createStorageExtensionApi(initialStore = {}) {
     storage: {
       local: {
         get(keys) {
+          if (keys === null) {
+            return Promise.resolve({ ...store });
+          }
+
           const response = {};
 
           for (const key of keys) {
@@ -5186,6 +5190,7 @@ test('scanFollowersForBlocking stops scanning and limits request count when it h
 function installAdBlockRecorder(t) {
   const blockCalls = [];
   const originalBlockUserByScreenNameViaApi = globalThis.EasyTweetBlockContent.blockUserByScreenNameViaApi;
+  useGlobalOverrides(t, { browser: undefined, chrome: createStorageExtensionApi() });
 
   globalThis.EasyTweetBlockContent.blockUserByScreenNameViaApi = async (screenName) => {
     blockCalls.push(screenName);
@@ -5486,6 +5491,91 @@ test('processNode blocks an ad author only once across repeated processing in hi
   assert.equal(tweetNode.getAttribute(AD_HIDDEN_ATTRIBUTE), 'true');
 });
 
+test('ad block history is persisted only after the real block API succeeds and excludes manual blocks', async (t) => {
+  const { documentRef } = createDocumentStub();
+  documentRef.cookie = 'ct0=token123';
+  documentRef.location = { origin: 'https://x.com' };
+  const { tweetNode } = createTweetNode('AdHistoryOnly', {
+    adLabel: true,
+    profileLink: createAuthorLink('AdHistoryOnly')
+  });
+  const initialStore = { unrelated: 'keep' };
+  const extensionApi = createStorageExtensionApi(initialStore);
+  let resolveBlock;
+  const blockResponse = new Promise((resolve) => { resolveBlock = resolve; });
+  const posts = [];
+
+  useGlobalOverrides(t, {
+    browser: undefined,
+    chrome: extensionApi,
+    document: documentRef,
+    async fetch(url, options = {}) {
+      if (options.method === 'POST') {
+        assert.equal(new URL(url).pathname, '/i/api/1.1/blocks/create.json');
+        posts.push(options.body);
+        return posts.length === 1 ? blockResponse : new Response('{}');
+      }
+
+      assert.equal(new URL(url).pathname.endsWith('/UserByScreenName'), true);
+      return new Response(JSON.stringify({ data: { user: { result: { rest_id: '2057563419742486528' } } } }));
+    }
+  });
+  t.mock.method(Date, 'now', () => 1767312000000);
+  t.mock.method(globalThis.EasyTweetBlockContent, 'tryGenerateXClientTransactionId', async () => null);
+  t.after(() => setCurrentAdFilterMode(DEFAULT_AD_FILTER_MODE));
+  setCurrentAdFilterMode(AD_FILTER_MODES.hideAndBlock);
+
+  processNode(tweetNode, documentRef);
+  await flushAsyncWork();
+  assert.equal(posts.length, 1);
+  assert.equal(tweetNode.getAttribute(AD_HIDDEN_ATTRIBUTE), 'true');
+  assert.deepEqual(extensionApi.store, initialStore);
+
+  resolveBlock(new Response('{}'));
+  await flushAsyncWork();
+  const expectedStore = {
+    unrelated: 'keep',
+    'easyTweetBlockAdBlockHistory:2057563419742486528': {
+      restId: '2057563419742486528',
+      username: 'adhistoryonly',
+      blockedAt: 1767312000000
+    }
+  };
+  assert.deepEqual(extensionApi.store, expectedStore);
+
+  processNode(tweetNode, documentRef);
+  await blockUserByRestIdViaApi('202', { documentRef });
+  assert.equal(posts.length, 2);
+  assert.deepEqual(extensionApi.store, expectedStore);
+});
+
+test('a failed history write does not report a block failure or retry the hidden ad author', async (t) => {
+  const { documentRef } = createDocumentStub();
+  const { tweetNode } = createTweetNode('AdHistoryFail', {
+    adLabel: true,
+    profileLink: createAuthorLink('AdHistoryFail')
+  });
+  const blockCalls = installAdBlockRecorder(t);
+  const errors = [];
+  useGlobalOverrides(t, {
+    document: documentRef,
+    console: { ...console, error(...args) { errors.push(args); } }
+  });
+  globalThis.chrome.storage.local.set = async () => { throw new Error('storage quota exceeded'); };
+  setCurrentAdFilterMode(AD_FILTER_MODES.hideAndBlock);
+
+  processNode(tweetNode, documentRef);
+  await flushAsyncWork();
+  processNode(tweetNode, documentRef);
+  await flushAsyncWork();
+
+  assert.deepEqual(blockCalls, ['adhistoryfail']);
+  assert.equal(tweetNode.getAttribute(AD_HIDDEN_ATTRIBUTE), 'true');
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0][1], 'Failed to save ad block history.');
+  assert.match(errors[0][2].message, /storage quota exceeded/);
+});
+
 test('a failed ad author block keeps the tweet hidden and never retries', async (t) => {
   const { documentRef } = createDocumentStub();
   const { tweetNode } = createTweetNode('AdBlockFail', {
@@ -5493,8 +5583,11 @@ test('a failed ad author block keeps the tweet hidden and never retries', async 
     profileLink: createAuthorLink('AdBlockFail')
   });
   const blockCalls = [];
+  const extensionApi = createStorageExtensionApi({ unrelated: 'keep' });
 
   useGlobalOverrides(t, {
+    browser: undefined,
+    chrome: extensionApi,
     document: documentRef,
     console: {
       ...console,
@@ -5520,6 +5613,7 @@ test('a failed ad author block keeps the tweet hidden and never retries', async 
 
   assert.deepEqual(blockCalls, ['adblockfail']);
   assert.equal(tweetNode.getAttribute(AD_HIDDEN_ATTRIBUTE), 'true');
+  assert.deepEqual(extensionApi.store, { unrelated: 'keep' });
 });
 
 test('processNode hides an ad tweet without blocking when no author can be resolved', async (t) => {
@@ -5624,18 +5718,7 @@ test('a stored ad filter change applies the new mode to tweets already in the fe
     },
     document: documentRef
   };
-  const blockCalls = [];
-  const originalBlockUserByScreenNameViaApi = globalThis.EasyTweetBlockContent.blockUserByScreenNameViaApi;
-
-  globalThis.EasyTweetBlockContent.blockUserByScreenNameViaApi = async (screenName) => {
-    blockCalls.push(screenName);
-    return { restId: '101', screenName };
-  };
-
-  t.after(() => {
-    globalThis.EasyTweetBlockContent.blockUserByScreenNameViaApi = originalBlockUserByScreenNameViaApi;
-    setCurrentAdFilterMode(DEFAULT_AD_FILTER_MODE);
-  });
+  const blockCalls = installAdBlockRecorder(t);
 
   const stopObservation = observeStoredAdFilterMode(globalRef);
   assert.equal(storageListeners.length, 1);

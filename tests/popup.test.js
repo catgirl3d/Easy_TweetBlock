@@ -7,6 +7,7 @@ const sharedBlocklist = require('../src/shared/blocklist.js');
 const sharedFollowerScanSessions = require('../src/shared/follower-scan-session.js');
 const sharedFollowers = require('../src/shared/followers.js');
 const sharedSettings = require('../src/shared/settings.js');
+const sharedAdBlockHistory = require('../src/shared/ad-block-history.js');
 const {
   CONTENT_SCRIPT_CSS_FILES,
   CONTENT_SCRIPT_FILES,
@@ -95,6 +96,19 @@ test('ad filtering uses a three-way segmented control', () => {
   assert.match(popupHtml, /<button id="ad-filter-mode-hide-block" class="segment-button" type="button">Hide \+ block<\/button>/);
   assert.match(popupCss, /\.segmented-control-ad-filter\s*\{[\s\S]*?grid-template-columns: repeat\(3, minmax\(0, 1fr\)\);/);
   assert.match(popupCss, /\.segmented-control-ad-filter:has\(\.segment-button\[data-active="true"\]:nth-child\(3\)\)::before\s*\{[\s\S]*?transform: translateX\(calc\(200% \+ 6px\)\);/);
+});
+
+test('ad history entry is under ad filtering in settings and absent from the main tools', () => {
+  const popupHtml = fs.readFileSync(path.join(__dirname, '..', 'src', 'popup', 'popup.html'), 'utf8');
+  const mainPanel = popupHtml.slice(popupHtml.indexOf('data-view-panel="main"'), popupHtml.indexOf('data-view-panel="settings"'));
+  const adSettings = popupHtml.slice(popupHtml.indexOf('<h3 class="settings-section-title">Ad filtering'), popupHtml.indexOf('<h3 class="settings-section-title">Block button'));
+  const popupCss = fs.readFileSync(path.join(__dirname, '..', 'src', 'popup', 'popup.css'), 'utf8');
+
+  assert.equal(mainPanel.includes('id="open-ad-history"'), false);
+  assert.equal(mainPanel.includes('ad-history-launch-card'), false);
+  assert.equal(adSettings.indexOf('id="open-ad-history"') > adSettings.indexOf('id="ad-filter-mode-hide-block"'), true);
+  assert.equal(/<button id="open-ad-history"[^>]* hidden>/.test(adSettings), true);
+  assert.equal(/\.ad-history-link\[hidden\]\s*\{\s*display: none;/.test(popupCss), true);
 });
 
 test('settings expose an unsaved changes notice with a top save action', () => {
@@ -222,9 +236,14 @@ function createStorageExtensionApi(initialStore = {}, { onSet = null } = {}) {
 
   return {
     runtime: {},
+    tabs: { async query() { return []; } },
     storage: {
       local: {
         get(keys) {
+          if (keys === null) {
+            return Promise.resolve({ ...store });
+          }
+
           const response = {};
 
           for (const key of keys) {
@@ -268,7 +287,8 @@ function createStorageExtensionApi(initialStore = {}, { onSet = null } = {}) {
         }
       }
     },
-    store
+    store,
+    listeners
   };
 }
 
@@ -457,6 +477,12 @@ function createPopupElement(overrides = {}) {
 
 function createPopupDocument() {
   const elements = {
+    'ad-block-history-count': createPopupElement({ textContent: 'Loading...' }),
+    'ad-block-history-list': createPopupElement(),
+    'ad-block-history-empty': createPopupElement({ textContent: 'Loading history...' }),
+    'ad-block-history-error': createPopupElement({ hidden: true }),
+    'open-ad-history': createPopupElement({ hidden: true }),
+    'back-from-ad-history': createPopupElement(),
     'ad-filter-mode-hide': createPopupElement({ setAttribute() {} }),
     'ad-filter-mode-hide-block': createPopupElement({ setAttribute() {} }),
     'ad-filter-mode-off': createPopupElement({ setAttribute() {} }),
@@ -557,6 +583,192 @@ test('setPopupView updates the shell dataset with the normalized view', () => {
   assert.equal(setPopupView(shellElement, 'unknown'), POPUP_VIEWS.main);
   assert.equal(shellElement.dataset.view, POPUP_VIEWS.main);
 });
+
+test('ad history renders saved accounts newest first with stable profile links and dates', async () => {
+  const { documentRef, elements } = createPopupDocument();
+  const extensionApi = createStorageExtensionApi({
+    'easyTweetBlockAdBlockHistory:101': { restId: '101', username: 'OldAd', blockedAt: 1767225600000 },
+    'easyTweetBlockAdBlockHistory:202': { restId: '202', username: 'NewAd', blockedAt: 1767312000000 }
+  });
+  init(documentRef, extensionApi, sharedBlocklist, sharedFollowers, sharedSettings);
+  await flushAsyncWork();
+
+  assert.equal(elements['ad-block-history-count'].textContent, '2 accounts');
+  assert.equal(elements['open-ad-history'].hidden, false);
+  assert.equal(elements['ad-block-history-empty'].hidden, true);
+  assert.equal(elements['ad-block-history-error'].hidden, true);
+  const rows = elements['ad-block-history-list'].children;
+  assert.deepEqual(rows.map((row) => row.children[0].textContent), ['@newad', '@oldad']);
+  assert.equal(rows[0].children[0].href, 'https://x.com/i/user/202');
+  assert.equal(rows[0].children[0].target, '_blank');
+  assert.equal(rows[0].children[0].rel, 'noopener noreferrer');
+  assert.equal(rows[0].children[1].tagName, 'TIME');
+  assert.equal(rows[0].children[1].dateTime, '2026-01-02T00:00:00.000Z');
+  assert.notEqual(rows[0].children[1].textContent, '');
+});
+
+test('empty ad history entry follows the selected ad filtering mode without saving draft changes', async () => {
+  for (const mode of Object.values(sharedSettings.AD_FILTER_MODES)) {
+    const extensionApi = createStorageExtensionApi({ [sharedSettings.AD_FILTER_MODE_STORAGE_KEY]: mode });
+    const { documentRef, elements } = createPopupDocument();
+    init(documentRef, extensionApi, sharedBlocklist, sharedFollowers, sharedSettings);
+    assert.equal(elements['open-ad-history'].disabled, true);
+    await flushAsyncWork();
+    elements['open-settings'].click();
+    assert.equal(elements['open-ad-history'].hidden, mode !== sharedSettings.AD_FILTER_MODES.hideAndBlock);
+
+    elements['ad-filter-mode-off'].click();
+    assert.equal(elements['open-ad-history'].hidden, true);
+    elements['ad-filter-mode-hide-block'].click();
+    assert.equal(elements['open-ad-history'].hidden, false);
+    elements['ad-filter-mode-hide'].click();
+    assert.equal(elements['open-ad-history'].hidden, true);
+
+    elements['back-to-main'].click();
+    elements['open-settings'].click();
+    assert.equal(elements['open-ad-history'].hidden, mode !== sharedSettings.AD_FILTER_MODES.hideAndBlock);
+    assert.deepEqual(extensionApi.store, { [sharedSettings.AD_FILTER_MODE_STORAGE_KEY]: mode });
+  }
+});
+
+test('ad history returns to settings without losing drafts and restores the history view on reopening', async (t) => {
+  const originalLocalStorage = globalThis.localStorage;
+  globalThis.localStorage = createLocalStorageStub();
+  t.after(() => {
+    if (originalLocalStorage === undefined) {
+      delete globalThis.localStorage;
+    } else {
+      globalThis.localStorage = originalLocalStorage;
+    }
+  });
+  const extensionApi = createStorageExtensionApi({ [sharedSettings.AD_FILTER_MODE_STORAGE_KEY]: sharedSettings.AD_FILTER_MODES.off });
+  const { documentRef, elements } = createPopupDocument();
+  init(documentRef, extensionApi, sharedBlocklist, sharedFollowers, sharedSettings);
+  await flushAsyncWork();
+
+  assert.equal(elements['ad-block-history-count'].textContent, '0 accounts');
+  assert.equal(elements['ad-block-history-empty'].hidden, false);
+  assert.equal(elements['ad-block-history-list'].children.length, 0);
+  elements['open-settings'].click();
+  elements['ad-filter-mode-hide-block'].click();
+  elements['batch-block-delay-ms'].value = '1700';
+  elements['batch-block-delay-ms'].dispatch('input');
+  assert.equal(elements['open-ad-history'].hidden, false);
+  elements['open-ad-history'].click();
+  assert.equal(elements['popup-shell'].dataset.view, 'ad-history');
+  elements['back-from-ad-history'].click();
+  assert.equal(elements['popup-shell'].dataset.view, 'settings');
+  assert.equal(elements['ad-filter-mode-hide-block'].dataset.active, 'true');
+  assert.equal(elements['batch-block-delay-ms'].value, '1700');
+  assert.equal(elements['settings-unsaved-bar'].hidden, false);
+  assert.deepEqual(extensionApi.store, { [sharedSettings.AD_FILTER_MODE_STORAGE_KEY]: sharedSettings.AD_FILTER_MODES.off });
+  elements['open-ad-history'].click();
+  const reopened = createPopupDocument();
+  init(reopened.documentRef, extensionApi, sharedBlocklist, sharedFollowers, sharedSettings);
+  await flushAsyncWork();
+  assert.equal(reopened.elements['popup-shell'].dataset.view, 'ad-history');
+  reopened.elements['back-from-ad-history'].click();
+  assert.equal(reopened.elements['popup-shell'].dataset.view, 'settings');
+});
+
+test('ad history updates live only for its local storage records and stops observing on unload', async (t) => {
+  const unloadCallbacks = [];
+  const originalAddEventListener = globalThis.addEventListener;
+  globalThis.addEventListener = (type, callback) => {
+    if (type === 'unload') unloadCallbacks.push(callback);
+  };
+  t.after(() => {
+    if (originalAddEventListener === undefined) delete globalThis.addEventListener;
+    else globalThis.addEventListener = originalAddEventListener;
+  });
+  const extensionApi = createStorageExtensionApi();
+  const originalGet = extensionApi.storage.local.get;
+  let historyReads = 0;
+  extensionApi.storage.local.get = (query) => {
+    if (query === null) historyReads += 1;
+    return originalGet(query);
+  };
+  const { documentRef, elements } = createPopupDocument();
+  init(documentRef, extensionApi, sharedBlocklist, sharedFollowers, sharedSettings);
+  await flushAsyncWork();
+  elements['open-settings'].click();
+  elements['ad-filter-mode-off'].click();
+  assert.equal(elements['open-ad-history'].hidden, true);
+
+  await sharedAdBlockHistory.recordAdBlock({ restId: '101', username: 'FirstAd', blockedAt: 1000 }, extensionApi);
+  await flushAsyncWork();
+  assert.equal(elements['open-ad-history'].hidden, false);
+  assert.equal(elements['ad-filter-mode-off'].dataset.active, 'true');
+  assert.equal(elements['ad-block-history-count'].textContent, '1 account');
+  assert.equal(elements['ad-block-history-list'].children[0].children[0].textContent, '@firstad');
+  assert.equal(historyReads, 2);
+  elements['ad-filter-mode-hide-block'].click();
+  elements['ad-filter-mode-hide'].click();
+  assert.equal(elements['open-ad-history'].hidden, false);
+  await extensionApi.storage.local.set({ unrelated: 'keep' });
+  for (const listener of extensionApi.listeners) {
+    listener({ 'easyTweetBlockAdBlockHistory:202': { newValue: {} } }, 'sync');
+  }
+  await flushAsyncWork();
+  assert.equal(historyReads, 2);
+
+  for (const callback of unloadCallbacks) callback();
+  await sharedAdBlockHistory.recordAdBlock({ restId: '202', username: 'SecondAd', blockedAt: 2000 }, extensionApi);
+  await flushAsyncWork();
+  assert.equal(historyReads, 2);
+  assert.equal(elements['ad-block-history-count'].textContent, '1 account');
+});
+
+for (const scenario of [
+  { name: 'an older success cannot replace a newer snapshot', oldFails: false, newFails: false },
+  { name: 'an older failure cannot replace a newer snapshot', oldFails: true, newFails: false },
+  { name: 'an older success cannot erase a newer read failure', oldFails: false, newFails: true }
+]) {
+  test(`ad history refresh: ${scenario.name}`, async (t) => {
+    t.mock.method(console, 'error', () => {});
+    const initialRead = createDeferred();
+    const extensionApi = createStorageExtensionApi({
+      [sharedSettings.AD_FILTER_MODE_STORAGE_KEY]: scenario.newFails ? sharedSettings.AD_FILTER_MODES.hideAndBlock : sharedSettings.AD_FILTER_MODES.off
+    });
+    const originalGet = extensionApi.storage.local.get;
+    let historyReads = 0;
+    extensionApi.storage.local.get = (query) => {
+      if (query !== null) return originalGet(query);
+      historyReads += 1;
+      if (historyReads === 1) return initialRead.promise;
+      return scenario.newFails ? Promise.reject(new Error('history read failed')) : originalGet(query);
+    };
+    const { documentRef, elements } = createPopupDocument();
+    init(documentRef, extensionApi, sharedBlocklist, sharedFollowers, sharedSettings);
+    await flushAsyncWork();
+    assert.equal(elements['open-settings'].disabled, false);
+    assert.equal(elements['save-blocklist'].disabled, false);
+
+    await sharedAdBlockHistory.recordAdBlock({ restId: '202', username: 'NewAd', blockedAt: 2000 }, extensionApi);
+    await flushAsyncWork();
+    if (scenario.oldFails) initialRead.reject(new Error('old history read failed'));
+    else initialRead.resolve({ 'easyTweetBlockAdBlockHistory:101': { restId: '101', username: 'OldAd', blockedAt: 1000 } });
+    await flushAsyncWork();
+
+    assert.equal(elements['ad-block-history-error'].hidden, !scenario.newFails);
+    assert.equal(elements['ad-block-history-empty'].hidden, true);
+    assert.equal(elements['open-settings'].disabled, false);
+    elements['open-settings'].click();
+    assert.equal(elements['open-ad-history'].hidden, false);
+    elements['open-ad-history'].click();
+    assert.equal(elements['popup-shell'].dataset.view, 'ad-history');
+    elements['back-from-ad-history'].click();
+    assert.equal(elements['popup-shell'].dataset.view, 'settings');
+    if (scenario.newFails) {
+      assert.equal(elements['ad-block-history-count'].textContent, 'Unavailable');
+      assert.equal(elements['ad-block-history-list'].children.length, 0);
+    } else {
+      assert.equal(elements['ad-block-history-count'].textContent, '1 account');
+      assert.equal(elements['ad-block-history-list'].children[0].children[0].textContent, '@newad');
+    }
+    await flushAsyncWork();
+  });
+}
 
 test('stored popup state helpers round-trip through localStorage', () => {
   const storage = createLocalStorageStub();
