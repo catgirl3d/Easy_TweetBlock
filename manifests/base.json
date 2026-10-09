@@ -15,7 +15,6 @@
     "storage"
   ],
   "host_permissions": [
-    "https://abs.twimg.com/*",
     "https://x.com/*",
     "https://twitter.com/*"
   ],

@@ -25,7 +25,6 @@ test("buildManifest merges the Chrome overlay into the base manifest", () => {
   assert.equal("browser_specific_settings" in manifest, false);
   assert.equal(manifest.background.service_worker, "src/background/background-chrome.js");
   assert.deepEqual(manifest.host_permissions, [
-    "https://abs.twimg.com/*",
     "https://x.com/*",
     "https://twitter.com/*"
   ]);
@@ -144,9 +143,7 @@ test("buildManifest merges the Firefox overlay into the base manifest", () => {
   assert.equal(manifest.browser_specific_settings.gecko.strict_min_version, "142.0");
   assert.deepEqual(manifest.browser_specific_settings.gecko.data_collection_permissions, {
     required: [
-      "authenticationInfo",
-      "websiteActivity",
-      "websiteContent"
+      "none"
     ]
   });
   assert.equal("gecko_android" in manifest.browser_specific_settings, false);

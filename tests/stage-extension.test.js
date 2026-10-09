@@ -51,9 +51,7 @@ test("stageExtension prepares a Firefox stage with the Firefox manifest overlay"
     assert.equal(manifest.browser_specific_settings.gecko.strict_min_version, "142.0");
     assert.deepEqual(manifest.browser_specific_settings.gecko.data_collection_permissions, {
       required: [
-        "authenticationInfo",
-        "websiteActivity",
-        "websiteContent"
+        "none"
       ]
     });
     assert.equal("gecko_android" in manifest.browser_specific_settings, false);

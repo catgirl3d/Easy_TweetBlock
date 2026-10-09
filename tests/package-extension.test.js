@@ -124,9 +124,7 @@ test("packageExtension creates deterministic Chrome ZIP and Firefox XPI archives
         assert.deepEqual(manifest.background.scripts, ["src/background/background-firefox.js"]);
         assert.deepEqual(manifest.browser_specific_settings.gecko.data_collection_permissions, {
           required: [
-            "authenticationInfo",
-            "websiteActivity",
-            "websiteContent"
+            "none"
           ]
         });
         assert.equal(manifest.browser_specific_settings.gecko.strict_min_version, "142.0");
