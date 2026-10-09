@@ -1,6 +1,9 @@
 name: Publish Release
 
 on:
+  push:
+    tags:
+      - "v*.*.*"
   workflow_dispatch:
     inputs:
       tag:
@@ -9,7 +12,7 @@ on:
         type: string
 
 concurrency:
-  group: publish-release-${{ inputs.tag }}
+  group: publish-release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -19,13 +22,21 @@ jobs:
       contents: write
 
     steps:
+      - name: Resolve release tag
+        id: release_tag
+        env:
+          REQUESTED_TAG: ${{ inputs.tag }}
+        run: echo "tag=${REQUESTED_TAG:-${{ github.ref_name }}}" >> "$GITHUB_OUTPUT"
+
       - name: Verify requested tag exists
-        run: git ls-remote --exit-code --refs "https://github.com/${{ github.repository }}.git" "refs/tags/${{ inputs.tag }}"
+        env:
+          RELEASE_TAG: ${{ steps.release_tag.outputs.tag }}
+        run: git ls-remote --exit-code --refs "https://github.com/${{ github.repository }}.git" "refs/tags/$RELEASE_TAG"
 
       - name: Check out repository at tag
         uses: actions/checkout@v4
         with:
-          ref: refs/tags/${{ inputs.tag }}
+          ref: refs/tags/${{ steps.release_tag.outputs.tag }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -37,7 +48,9 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: Validate release tag against manifest version
-        run: npm run validate:release-tag -- "${{ inputs.tag }}"
+        env:
+          RELEASE_TAG: ${{ steps.release_tag.outputs.tag }}
+        run: npm run validate:release-tag -- "$RELEASE_TAG"
 
       - name: Run test suite
         run: npm test
@@ -51,17 +64,19 @@ jobs:
       - name: Upload build output
         uses: actions/upload-artifact@v4
         with:
-          name: easy-tweetblock-packages-${{ inputs.tag }}
+          name: easy-tweetblock-packages-${{ steps.release_tag.outputs.tag }}
           path: dist
           if-no-files-found: error
 
       - name: Prepare release notes from changelog
-        run: node scripts/extract-release-notes.js "${{ inputs.tag }}" dist/release-notes.md
+        env:
+          RELEASE_TAG: ${{ steps.release_tag.outputs.tag }}
+        run: node scripts/extract-release-notes.js "$RELEASE_TAG" dist/release-notes.md
 
       - name: Create or update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ inputs.tag }}
+          tag_name: ${{ steps.release_tag.outputs.tag }}
           files: |
             dist/*.xpi
             dist/*.zip

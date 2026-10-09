@@ -49,3 +49,15 @@ test("extractReleaseNotes returns only the requested changelog section", () => {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
+
+test("publish-release workflow triggers on version tag pushes and manual dispatch", () => {
+  const workflow = fs.readFileSync(
+    path.join(__dirname, "..", ".github", "workflows", "publish-release.yml"),
+    "utf8"
+  );
+
+  assert.match(workflow, /on:\s*push:\s*tags:\s*- "v\*\.\*\.\*"/);
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /github\.ref_name/);
+  assert.match(workflow, /steps\.release_tag\.outputs\.tag/);
+});
